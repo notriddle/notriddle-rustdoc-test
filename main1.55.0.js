@@ -344,28 +344,6 @@ function hideThemeButtonState() {
         document.getElementsByTagName("body")[0].style.marginTop = "";
     }
 
-    function isInSidebarElems(elem) {
-        while (elem) {
-            if (elem.classList && elem.classList.contains("sidebar-elems")) {
-                return true;
-            }
-            elem = elem.parentElement;
-        }
-        return false;
-    }
-
-    function handleSidebarElemsFocus(e) {
-        if (isInSidebarElems(e.relatedTarget) || isInSidebarElems(document.activeElement)) {
-            showSidebar();
-        }
-    }
-
-    function handleSidebarElemsBlur(e) {
-        if (!isInSidebarElems(e.relatedTarget)) {
-            hideSidebar();
-        }
-    }
-
     var toggleAllDocsId = "toggle-all-docs";
     var main = document.getElementById("main");
     var savedHash = "";
@@ -680,11 +658,6 @@ function hideThemeButtonState() {
             // `crates{version}.js` should always be loaded before this script, so we can use
             // it safely.
             addSidebarCrates(window.ALL_CRATES);
-
-            onEachLazy(sidebar.getElementsByTagName("a"), function(a) {
-                a.onfocus = handleSidebarElemsFocus;
-                a.onblur = handleSidebarElemsBlur;
-            });
         }
     };
 
