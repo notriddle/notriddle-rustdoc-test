@@ -181,6 +181,10 @@ struct Iter&lt;'a, T: 'a&gt; {
 </span></code></pre></pre>
 <p>and that's it. The lifetime will be bounded, and your iterator will be covariant
 over <code>'a</code> and <code>T</code>. Everything Just Works.</p>
+<h2 id="generic-parameters-and-drop-checking"><a class="header" href="#generic-parameters-and-drop-checking">Generic parameters and drop-checking</a></h2>
+<p>In the past, there used to be another thing to take into consideration.</p>
+<p>This very documentation used to say:</p>
+<blockquote>
 <p>Another important example is Vec, which is (approximately) defined as follows:</p>
 <pre><pre class="playground"><code class="language-rust edition2018">
 <span class="boring">#![allow(unused)]
@@ -213,10 +217,119 @@ struct Vec&lt;T&gt; {
     data: *const T, // *const for variance!
     len: usize,
     cap: usize,
-    _marker: marker::PhantomData&lt;T&gt;,
+    _owns_T: marker::PhantomData&lt;T&gt;,
 }
 <span class="boring">}
 </span></code></pre></pre>
+</blockquote>
+<p>But ever since <a href="https://rust-lang.github.io/rfcs/1238-nonparametric-dropck.html">RFC 1238</a>,
+<strong>this is no longer true nor necessary</strong>.</p>
+<p>If you were to write:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct Vec&lt;T&gt; {
+    data: *const T, // `*const` for variance!
+    len: usize,
+    cap: usize,
+}
+
+<span class="boring">#[cfg(any())]
+</span>impl&lt;T&gt; Drop for Vec&lt;T&gt; { /* … */ }
+<span class="boring">}
+</span></code></pre></pre>
+<p>then the existence of that <code>impl&lt;T&gt; Drop for Vec&lt;T&gt;</code> makes it so Rust will consider
+that that <code>Vec&lt;T&gt;</code> <em>owns</em> values of type <code>T</code> (more precisely: may use values of type <code>T</code>
+in its <code>Drop</code> implementation), and Rust will thus not allow them to <em>dangle</em> should a
+<code>Vec&lt;T&gt;</code> be dropped.</p>
+<p><strong>Adding an extra <code>_owns_T: PhantomData&lt;T&gt;</code> field is thus <em>superfluous</em> and accomplishes nothing</strong>.</p>
+<hr />
+<p>But this situation can sometimes lead to overly restrictive code. That's why the
+standard library uses an unstable and <code>unsafe</code> attribute to opt back into the old
+&quot;unchecked&quot; drop-checking behavior, that this very documentation warned about: the
+<code>#[may_dangle]</code> attribute.</p>
+<h3 id="an-exception-the-special-case-of-the-standard-library-and-its-unstable-may_dangle"><a class="header" href="#an-exception-the-special-case-of-the-standard-library-and-its-unstable-may_dangle">An exception: the special case of the standard library and its unstable <code>#[may_dangle]</code></a></h3>
+<p>This section can be skipped if you are only writing your own library code; but if you are
+curious about what the standard library does with the actual <code>Vec</code> definition, you'll notice
+that it still needs to use a <code>_owns_T: PhantomData&lt;T&gt;</code> field for soundness.</p>
+<details><summary>Click here to see why</summary>
+<p>Consider the following example:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">fn main() {
+    let mut v: Vec&lt;&amp;str&gt; = Vec::new();
+    let s: String = &quot;Short-lived&quot;.into();
+    v.push(&amp;s);
+    drop(s);
+} // &lt;- `v` is dropped here
+</code></pre></pre>
+<p>with a classical <code>impl&lt;T&gt; Drop for Vec&lt;T&gt; {</code> definition, the above <a href="https://rust.godbolt.org/z/ans15Kqz3">is denied</a>.</p>
+<p>Indeed, in this case we have a <code>Vec&lt;/* T = */ &amp;'s str&gt;</code> vector of <code>'s</code>-lived references
+to <code>str</code>ings, but in the case of <code>let s: String</code>, it is dropped before the <code>Vec</code> is, and
+thus <code>'s</code> <strong>is expired</strong> by the time the <code>Vec</code> is dropped, and the
+<code>impl&lt;'s&gt; Drop for Vec&lt;&amp;'s str&gt; {</code> is used.</p>
+<p>This means that if such <code>Drop</code> were to be used, it would be dealing with an <em>expired</em>, or
+<em>dangling</em> lifetime <code>'s</code>. But this is contrary to Rust principles, where by default all
+Rust references involved in a function signature are non-dangling and valid to dereference.</p>
+<p>Hence why Rust has to conservatively deny this snippet.</p>
+<p>And yet, in the case of the real <code>Vec</code>, the <code>Drop</code> impl does not care about <code>&amp;'s str</code>,
+<em>since it has no drop glue of its own</em>: it only wants to deallocate the backing buffer.</p>
+<p>In other words, it would be nice if the above snippet was somehow accepted, by special
+casing <code>Vec</code>, or by relying on some special property of <code>Vec</code>: <code>Vec</code> could try to
+<em>promise not to use the <code>&amp;'s str</code>s it holds when being dropped</em>.</p>
+<p>This is the kind of <code>unsafe</code> promise that can be expressed with <code>#[may_dangle]</code>:</p>
+<pre><code class="language-rust  ignore">unsafe impl&lt;#[may_dangle] 's&gt; Drop for Vec&lt;&amp;'s str&gt; { /* … */ }
+</code></pre>
+<p>or, more generally:</p>
+<pre><code class="language-rust  ignore">unsafe impl&lt;#[may_dangle] T&gt; Drop for Vec&lt;T&gt; { /* … */ }
+</code></pre>
+<p>is the <code>unsafe</code> way to opt out of this conservative assumption that Rust's drop
+checker makes about type parameters of a dropped instance not being allowed to dangle.</p>
+<p>And when this is done, such as in the standard library, we need to be careful in the
+case where <code>T</code> has drop glue of its own. In this instance, imagine replacing the
+<code>&amp;'s str</code>s with a <code>struct PrintOnDrop&lt;'s&gt; /* = */ (&amp;'s str);</code> which would have a
+<code>Drop</code> impl wherein the inner <code>&amp;'s str</code> would be dereferenced and printed to the screen.</p>
+<p>Indeed, <code>Drop for Vec&lt;T&gt; {</code>, before deallocating the backing buffer, does have to transitively
+drop each <code>T</code> item when it has drop glue; in the case of <code>PrintOnDrop&lt;'s&gt;</code>, it means that
+<code>Drop for Vec&lt;PrintOnDrop&lt;'s&gt;&gt;</code> has to transitively drop the <code>PrintOnDrop&lt;'s&gt;</code>s elements before
+deallocating the backing buffer.</p>
+<p>So when we said that <code>'s</code> <code>#[may_dangle]</code>, it was an excessively loose statement. We'd rather want
+to say: &quot;<code>'s</code> may dangle provided it not be involved in some transitive drop glue&quot;. Or, more generally,
+&quot;<code>T</code> may dangle provided it not be involved in some transitive drop glue&quot;. This &quot;exception to the
+exception&quot; is a pervasive situation whenever <strong>we own a <code>T</code></strong>. That's why Rust's <code>#[may_dangle]</code> is
+smart enough to know of this opt-out, and will thus be disabled <em>when the generic parameter is held
+in an owned fashion</em> by the fields of the struct.</p>
+<p>Hence why the standard library ends up with:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">#[cfg(any())]
+</span>// we pinky-swear not to use `T` when dropping a `Vec`…
+unsafe impl&lt;#[may_dangle] T&gt; Drop for Vec&lt;T&gt; {
+    fn drop(&amp;mut self) {
+        unsafe {
+            if mem::needs_drop::&lt;T&gt;() {
+                /* … except here, that is, … */
+                ptr::drop_in_place::&lt;[T]&gt;(/* … */);
+            }
+            // …
+            dealloc(/* … */)
+            // …
+        }
+    }
+}
+
+struct Vec&lt;T&gt; {
+    // … except for the fact that a `Vec` owns `T` items and
+    // may thus be dropping `T` items on drop!
+    _owns_T: core::marker::PhantomData&lt;T&gt;,
+
+    ptr: *const T, // `*const` for variance (but this does not express ownership of a `T` *per se*)
+    len: usize,
+    cap: usize,
+}
+<span class="boring">}
+</span></code></pre></pre>
+</details>
+<hr />
 <p>Raw pointers that own an allocation is such a pervasive pattern that the
 standard library made a utility for itself called <code>Unique&lt;T&gt;</code> which:</p>
 <ul>

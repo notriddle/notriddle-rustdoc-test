@@ -150,11 +150,12 @@ we’re not cleaning up anything. When we use the less elegant <span
 class="keystroke">ctrl-c</span> method to halt the main thread, all other
 threads are stopped immediately as well, even if they’re in the middle of
 serving a request.</p>
-<p>Now we’ll implement the <code>Drop</code> trait to call <code>join</code> on each of the threads in
-the pool so they can finish the requests they’re working on before closing.
-Then we’ll implement a way to tell the threads they should stop accepting new
-requests and shut down. To see this code in action, we’ll modify our server to
-accept only two requests before gracefully shutting down its thread pool.</p>
+<p>Next, then, we’ll implement the <code>Drop</code> trait to call <code>join</code> on each of the
+threads in the pool so they can finish the requests they’re working on before
+closing. Then we’ll implement a way to tell the threads they should stop
+accepting new requests and shut down. To see this code in action, we’ll modify
+our server to accept only two requests before gracefully shutting down its
+thread pool.</p>
 <h3 id="implementing-the-drop-trait-on-threadpool"><a class="header" href="#implementing-the-drop-trait-on-threadpool">Implementing the <code>Drop</code> Trait on <code>ThreadPool</code></a></h3>
 <p>Let’s start with implementing <code>Drop</code> on our thread pool. When the pool is
 dropped, our threads should all join to make sure they finish their work.
@@ -248,10 +249,14 @@ into an ungraceful shutdown.</p>
 <pre><code class="language-console">$ cargo check
     Checking hello v0.1.0 (file:///projects/hello)
 error[E0507]: cannot move out of `worker.thread` which is behind a mutable reference
-  --&gt; src/lib.rs:52:13
-   |
-52 |             worker.thread.join().unwrap();
-   |             ^^^^^^^^^^^^^ move occurs because `worker.thread` has type `JoinHandle&lt;()&gt;`, which does not implement the `Copy` trait
+    --&gt; src/lib.rs:52:13
+     |
+52   |             worker.thread.join().unwrap();
+     |             ^^^^^^^^^^^^^ ------ `worker.thread` moved due to this method call
+     |             |
+     |             move occurs because `worker.thread` has type `JoinHandle&lt;()&gt;`, which does not implement the `Copy` trait
+     |
+note: this function takes ownership of the receiver `self`, which moves `worker.thread`
 
 For more information about this error, try `rustc --explain E0507`.
 error: could not compile `hello` due to previous error
@@ -363,8 +368,8 @@ error[E0308]: mismatched types
             found struct `JoinHandle&lt;_&gt;`
 help: try wrapping the expression in `Some`
    |
-72 |         Worker { id, Some(thread) }
-   |                      +++++      +
+72 |         Worker { id, thread: Some(thread) }
+   |                      +++++++++++++      +
 
 Some errors have detailed explanations: E0308, E0599.
 For more information about an error, try `rustc --explain E0308`.
@@ -544,13 +549,13 @@ the <code>Some</code> and get the thread; then we call <code>join</code> on the 
 thread is already <code>None</code>, we know that worker has already had its thread
 cleaned up, so nothing happens in that case.</p>
 <h3 id="signaling-to-the-threads-to-stop-listening-for-jobs"><a class="header" href="#signaling-to-the-threads-to-stop-listening-for-jobs">Signaling to the Threads to Stop Listening for Jobs</a></h3>
-<p>With all the changes we’ve made, our code compiles without any warnings. But
-the bad news is this code doesn’t function the way we want it to yet. The key
-is the logic in the closures run by the threads of the <code>Worker</code> instances: at
-the moment, we call <code>join</code>, but that won’t shut down the threads because they
-<code>loop</code> forever looking for jobs. If we try to drop our <code>ThreadPool</code> with our
-current implementation of <code>drop</code>, the main thread will block forever waiting
-for the first thread to finish.</p>
+<p>With all the changes we’ve made, our code compiles without any warnings.
+However, the bad news is this code doesn’t function the way we want it to yet.
+The key is the logic in the closures run by the threads of the <code>Worker</code>
+instances: at the moment, we call <code>join</code>, but that won’t shut down the threads
+because they <code>loop</code> forever looking for jobs. If we try to drop our
+<code>ThreadPool</code> with our current implementation of <code>drop</code>, the main thread will
+block forever waiting for the first thread to finish.</p>
 <p>To fix this problem, we’ll need a change in the the <code>ThreadPool</code> <code>drop</code>
 implementation and then a change in the <code>Worker</code> loop.</p>
 <p>First, we’ll change the <code>ThreadPool</code> <code>drop</code> implementation to explicitly drop
@@ -944,7 +949,10 @@ impl ThreadPool {
             workers.push(Worker::new(id, Arc::clone(&amp;receiver)));
         }
 
-        ThreadPool { workers, sender: Some(sender) }
+        ThreadPool {
+            workers,
+            sender: Some(sender),
+        }
     }
 
     pub fn execute&lt;F&gt;(&amp;self, f: F)

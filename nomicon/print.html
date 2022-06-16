@@ -165,7 +165,7 @@ You can skip straight to this book if you want; just know that we won't be expla
 <p>This book exists primarily as a high-level companion to <a href="../reference/index.html">The Reference</a>.
 Where The Reference exists to detail the syntax and semantics of every part of the language, The Rustonomicon exists to describe how to use those pieces together, and the issues that you will have in doing so.</p>
 <p>The Reference will tell you the syntax and semantics of references, destructors, and unwinding, but it won't tell you how combining them can lead to exception-safety issues, or how to deal with those issues.</p>
-<p>It should be noted that we haven't synced The Rustnomicon and The Reference well, so they may have a duplicate content.
+<p>It should be noted that we haven't synced The Rustnomicon and The Reference well, so they may have duplicate content.
 In general, if the two documents disagree, The Reference should be assumed to be correct (it isn't yet considered normative, it's just better maintained).</p>
 <p>Topics that are within the scope of this book include: the meaning of (un)safety, unsafe primitives provided by the language and standard library, techniques for creating safe abstractions with those unsafe primitives, subtyping and variance, exception-safety (panic/unwind-safety), working with uninitialized memory, type punning, concurrency, interoperating with other languages (FFI), optimization tricks, how constructs lower to compiler/OS/hardware primitives, how to <strong>not</strong> make the memory model people angry, how you're <strong>going</strong> to make the memory model people angry, and more.</p>
 <p>The Rustonomicon is not a place to exhaustively describe the semantics and guarantees of every single API in the standard library, nor is it a place to exhaustively describe every feature of Rust.</p>
@@ -850,9 +850,9 @@ because that wouldn't make sense.</p>
 <p>We recommend against modelling C's <code>void*</code> type with <code>*const Void</code>.
 A lot of people started doing that but quickly ran into trouble because
 Rust doesn't really have any safety guards against trying to instantiate
-empty types with unsafe code, and if you do it, it's Undefined Behaviour.
+empty types with unsafe code, and if you do it, it's Undefined Behavior.
 This was especially problematic because developers had a habit of converting
-raw pointers to references and <code>&amp;Void</code> is <em>also</em> Undefined Behaviour to
+raw pointers to references and <code>&amp;Void</code> is <em>also</em> Undefined Behavior to
 construct.</p>
 <p><code>*const ()</code> (or equivalent) works reasonably well for <code>void*</code>, and can be made
 into a reference without any safety problems. It still doesn't prevent you from
@@ -1840,7 +1840,7 @@ write unsafe code, the compiler will automatically handle all the corner cases f
 this stuff really works, and how we can mess it up.</p>
 <p>The core problem is that this rule, naively applied, will lead to <em>meowing Dogs</em>. That is,
 we can convince someone that a Dog is actually a Cat. This completely destroys the fabric
-of our static type system, making it worse than useless (and leading to Undefined Behaviour).</p>
+of our static type system, making it worse than useless (and leading to Undefined Behavior).</p>
 <p>Here's a simple example of this happening when we apply subtyping in a completely naive
 &quot;find and replace&quot; way.</p>
 <!-- ignore: simplified code -->
@@ -2485,6 +2485,10 @@ struct Iter&lt;'a, T: 'a&gt; {
 </span></code></pre></pre>
 <p>and that's it. The lifetime will be bounded, and your iterator will be covariant
 over <code>'a</code> and <code>T</code>. Everything Just Works.</p>
+<h2 id="generic-parameters-and-drop-checking"><a class="header" href="#generic-parameters-and-drop-checking">Generic parameters and drop-checking</a></h2>
+<p>In the past, there used to be another thing to take into consideration.</p>
+<p>This very documentation used to say:</p>
+<blockquote>
 <p>Another important example is Vec, which is (approximately) defined as follows:</p>
 <pre><pre class="playground"><code class="language-rust edition2018">
 <span class="boring">#![allow(unused)]
@@ -2517,10 +2521,119 @@ struct Vec&lt;T&gt; {
     data: *const T, // *const for variance!
     len: usize,
     cap: usize,
-    _marker: marker::PhantomData&lt;T&gt;,
+    _owns_T: marker::PhantomData&lt;T&gt;,
 }
 <span class="boring">}
 </span></code></pre></pre>
+</blockquote>
+<p>But ever since <a href="https://rust-lang.github.io/rfcs/1238-nonparametric-dropck.html">RFC 1238</a>,
+<strong>this is no longer true nor necessary</strong>.</p>
+<p>If you were to write:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct Vec&lt;T&gt; {
+    data: *const T, // `*const` for variance!
+    len: usize,
+    cap: usize,
+}
+
+<span class="boring">#[cfg(any())]
+</span>impl&lt;T&gt; Drop for Vec&lt;T&gt; { /* … */ }
+<span class="boring">}
+</span></code></pre></pre>
+<p>then the existence of that <code>impl&lt;T&gt; Drop for Vec&lt;T&gt;</code> makes it so Rust will consider
+that that <code>Vec&lt;T&gt;</code> <em>owns</em> values of type <code>T</code> (more precisely: may use values of type <code>T</code>
+in its <code>Drop</code> implementation), and Rust will thus not allow them to <em>dangle</em> should a
+<code>Vec&lt;T&gt;</code> be dropped.</p>
+<p><strong>Adding an extra <code>_owns_T: PhantomData&lt;T&gt;</code> field is thus <em>superfluous</em> and accomplishes nothing</strong>.</p>
+<hr />
+<p>But this situation can sometimes lead to overly restrictive code. That's why the
+standard library uses an unstable and <code>unsafe</code> attribute to opt back into the old
+&quot;unchecked&quot; drop-checking behavior, that this very documentation warned about: the
+<code>#[may_dangle]</code> attribute.</p>
+<h3 id="an-exception-the-special-case-of-the-standard-library-and-its-unstable-may_dangle"><a class="header" href="#an-exception-the-special-case-of-the-standard-library-and-its-unstable-may_dangle">An exception: the special case of the standard library and its unstable <code>#[may_dangle]</code></a></h3>
+<p>This section can be skipped if you are only writing your own library code; but if you are
+curious about what the standard library does with the actual <code>Vec</code> definition, you'll notice
+that it still needs to use a <code>_owns_T: PhantomData&lt;T&gt;</code> field for soundness.</p>
+<details><summary>Click here to see why</summary>
+<p>Consider the following example:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">fn main() {
+    let mut v: Vec&lt;&amp;str&gt; = Vec::new();
+    let s: String = &quot;Short-lived&quot;.into();
+    v.push(&amp;s);
+    drop(s);
+} // &lt;- `v` is dropped here
+</code></pre></pre>
+<p>with a classical <code>impl&lt;T&gt; Drop for Vec&lt;T&gt; {</code> definition, the above <a href="https://rust.godbolt.org/z/ans15Kqz3">is denied</a>.</p>
+<p>Indeed, in this case we have a <code>Vec&lt;/* T = */ &amp;'s str&gt;</code> vector of <code>'s</code>-lived references
+to <code>str</code>ings, but in the case of <code>let s: String</code>, it is dropped before the <code>Vec</code> is, and
+thus <code>'s</code> <strong>is expired</strong> by the time the <code>Vec</code> is dropped, and the
+<code>impl&lt;'s&gt; Drop for Vec&lt;&amp;'s str&gt; {</code> is used.</p>
+<p>This means that if such <code>Drop</code> were to be used, it would be dealing with an <em>expired</em>, or
+<em>dangling</em> lifetime <code>'s</code>. But this is contrary to Rust principles, where by default all
+Rust references involved in a function signature are non-dangling and valid to dereference.</p>
+<p>Hence why Rust has to conservatively deny this snippet.</p>
+<p>And yet, in the case of the real <code>Vec</code>, the <code>Drop</code> impl does not care about <code>&amp;'s str</code>,
+<em>since it has no drop glue of its own</em>: it only wants to deallocate the backing buffer.</p>
+<p>In other words, it would be nice if the above snippet was somehow accepted, by special
+casing <code>Vec</code>, or by relying on some special property of <code>Vec</code>: <code>Vec</code> could try to
+<em>promise not to use the <code>&amp;'s str</code>s it holds when being dropped</em>.</p>
+<p>This is the kind of <code>unsafe</code> promise that can be expressed with <code>#[may_dangle]</code>:</p>
+<pre><code class="language-rust  ignore">unsafe impl&lt;#[may_dangle] 's&gt; Drop for Vec&lt;&amp;'s str&gt; { /* … */ }
+</code></pre>
+<p>or, more generally:</p>
+<pre><code class="language-rust  ignore">unsafe impl&lt;#[may_dangle] T&gt; Drop for Vec&lt;T&gt; { /* … */ }
+</code></pre>
+<p>is the <code>unsafe</code> way to opt out of this conservative assumption that Rust's drop
+checker makes about type parameters of a dropped instance not being allowed to dangle.</p>
+<p>And when this is done, such as in the standard library, we need to be careful in the
+case where <code>T</code> has drop glue of its own. In this instance, imagine replacing the
+<code>&amp;'s str</code>s with a <code>struct PrintOnDrop&lt;'s&gt; /* = */ (&amp;'s str);</code> which would have a
+<code>Drop</code> impl wherein the inner <code>&amp;'s str</code> would be dereferenced and printed to the screen.</p>
+<p>Indeed, <code>Drop for Vec&lt;T&gt; {</code>, before deallocating the backing buffer, does have to transitively
+drop each <code>T</code> item when it has drop glue; in the case of <code>PrintOnDrop&lt;'s&gt;</code>, it means that
+<code>Drop for Vec&lt;PrintOnDrop&lt;'s&gt;&gt;</code> has to transitively drop the <code>PrintOnDrop&lt;'s&gt;</code>s elements before
+deallocating the backing buffer.</p>
+<p>So when we said that <code>'s</code> <code>#[may_dangle]</code>, it was an excessively loose statement. We'd rather want
+to say: &quot;<code>'s</code> may dangle provided it not be involved in some transitive drop glue&quot;. Or, more generally,
+&quot;<code>T</code> may dangle provided it not be involved in some transitive drop glue&quot;. This &quot;exception to the
+exception&quot; is a pervasive situation whenever <strong>we own a <code>T</code></strong>. That's why Rust's <code>#[may_dangle]</code> is
+smart enough to know of this opt-out, and will thus be disabled <em>when the generic parameter is held
+in an owned fashion</em> by the fields of the struct.</p>
+<p>Hence why the standard library ends up with:</p>
+<pre><pre class="playground"><code class="language-rust edition2018">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">#[cfg(any())]
+</span>// we pinky-swear not to use `T` when dropping a `Vec`…
+unsafe impl&lt;#[may_dangle] T&gt; Drop for Vec&lt;T&gt; {
+    fn drop(&amp;mut self) {
+        unsafe {
+            if mem::needs_drop::&lt;T&gt;() {
+                /* … except here, that is, … */
+                ptr::drop_in_place::&lt;[T]&gt;(/* … */);
+            }
+            // …
+            dealloc(/* … */)
+            // …
+        }
+    }
+}
+
+struct Vec&lt;T&gt; {
+    // … except for the fact that a `Vec` owns `T` items and
+    // may thus be dropping `T` items on drop!
+    _owns_T: core::marker::PhantomData&lt;T&gt;,
+
+    ptr: *const T, // `*const` for variance (but this does not express ownership of a `T` *per se*)
+    len: usize,
+    cap: usize,
+}
+<span class="boring">}
+</span></code></pre></pre>
+</details>
+<hr />
 <p>Raw pointers that own an allocation is such a pervasive pattern that the
 standard library made a utility for itself called <code>Unique&lt;T&gt;</code> which:</p>
 <ul>
@@ -2544,10 +2657,10 @@ standard library made a utility for itself called <code>Unique&lt;T&gt;</code> w
 </tbody></table>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="splitting-borrows"><a class="header" href="#splitting-borrows">Splitting Borrows</a></h1>
 <p>The mutual exclusion property of mutable references can be very limiting when
-working with a composite structure. The borrow checker understands some basic
-stuff, but will fall over pretty easily. It does understand structs
-sufficiently to know that it's possible to borrow disjoint fields of a struct
-simultaneously. So this works today:</p>
+working with a composite structure. The borrow checker (a.k.a. borrowck)
+understands some basic stuff, but will fall over pretty easily. It does
+understand structs sufficiently to know that it's possible to borrow disjoint
+fields of a struct simultaneously. So this works today:</p>
 <pre><pre class="playground"><code class="language-rust edition2018">
 <span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -3598,7 +3711,7 @@ dropped, even though it itself doesn't implement Drop. We say that such a type
 Next variant.</p>
 <p>In general this works really nicely because you don't need to worry about
 adding/removing drops when you refactor your data layout. Still there's
-certainly many valid usecases for needing to do trickier things with
+certainly many valid use cases for needing to do trickier things with
 destructors.</p>
 <p>The classic safe solution to overriding recursive drop and allowing moving out
 of Self during <code>drop</code> is to use an Option:</p>
@@ -7116,14 +7229,98 @@ fn main() {
 }
 </code></pre>
 <p>No <code>transmute</code> required!</p>
-<h2 id="ffi-and-panics"><a class="header" href="#ffi-and-panics">FFI and panics</a></h2>
-<p>It’s important to be mindful of <code>panic!</code>s when working with FFI. A <code>panic!</code>
-across an FFI boundary is undefined behavior. If you’re writing code that may
-panic, you should run it in a closure with <a href="../std/panic/fn.catch_unwind.html"><code>catch_unwind</code></a>:</p>
+<h2 id="ffi-and-unwinding"><a class="header" href="#ffi-and-unwinding">FFI and unwinding</a></h2>
+<p>It’s important to be mindful of unwinding when working with FFI. Each
+non-<code>Rust</code> ABI comes in two variants, one with <code>-unwind</code> suffix and one without. If
+you expect Rust <code>panic</code>s or foreign (e.g. C++) exceptions to cross an FFI
+boundary, that boundary must use the appropriate <code>-unwind</code> ABI string (note
+that compiling with <code>panic=abort</code> will still cause <code>panic!</code> to immediately
+abort the process, regardless of which ABI is specified by the function that
+<code>panic</code>s).</p>
+<p>Conversely, if you do not expect unwinding to cross an ABI boundary, use one of
+the non-<code>unwind</code> ABI strings (other than <code>Rust</code>, which always permits
+unwinding). If an unwinding operation does encounter an ABI boundary that is
+not permitted to unwind, the behavior depends on the source of the unwinding
+(Rust <code>panic</code> or a foreign exception):</p>
+<ul>
+<li><code>panic</code> will cause the process to safely abort.</li>
+<li>A foreign exception entering Rust will cause undefined behavior.</li>
+</ul>
+<p>Note that the interaction of <code>catch_unwind</code> with foreign exceptions <strong>is
+undefined</strong>, as is the interaction of <code>panic</code> with foreign exception-catching
+mechanisms (notably C++'s <code>try</code>/<code>catch</code>).</p>
+<h3 id="rust-panic-with-c-unwind"><a class="header" href="#rust-panic-with-c-unwind">Rust <code>panic</code> with <code>&quot;C-unwind&quot;</code></a></h3>
+<!-- ignore: using unstable feature -->
+<pre><code class="language-rust ignore">#[no_mangle]
+extern &quot;C-unwind&quot; fn example() {
+    panic!(&quot;Uh oh&quot;);
+}
+</code></pre>
+<p>This function (when compiled with <code>panic=unwind</code>) is permitted to unwind C++
+stack frames.</p>
+<pre><code class="language-text">[Rust function with `catch_unwind`, which stops the unwinding]
+      |
+     ...
+      |
+[C++ frames]
+      |                           ^
+      | (calls)                   | (unwinding
+      v                           |  goes this
+[Rust function `example`]         |  way)
+      |                           |
+      +--- rust function panics --+
+</code></pre>
+<p>If the C++ frames have objects, their destructors will be called.</p>
+<h3 id="c-throw-with-c-unwind"><a class="header" href="#c-throw-with-c-unwind">C++ <code>throw</code> with <code>&quot;C-unwind&quot;</code></a></h3>
+<!-- ignore: using unstable feature -->
+<pre><code class="language-rust ignore">#[link(...)]
+extern &quot;C-unwind&quot; {
+    // A C++ function that may throw an exception
+    fn may_throw();
+}
+
+#[no_mangle]
+extern &quot;C-unwind&quot; fn rust_passthrough() {
+    let b = Box::new(5);
+    unsafe { may_throw(); }
+    println!(&quot;{:?}&quot;, &amp;b);
+}
+</code></pre>
+<p>A C++ function with a <code>try</code> block may invoke <code>rust_passthrough</code> and <code>catch</code> an
+exception thrown by <code>may_throw</code>.</p>
+<pre><code class="language-text">[C++ function with `try` block that invokes `rust_passthrough`]
+      |
+     ...
+      |
+[Rust function `rust_passthrough`]
+      |                            ^
+      | (calls)                    | (unwinding
+      v                            |  goes this
+[C++ function `may_throw`]         |  way)
+      |                            |
+      +--- C++ function throws ----+
+</code></pre>
+<p>If <code>may_throw</code> does throw an exception, <code>b</code> will be dropped. Otherwise, <code>5</code>
+will be printed.</p>
+<h3 id="panic-can-be-stopped-at-an-abi-boundary"><a class="header" href="#panic-can-be-stopped-at-an-abi-boundary"><code>panic</code> can be stopped at an ABI boundary</a></h3>
+<pre><pre class="playground"><code class="language-rust edition2018">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[no_mangle]
+extern &quot;C&quot; fn assert_nonzero(input: u32) {
+    assert!(input != 0)
+}
+<span class="boring">}
+</span></code></pre></pre>
+<p>If <code>assert_nonzero</code> is called with the argument <code>0</code>, the runtime is guaranteed
+to (safely) abort the process, whether or not compiled with <code>panic=abort</code>.</p>
+<h3 id="catching-panic-preemptively"><a class="header" href="#catching-panic-preemptively">Catching <code>panic</code> preemptively</a></h3>
+<p>If you are writing Rust code that may panic, and you don't wish to abort the
+process if it panics, you must use <a href="../std/panic/fn.catch_unwind.html"><code>catch_unwind</code></a>:</p>
 <pre><pre class="playground"><code class="language-rust edition2018">use std::panic::catch_unwind;
 
 #[no_mangle]
-pub extern fn oh_no() -&gt; i32 {
+pub extern &quot;C&quot; fn oh_no() -&gt; i32 {
     let result = catch_unwind(|| {
         panic!(&quot;Oops!&quot;);
     });
@@ -7136,7 +7333,7 @@ pub extern fn oh_no() -&gt; i32 {
 fn main() {}
 </code></pre></pre>
 <p>Please note that <a href="../std/panic/fn.catch_unwind.html"><code>catch_unwind</code></a> will only catch unwinding panics, not
-those who abort the process. See the documentation of <a href="../std/panic/fn.catch_unwind.html"><code>catch_unwind</code></a>
+those that abort the process. See the documentation of <a href="../std/panic/fn.catch_unwind.html"><code>catch_unwind</code></a>
 for more information.</p>
 <h2 id="representing-opaque-structs"><a class="header" href="#representing-opaque-structs">Representing opaque structs</a></h2>
 <p>Sometimes, a C library wants to provide a pointer to something, but not let you know the internal details of the thing it wants.

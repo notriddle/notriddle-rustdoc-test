@@ -201,8 +201,8 @@ fn handle_connection(mut stream: TcpStream) {
 </span><span class="boring">    stream.write_all(response.as_bytes()).unwrap();
 </span>}
 </code></pre></pre>
-<p><span class="caption">Listing 20-10: Simulating a slow request by recognizing
-<em>/sleep</em> and sleeping for 5 seconds</span></p>
+<p><span class="caption">Listing 20-10: Simulating a slow request by sleeping for
+5 seconds</span></p>
 <p>We switched from <code>if</code> to <code>match</code> now that we have three cases. We need to
 explicitly match on a slice of <code>request_line</code> to pattern match against the
 string literal values; <code>match</code> doesn’t do automatic referencing and
@@ -218,9 +218,8 @@ recognition of multiple requests in a much less verbose way!</p>
 you enter the <em>/</em> URI a few times, as before, you’ll see it respond quickly.
 But if you enter <em>/sleep</em> and then load <em>/</em>, you’ll see that <em>/</em> waits until
 <code>sleep</code> has slept for its full 5 seconds before loading.</p>
-<p>There are multiple ways we could change how our web server works to avoid
-having more requests back up behind a slow request; the one we’ll implement is
-a thread pool.</p>
+<p>There are multiple techniques we could use to avoid requests backing up behind
+a slow request; the one we’ll implement is a thread pool.</p>
 <h3 id="improving-throughput-with-a-thread-pool"><a class="header" href="#improving-throughput-with-a-thread-pool">Improving Throughput with a Thread Pool</a></h3>
 <p>A <em>thread pool</em> is a group of spawned threads that are waiting and ready to
 handle a task. When the program receives a new task, it assigns one of the
@@ -235,18 +234,18 @@ from Denial of Service (DoS) attacks; if we had our program create a new thread
 for each request as it came in, someone making 10 million requests to our
 server could create havoc by using up all our server’s resources and grinding
 the processing of requests to a halt.</p>
-<p>Rather than spawning unlimited threads, we’ll have a fixed number of threads
-waiting in the pool. As requests come in, they’ll be sent to the pool for
+<p>Rather than spawning unlimited threads, then, we’ll have a fixed number of
+threads waiting in the pool. Requests that come in are sent to the pool for
 processing. The pool will maintain a queue of incoming requests. Each of the
 threads in the pool will pop off a request from this queue, handle the request,
-and then ask the queue for another request. With this design, we can process
-<code>N</code> requests concurrently, where <code>N</code> is the number of threads. If each thread
-is responding to a long-running request, subsequent requests can still back up
-in the queue, but we’ve increased the number of long-running requests we can
-handle before reaching that point.</p>
+and then ask the queue for another request. With this design, we can process up
+to <code>N</code> requests concurrently, where <code>N</code> is the number of threads. If each
+thread is responding to a long-running request, subsequent requests can still
+back up in the queue, but we’ve increased the number of long-running requests
+we can handle before reaching that point.</p>
 <p>This technique is just one of many ways to improve the throughput of a web
-server. Other options you might explore are the fork/join model and the
-single-threaded async I/O model. If you’re interested in this topic, you can
+server. Other options you might explore are the <em>fork/join model</em> and the
+<em>single-threaded async I/O model</em>. If you’re interested in this topic, you can
 read more about other solutions and try to implement them; with a low-level
 language like Rust, all of these options are possible.</p>
 <p>Before we begin implementing a thread pool, let’s talk about what using the
@@ -258,13 +257,18 @@ designing the public API.</p>
 <p>Similar to how we used test-driven development in the project in Chapter 12,
 we’ll use compiler-driven development here. We’ll write the code that calls the
 functions we want, and then we’ll look at errors from the compiler to determine
-what we should change next to get the code to work.</p>
-<h4 id="code-structure-if-we-could-spawn-a-thread-for-each-request"><a class="header" href="#code-structure-if-we-could-spawn-a-thread-for-each-request">Code Structure If We Could Spawn a Thread for Each Request</a></h4>
+what we should change next to get the code to work. Before we do that, however,
+we’ll explore the technique we’re not going to use as a starting point.</p>
+<!-- Old headings. Do not remove or links may break. -->
+<p><a id="code-structure-if-we-could-spawn-a-thread-for-each-request"></a></p>
+<h4 id="spawning-a-thread-for-each-request"><a class="header" href="#spawning-a-thread-for-each-request">Spawning a Thread for Each Request</a></h4>
 <p>First, let’s explore how our code might look if it did create a new thread for
 every connection. As mentioned earlier, this isn’t our final plan due to the
 problems with potentially spawning an unlimited number of threads, but it is a
-starting point. Listing 20-11 shows the changes to make to <code>main</code> to spawn a
-new thread to handle each stream within the <code>for</code> loop.</p>
+starting point to get a working multithreaded server first. Then we’ll add the
+thread pool as an improvement, and contrasting the two solutions will be
+easier. Listing 20-11 shows the changes to make to <code>main</code> to spawn a new thread
+to handle each stream within the <code>for</code> loop.</p>
 <p><span class="filename">Filename: src/main.rs</span></p>
 <pre><pre class="playground"><code class="language-rust no_run"><span class="boring">use std::{
 </span><span class="boring">    fs,
@@ -313,10 +317,12 @@ stream</span></p>
 <p>As you learned in Chapter 16, <code>thread::spawn</code> will create a new thread and then
 run the code in the closure in the new thread. If you run this code and load
 <em>/sleep</em> in your browser, then <em>/</em> in two more browser tabs, you’ll indeed see
-that the requests to <em>/</em> don’t have to wait for <em>/sleep</em> to finish. But as we
-mentioned, this will eventually overwhelm the system because you’d be making
+that the requests to <em>/</em> don’t have to wait for <em>/sleep</em> to finish. However, as
+we mentioned, this will eventually overwhelm the system because you’d be making
 new threads without any limit.</p>
-<h4 id="creating-a-similar-interface-for-a-finite-number-of-threads"><a class="header" href="#creating-a-similar-interface-for-a-finite-number-of-threads">Creating a Similar Interface for a Finite Number of Threads</a></h4>
+<!-- Old headings. Do not remove or links may break. -->
+<p><a id="creating-a-similar-interface-for-a-finite-number-of-threads"></a></p>
+<h4 id="creating-a-finite-number-of-threads"><a class="header" href="#creating-a-finite-number-of-threads">Creating a Finite Number of Threads</a></h4>
 <p>We want our thread pool to work in a similar, familiar way so switching from
 threads to a thread pool doesn’t require large changes to the code that uses
 our API. Listing 20-12 shows the hypothetical interface for a <code>ThreadPool</code>
@@ -372,16 +378,18 @@ similar interface as <code>thread::spawn</code> in that it takes a closure the p
 run for each stream. We need to implement <code>pool.execute</code> so it takes the
 closure and gives it to a thread in the pool to run. This code won’t yet
 compile, but we’ll try so the compiler can guide us in how to fix it.</p>
-<h4 id="building-the-threadpool-struct-using-compiler-driven-development"><a class="header" href="#building-the-threadpool-struct-using-compiler-driven-development">Building the <code>ThreadPool</code> Struct Using Compiler Driven Development</a></h4>
+<!-- Old headings. Do not remove or links may break. -->
+<p><a id="building-the-threadpool-struct-using-compiler-driven-development"></a></p>
+<h4 id="building-threadpool-using-compiler-driven-development"><a class="header" href="#building-threadpool-using-compiler-driven-development">Building <code>ThreadPool</code> Using Compiler Driven Development</a></h4>
 <p>Make the changes in Listing 20-12 to <em>src/main.rs</em>, and then let’s use the
 compiler errors from <code>cargo check</code> to drive our development. Here is the first
 error we get:</p>
 <pre><code class="language-console">$ cargo check
     Checking hello v0.1.0 (file:///projects/hello)
 error[E0433]: failed to resolve: use of undeclared type `ThreadPool`
-  --&gt; src/main.rs:10:16
+  --&gt; src/main.rs:11:16
    |
-10 |     let pool = ThreadPool::new(4);
+11 |     let pool = ThreadPool::new(4);
    |                ^^^^^^^^^^ use of undeclared type `ThreadPool`
 
 For more information about this error, try `rustc --explain E0433`.
@@ -451,9 +459,9 @@ we need to address:</p>
 <pre><code class="language-console">$ cargo check
     Checking hello v0.1.0 (file:///projects/hello)
 error[E0599]: no function or associated item named `new` found for struct `ThreadPool` in the current scope
-  --&gt; src/bin/main.rs:11:28
+  --&gt; src/main.rs:12:28
    |
-11 |     let pool = ThreadPool::new(4);
+12 |     let pool = ThreadPool::new(4);
    |                            ^^^ function or associated item not found in `ThreadPool`
 
 For more information about this error, try `rustc --explain E0599`.
@@ -482,21 +490,20 @@ ignore --> section of Chapter 3.</p>
 <pre><code class="language-console">$ cargo check
     Checking hello v0.1.0 (file:///projects/hello)
 error[E0599]: no method named `execute` found for struct `ThreadPool` in the current scope
-  --&gt; src/bin/main.rs:16:14
+  --&gt; src/main.rs:17:14
    |
-16 |         pool.execute(|| {
+17 |         pool.execute(|| {
    |              ^^^^^^^ method not found in `ThreadPool`
 
 For more information about this error, try `rustc --explain E0599`.
 error: could not compile `hello` due to previous error
 </code></pre>
 <p>Now the error occurs because we don’t have an <code>execute</code> method on <code>ThreadPool</code>.
-Recall from the <a href="#creating-a-similar-interface-for-a-finite-number-of-threads">“Creating a Similar Interface for a Finite Number of
-Threads”</a><!--
-ignore --> section that we decided our thread pool should have an interface
-similar to <code>thread::spawn</code>. In addition, we’ll implement the <code>execute</code> function
-so it takes the closure it’s given and gives it to an idle thread in the pool
-to run.</p>
+Recall from the <a href="#creating-a-finite-number-of-threads">“Creating a Finite Number of
+Threads”</a><!-- ignore --> section that we
+decided our thread pool should have an interface similar to <code>thread::spawn</code>. In
+addition, we’ll implement the <code>execute</code> function so it takes the closure it’s
+given and gives it to an idle thread in the pool to run.</p>
 <p>We’ll define the <code>execute</code> method on <code>ThreadPool</code> to take a closure as a
 parameter. Recall from the <a href="ch13-01-closures.html#moving-captured-values-out-of-the-closure-and-the-fn-traits">“Moving Captured Values Out of the Closure and the
 <code>Fn</code> Traits”</a><!-- ignore --> section in Chapter 13 that we can take
@@ -603,9 +610,9 @@ calls out the situations in which our function can panic, as discussed in
 Chapter 14. Try running <code>cargo doc --open</code> and clicking the <code>ThreadPool</code> struct
 to see what the generated docs for <code>new</code> look like!</p>
 <p>Instead of adding the <code>assert!</code> macro as we’ve done here, we could make <code>new</code>
-return a <code>Result</code> like we did with <code>Config::new</code> in the I/O project in Listing
-12-9. But we’ve decided in this case that trying to create a thread pool
-without any threads should be an unrecoverable error. If you’re feeling
+return a <code>Result</code> like we did with <code>Config::build</code> in the I/O project in
+Listing 12-9. But we’ve decided in this case that trying to create a thread
+pool without any threads should be an unrecoverable error. If you’re feeling
 ambitious, try to write a version of <code>new</code> with the following signature to
 compare both versions:</p>
 <pre><code class="language-rust ignore">pub fn new(size: usize) -&gt; Result&lt;ThreadPool, PoolCreationError&gt; {
@@ -613,8 +620,8 @@ compare both versions:</p>
 <h4 id="creating-space-to-store-the-threads"><a class="header" href="#creating-space-to-store-the-threads">Creating Space to Store the Threads</a></h4>
 <p>Now that we have a way to know we have a valid number of threads to store in
 the pool, we can create those threads and store them in the <code>ThreadPool</code> struct
-before returning it. But how do we “store” a thread? Let’s take another look at
-the <code>thread::spawn</code> signature:</p>
+before returning the struct. But how do we “store” a thread? Let’s take another
+look at the <code>thread::spawn</code> signature:</p>
 <pre><code class="language-rust ignore">pub fn spawn&lt;F, T&gt;(f: F) -&gt; JoinHandle&lt;T&gt;
     where
         F: FnOnce() -&gt; T,
@@ -672,12 +679,11 @@ the threads</span></p>
 using <code>thread::JoinHandle</code> as the type of the items in the vector in
 <code>ThreadPool</code>.</p>
 <p>Once a valid size is received, our <code>ThreadPool</code> creates a new vector that can
-hold <code>size</code> items. We haven’t used the <code>with_capacity</code> function in this book
-yet, which performs the same task as <code>Vec::new</code> but with an important
-difference: it preallocates space in the vector. Because we know we need to
-store <code>size</code> elements in the vector, doing this allocation up front is slightly
-more efficient than using <code>Vec::new</code>, which resizes itself as elements are
-inserted.</p>
+hold <code>size</code> items. The <code>with_capacity</code> function performs the same task as
+<code>Vec::new</code> but with an important difference: it preallocates space in the
+vector. Because we know we need to store <code>size</code> elements in the vector, doing
+this allocation up front is slightly more efficient than using <code>Vec::new</code>,
+which resizes itself as elements are inserted.</p>
 <p>When you run <code>cargo check</code> again, it should succeed.</p>
 <h4 id="a-worker-struct-responsible-for-sending-code-from-the-threadpool-to-a-thread"><a class="header" href="#a-worker-struct-responsible-for-sending-code-from-the-threadpool-to-a-thread">A <code>Worker</code> Struct Responsible for Sending Code from the <code>ThreadPool</code> to a Thread</a></h4>
 <p>We left a comment in the <code>for</code> loop in Listing 20-14 regarding the creation of
@@ -690,19 +696,20 @@ implementation of threads doesn’t include any way to do that; we have to
 implement it manually.</p>
 <p>We’ll implement this behavior by introducing a new data structure between the
 <code>ThreadPool</code> and the threads that will manage this new behavior. We’ll call
-this data structure <code>Worker</code>, which is a common term in pooling
-implementations. Think of people working in the kitchen at a restaurant: the
-workers wait until orders come in from customers, and then they’re responsible
-for taking those orders and filling them.</p>
+this data structure <em>Worker</em>, which is a common term in pooling
+implementations. The Worker picks up code that needs to be run and runs the
+code in the Worker’s thread. Think of people working in the kitchen at a
+restaurant: the workers wait until orders come in from customers, and then
+they’re responsible for taking those orders and filling them.</p>
 <p>Instead of storing a vector of <code>JoinHandle&lt;()&gt;</code> instances in the thread pool,
 we’ll store instances of the <code>Worker</code> struct. Each <code>Worker</code> will store a single
 <code>JoinHandle&lt;()&gt;</code> instance. Then we’ll implement a method on <code>Worker</code> that will
 take a closure of code to run and send it to the already running thread for
 execution. We’ll also give each worker an <code>id</code> so we can distinguish between
 the different workers in the pool when logging or debugging.</p>
-<p>Let’s make the following changes to what happens when we create a <code>ThreadPool</code>.
-We’ll implement the code that sends the closure to the thread after we have
-<code>Worker</code> set up in this way:</p>
+<p>Here is the new process that will happen when we create a <code>ThreadPool</code>. We’ll
+implement the code that sends the closure to the thread after we have <code>Worker</code>
+set up in this way:</p>
 <ol>
 <li>Define a <code>Worker</code> struct that holds an <code>id</code> and a <code>JoinHandle&lt;()&gt;</code>.</li>
 <li>Change <code>ThreadPool</code> to hold a vector of <code>Worker</code> instances.</li>
@@ -779,17 +786,16 @@ instance that is created by spawning a new thread using an empty closure.</p>
 specified as an argument to <code>ThreadPool::new</code>. But we’re <em>still</em> not processing
 the closure that we get in <code>execute</code>. Let’s look at how to do that next.</p>
 <h4 id="sending-requests-to-threads-via-channels"><a class="header" href="#sending-requests-to-threads-via-channels">Sending Requests to Threads via Channels</a></h4>
-<p>Now we’ll tackle the problem that the closures given to <code>thread::spawn</code> do
+<p>The next problem we’ll tackle is that the closures given to <code>thread::spawn</code> do
 absolutely nothing. Currently, we get the closure we want to execute in the
 <code>execute</code> method. But we need to give <code>thread::spawn</code> a closure to run when we
 create each <code>Worker</code> during the creation of the <code>ThreadPool</code>.</p>
-<p>We want the <code>Worker</code> structs that we just created to fetch code to run from a
-queue held in the <code>ThreadPool</code> and send that code to its thread to run.</p>
-<p>In Chapter 16, you learned about <em>channels</em>—a simple way to communicate between
-two threads—that would be perfect for this use case. We’ll use a channel to
-function as the queue of jobs, and <code>execute</code> will send a job from the
-<code>ThreadPool</code> to the <code>Worker</code> instances, which will send the job to its thread.
-Here is the plan:</p>
+<p>We want the <code>Worker</code> structs that we just created to fetch the code to run from
+a queue held in the <code>ThreadPool</code> and send that code to its thread to run.</p>
+<p>The channels we learned about in Chapter 16—a simple way to communicate between
+two threads—would be perfect for this use case. We’ll use a channel to function
+as the queue of jobs, and <code>execute</code> will send a job from the <code>ThreadPool</code> to
+the <code>Worker</code> instances, which will send the job to its thread. Here is the plan:</p>
 <ol>
 <li>The <code>ThreadPool</code> will create a channel and hold on to the sender.</li>
 <li>Each <code>Worker</code> will hold on to the receiver.</li>
@@ -932,12 +938,12 @@ code in Listing 20-17 won’t quite compile yet.</p>
 <pre><code class="language-console">$ cargo check
     Checking hello v0.1.0 (file:///projects/hello)
 error[E0382]: use of moved value: `receiver`
-  --&gt; src/lib.rs:27:42
+  --&gt; src/lib.rs:26:42
    |
-22 |         let (sender, receiver) = mpsc::channel();
+21 |         let (sender, receiver) = mpsc::channel();
    |                      -------- move occurs because `receiver` has type `std::sync::mpsc::Receiver&lt;Job&gt;`, which does not implement the `Copy` trait
 ...
-27 |             workers.push(Worker::new(id, receiver));
+26 |             workers.push(Worker::new(id, receiver));
    |                                          ^^^^^^^^ value moved here, in previous iteration of loop
 
 For more information about this error, try `rustc --explain E0382`.
@@ -1034,8 +1040,8 @@ share ownership of the receiver.</p>
 <code>Job</code> from a struct to a type alias for a trait object that holds the type of
 closure that <code>execute</code> receives. As discussed in the <a href="ch19-04-advanced-types.html#creating-type-synonyms-with-type-aliases">“Creating Type Synonyms
 with Type Aliases”</a><!-- ignore -->
-section of Chapter 19, type aliases allow us to make long types shorter. Look
-at Listing 20-19.</p>
+section of Chapter 19, type aliases allow us to make long types shorter for
+ease of use. Look at Listing 20-19.</p>
 <p><span class="filename">Filename: src/lib.rs</span></p>
 <pre><code class="language-rust noplayground"><span class="boring">use std::{
 </span><span class="boring">    sync::{mpsc, Arc, Mutex},
@@ -1335,8 +1341,8 @@ processed. The reason is somewhat subtle: the <code>Mutex</code> struct has no p
 the <code>MutexGuard&lt;T&gt;</code> within the <code>LockResult&lt;MutexGuard&lt;T&gt;&gt;</code> that the <code>lock</code>
 method returns. At compile time, the borrow checker can then enforce the rule
 that a resource guarded by a <code>Mutex</code> cannot be accessed unless we hold the
-lock. But this implementation can also result in the lock being held longer
-than intended if we don’t think carefully about the lifetime of the
+lock. However, this implementation can also result in the lock being held
+longer than intended if we aren’t mindful of the lifetime of the
 <code>MutexGuard&lt;T&gt;</code>.</p>
 <p>The code in Listing 20-20 that uses <code>let job = receiver.lock().unwrap().recv().unwrap();</code> works because with <code>let</code>, any
 temporary values used in the expression on the right hand side of the equals
