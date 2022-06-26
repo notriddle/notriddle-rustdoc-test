@@ -1,1 +1,0 @@
-window.ALL_CRATES = ["trait_test"];
