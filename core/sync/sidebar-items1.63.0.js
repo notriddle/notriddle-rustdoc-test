@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["atomic","Atomic types"]]});
+window.SIDEBAR_ITEMS = {"mod":[["atomic","Atomic types"]]};

@@ -702,19 +702,30 @@ which must be <em>escaped</em> by a preceding <code>U+005C</code> character (<co
 <p>Line-breaks are allowed in string literals. A line-break is either a newline
 (<code>U+000A</code>) or a pair of carriage return and newline (<code>U+000D</code>, <code>U+000A</code>). Both
 byte sequences are normally translated to <code>U+000A</code>, but as a special exception,
-when an unescaped <code>U+005C</code> character (<code>\</code>) occurs immediately before the
-line-break, then the <code>U+005C</code> character, the line-break, and all whitespace at the
-beginning of the next line are ignored. Thus <code>a</code> and <code>b</code> are equal:</p>
+when an unescaped <code>U+005C</code> character (<code>\</code>) occurs immediately before a line
+break, then the line break character(s), and all immediately following
+<code> </code> (<code>U+0020</code>), <code>\t</code> (<code>U+0009</code>), <code>\n</code> (<code>U+000A</code>) and <code>\r</code> (<code>U+0000D</code>) characters
+are ignored. Thus <code>a</code>, <code>b</code> and <code>c</code> are equal:</p>
 <pre><pre class="playground"><code class="language-rust edition2021">
 <span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>let a = &quot;foobar&quot;;
 let b = &quot;foo\
          bar&quot;;
+let c = &quot;foo\
 
-assert_eq!(a,b);
+     bar&quot;;
+
+assert_eq!(a, b);
+assert_eq!(b, c);
 <span class="boring">}
 </span></code></pre></pre>
+<blockquote>
+<p>Note: Rust skipping additional newlines (like in example <code>c</code>) is potentially confusing and
+unexpected. This behavior may be adjusted in the future. Until a decision is made, it is
+recommended to avoid relying on this, i.e. skipping multiple newlines with line continuations.
+See <a href="https://github.com/rust-lang/reference/pull/1042">this issue</a> for more information.</p>
+</blockquote>
 <h4 id="character-escapes"><a class="header" href="#character-escapes">Character escapes</a></h4>
 <p>Some additional <em>escapes</em> are available in either character or non-raw string
 literals. An escape starts with a <code>U+005C</code> (<code>\</code>) and continues with one of the
@@ -1465,6 +1476,49 @@ invoking the macro with <code>(a, b, c; d, e, f)</code> is legal and expands to
 not have the same number. This requirement applies to every layer of nested
 repetitions.</li>
 </ol>
+<h2 id="dollar-dollar-"><a class="header" href="#dollar-dollar-">Dollar-dollar ($$)</a></h2>
+<p><code>$$</code> expands to a single <code>$</code>.</p>
+<p>Since metavariable expressions always apply during the expansion of a macro, they cannot be used in recursive macro definitions and this is where <code>$$</code> expressions comes into play, i.e., <code>$$</code> can be used to resolve ambiguities in nested macros.</p>
+<p>The following example illustrates a macro that fails to compile due to the ambiguity of the repetition in a nested macro:</p>
+<pre><pre class="playground"><code class="language-rust compile_fail edition2021">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>macro_rules! foo_error {
+    () =&gt; {
+        macro_rules! bar_error {
+            ( $( $any:tt )* ) =&gt; { $( $any )* };
+            // ^^^^^^^^^^^ error: attempted to repeat an expression containing no syntax variables matched as repeating at this depth
+        }
+    };
+}
+
+foo_error!();
+<span class="boring">}
+</span></code></pre></pre>
+<p>The following resolves the problem by escaping the <code>$</code> in the repetition with <code>$$</code>:</p>
+<pre><pre class="playground"><code class="language-rust edition2021">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>macro_rules! foo_ok {
+    () =&gt; {
+        macro_rules! bar_ok {
+            ( $$( $any:tt )* ) =&gt; { $$( $any )* };
+        }
+    };
+}
+
+foo_ok!();
+<span class="boring">}
+</span></code></pre></pre>
+<p>One consequence of such expansion is that deeper nested levels make dollar-dollar declarations grown linearly, starting at <code>$$</code>, then <code>$$$$</code>, then <code>$$$$$</code> and so on. This is also necessary to be fully featured so that it is possible to specify names of metavariables using other metavariables at each nesting level.</p>
+<pre><code class="language-ignore">$foo          =&gt; bar      =&gt; bar    // Evaluate foo at level 1
+$$foo         =&gt; $foo     =&gt; bar    // Evaluate foo at level 2
+$$$foo        =&gt; $bar     =&gt; baz    // Evaluate foo at level 1, and use that as a name at level 2
+$$$$foo       =&gt; $$foo    =&gt; $foo   // Evaluate foo at level 3
+$$$$$foo      =&gt; $$bar    =&gt; $bar   // Evaluate foo at level 1, and use that as a name at level 3
+$$$$$$foo     =&gt; $$$foo   =&gt; $bar   // Evaluate foo at level 2, and use that as a name at level 3
+$$$$$$$foo    =&gt; $$$bar   =&gt; $baz   // Evaluate foo at level 1, use that at level 2, and then use *that* at level 3
+</code></pre>
 <h2 id="scoping-exporting-and-importing"><a class="header" href="#scoping-exporting-and-importing">Scoping, Exporting, and Importing</a></h2>
 <p>For historical reasons, the scoping of macros by example does not work entirely
 like items. Macros have two forms of scope: textual scope, and path-based scope.
@@ -4628,12 +4682,30 @@ extern {
 this to satisfy the linking requirements of extern blocks elsewhere in your
 code (including upstream crates) instead of adding the attribute to each extern
 block.</p>
+<h4 id="linking-modifiers-bundle"><a class="header" href="#linking-modifiers-bundle">Linking modifiers: <code>bundle</code></a></h4>
+<p>This modifier is only compatible with the <code>static</code> linking kind.
+Using any other kind will result in a compiler error.</p>
+<p>When building a rlib or staticlib <code>+bundle</code> means that all object files from the native static
+library will be added to the rlib or staticlib archive, and then used from it during linking of
+the final binary.</p>
+<p>When building a rlib <code>-bundle</code> means that the native static library is registered as a dependency
+of that rlib &quot;by name&quot;, and object files from it are included only during linking of the final
+binary, the file search by that name is also performed during final linking. <br />
+When building a staticlib <code>-bundle</code> means that the native static library is simply not included
+into the archive and some higher level build system will need to add it later during linking of
+the final binary.</p>
+<p>This modifier has no effect when building other targets like executables or dynamic libraries.</p>
+<p>The default for this modifier is <code>+bundle</code>.</p>
+<p>More implementation details about this modifier can be found in
+<a href="items/../../rustc/command-line-arguments.html#linking-modifiers-bundle"><code>bundle</code> documentation for rustc</a>.</p>
 <h4 id="linking-modifiers-whole-archive"><a class="header" href="#linking-modifiers-whole-archive">Linking modifiers: <code>whole-archive</code></a></h4>
 <p>This modifier is only compatible with the <code>static</code> linking kind.
 Using any other kind will result in a compiler error.</p>
 <p><code>+whole-archive</code> means that the static library is linked as a whole archive
 without throwing any object files away.</p>
-<p>More implementation details about this modifier can be found in <a href="items/../../rustc/command-line-arguments.html#linking-modifiers-whole-archive">documentation for rustc</a>.</p>
+<p>The default for this modifier is <code>-whole-archive</code>.</p>
+<p>More implementation details about this modifier can be found in
+<a href="items/../../rustc/command-line-arguments.html#linking-modifiers-whole-archive"><code>whole-archive</code> documentation for rustc</a>.</p>
 <h3 id="the-link_name-attribute"><a class="header" href="#the-link_name-attribute">The <code>link_name</code> attribute</a></h3>
 <p>The <code>link_name</code> attribute may be specified on declarations inside an <code>extern</code>
 block to indicate the symbol to import for the given function or static. It
@@ -9889,9 +9961,6 @@ itself. Such recursion has restrictions:</p>
 aliases</a>, or other structural types such as <a href="types/array.html">arrays</a> or <a href="types/tuple.html">tuples</a>). So <code>type Rec = &amp;'static [Rec]</code> is not allowed.</li>
 <li>The size of a recursive type must be finite; in other words the recursive
 fields of the type must be <a href="types/pointer.html">pointer types</a>.</li>
-<li>Recursive type definitions can cross module boundaries, but not module
-<em>visibility</em> boundaries, or crate boundaries (in order to simplify the module
-system and type checker).</li>
 </ul>
 <p>An example of a <em>recursive</em> type and its use:</p>
 <pre><pre class="playground"><code class="language-rust edition2021">
@@ -11310,26 +11379,53 @@ derived)</li>
 <tr><td><code>[T]</code> and <code>[T; n]</code></td><td></td><td>covariant</td></tr>
 <tr><td><code>fn() -&gt; T</code></td><td></td><td>covariant</td></tr>
 <tr><td><code>fn(T) -&gt; ()</code></td><td></td><td>contravariant</td></tr>
-<tr><td><code>fn(T) -&gt; T</code></td><td></td><td>invariant</td></tr>
 <tr><td><code>std::cell::UnsafeCell&lt;T&gt;</code></td><td></td><td>invariant</td></tr>
 <tr><td><code>std::marker::PhantomData&lt;T&gt;</code></td><td></td><td>covariant</td></tr>
 <tr><td><code>dyn Trait&lt;T&gt; + 'a</code></td><td>covariant</td><td>invariant</td></tr>
 </tbody></table>
-<p>The variance of other <code>struct</code>, <code>enum</code>, <code>union</code>, and tuple types is decided by
+<p>The variance of other <code>struct</code>, <code>enum</code>, and <code>union</code> types is decided by
 looking at the variance of the types of their fields. If the parameter is used
 in positions with different variances then the parameter is invariant. For
-example the following struct is covariant in <code>'a</code> and <code>T</code> and invariant in <code>'b</code>
+example the following struct is covariant in <code>'a</code> and <code>T</code> and invariant in <code>'b</code>, <code>'c</code>,
 and <code>U</code>.</p>
 <pre><pre class="playground"><code class="language-rust edition2021">
 <span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use std::cell::UnsafeCell;
-struct Variance&lt;'a, 'b, T, U: 'a&gt; {
+struct Variance&lt;'a, 'b, 'c, T, U: 'a&gt; {
     x: &amp;'a U,               // This makes `Variance` covariant in 'a, and would
                             // make it covariant in U, but U is used later
     y: *const T,            // Covariant in T
     z: UnsafeCell&lt;&amp;'b f64&gt;, // Invariant in 'b
     w: *mut U,              // Invariant in U, makes the whole struct invariant
+
+    f: fn(&amp;'c ()) -&gt; &amp;'c () // Both co- and contravariant, makes 'c invariant
+                            // in the struct.
+}
+<span class="boring">}
+</span></code></pre></pre>
+<p>When used outside of an <code>struct</code>, <code>enum</code>, or <code>union</code>, the variance for parameters is checked at each location separately.</p>
+<pre><pre class="playground"><code class="language-rust edition2021">
+<span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span><span class="boring">use std::cell::UnsafeCell;
+</span>fn generic_tuple&lt;'short, 'long: 'short&gt;(
+    // 'long is used inside of a tuple in both a co- and invariant position.
+    x: (&amp;'long u32, UnsafeCell&lt;&amp;'long u32&gt;),
+) {
+    // As the variance at these positions is computed separately,
+    // we can freely shrink 'long in the covariant position.
+    let _: (&amp;'short u32, UnsafeCell&lt;&amp;'long u32&gt;) = x;
+}
+
+fn takes_fn_ptr&lt;'short, 'middle: 'short&gt;(
+    // 'middle is used in both a co- and contravariant position.
+    f: fn(&amp;'middle ()) -&gt; &amp;'middle (),
+) {
+    // As the variance at these positions is computed separately,
+    // we can freely shrink 'middle in the covariant position
+    // and extend it in the contravariant position.
+    let _: fn(&amp;'static ()) -&gt; &amp;'short () = f;
 }
 <span class="boring">}
 </span></code></pre></pre>
@@ -12814,6 +12910,8 @@ Vec::&lt;u8&gt;::with_capacity(1024);
 arguments, then const arguments, then equality constraints.</p>
 <p>Const arguments must be surrounded by braces unless they are a
 <a href="expressions/literal-expr.html">literal</a> or a single segment path.</p>
+<p>The synthetic type parameters corresponding to <code>impl Trait</code> types are implicit,
+and these cannot be explicitly specified.</p>
 <h2 id="qualified-paths"><a class="header" href="#qualified-paths">Qualified paths</a></h2>
 <blockquote>
 <p><strong><sup>Syntax</sup></strong><br />
