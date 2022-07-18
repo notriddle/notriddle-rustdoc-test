@@ -333,8 +333,8 @@ let add_one_v4 = |x|               x + 1  ;
 annotated closure definition. In the third line, we remove the type annotations
 from the closure definition. In the fourth line, we remove the brackets, which
 are optional because the closure body has only one expression. These are all
-valid definitions that will produce the same behavior when they’re called.
-Evaluating the closures is required for <code>add_one_v3</code> and <code>add_one_v4</code> to be
+valid definitions that will produce the same behavior when they’re called. The
+<code>add_one_v3</code> and <code>add_one_v4</code> lines require the closures to be evaluated to be
 able to compile because the types will be inferred from their usage. This is
 similar to <code>let v = Vec::new();</code> needing either type annotations or values of
 some type to be inserted into the <code>Vec</code> for Rust to be able to infer the type.</p>
@@ -445,32 +445,63 @@ borrows are allowed when there’s a mutable borrow. Try adding a <code>println!
 there to see what error message you get!</p>
 <p>If you want to force the closure to take ownership of the values it uses in the
 environment even though the body of the closure doesn’t strictly need
-ownership, you can use the <code>move</code> keyword before the parameter list. This
-technique is mostly useful when passing a closure to a new thread to move the
-data so that it’s owned by the new thread. We’ll have more examples of <code>move</code>
-closures in Chapter 16 when we talk about concurrency.</p>
+ownership, you can use the <code>move</code> keyword before the parameter list.</p>
+<p>This technique is mostly useful when passing a closure to a new thread to move
+the data so that it’s owned by the new thread. We’ll discuss threads and why
+you would want to use them in detail in Chapter 16 when we talk about
+concurrency, but for now, let’s briefly explore spawning a new thread using a
+closure that needs the <code>move</code> keyword. Listing 13-6 shows Listing 13-4 modified
+to print the vector in a new thread rather than in the main thread:</p>
+<p><span class="filename">Filename: src/main.rs</span></p>
+<pre><pre class="playground"><code class="language-rust">fn main() {
+    let mut list = vec![1, 2, 3];
+    println!(&quot;Before defining closure: {:?}&quot;, list);
+
+    let mut borrows_mutably = || list.push(7);
+
+    borrows_mutably();
+    println!(&quot;After calling closure: {:?}&quot;, list);
+}
+</code></pre></pre>
+<p><span class="caption">Listing 13-6: Using <code>move</code> to force the closure for the
+thread to take ownership of <code>list</code></span></p>
+<p>We spawn a new thread, giving the thread a closure to run as an argument. The
+closure body prints out the list. In Listing 13-4, the closure only captured
+<code>list</code> using an immutable reference because that's the least amount of access
+to <code>list</code> needed to print it. In this example, even though the closure body
+still only needs an immutable reference, we need to specify that <code>list</code> should
+be moved into the closure by putting the <code>move</code> keyword at the beginning of the
+closure definition. The new thread might finish before the rest of the main
+thread finishes, or the main thread might finish first. If the main thread
+maintained ownership of <code>list</code> but ended before the new thread did and dropped
+<code>list</code>, the immutable reference in the thread would be invalid. Therefore, the
+compiler requires that <code>list</code> be moved into the closure given to the new thread
+so the reference will be valid. Try removing the <code>move</code> keyword or using <code>list</code>
+in the main thread after the closure is defined to see what compiler errors you
+get!</p>
 <!-- Old headings. Do not remove or links may break. -->
 <p><a id="storing-closures-using-generic-parameters-and-the-fn-traits"></a>
 <a id="limitations-of-the-cacher-implementation"></a>
 <a id="moving-captured-values-out-of-the-closure-and-the-fn-traits"></a></p>
 <h3 id="moving-captured-values-out-of-closures-and-the-fn-traits"><a class="header" href="#moving-captured-values-out-of-closures-and-the-fn-traits">Moving Captured Values Out of Closures and the <code>Fn</code> Traits</a></h3>
-<p>Once a closure has captured a reference or captured ownership of a value where
-the closure is defined (thus affecting what, if anything, is moved <em>into</em> the
-closure), the code in the body of the closure defines what happens to the
-references or values when the closure is evaluated later (thus affecting what,
-if anything, is moved <em>out of</em> the closure). A closure body can do any of the
-following: move a captured value out of the closure, mutate the captured value,
-neither move nor mutate the value, or capture nothing from the environment to
-begin with.</p>
+<p>Once a closure has captured a reference or captured ownership of a value from
+the environment where the closure is defined (thus affecting what, if anything,
+is moved <em>into</em> the closure), the code in the body of the closure defines what
+happens to the references or values when the closure is evaluated later (thus
+affecting what, if anything, is moved <em>out of</em> the closure). A closure body can
+do any of the following: move a captured value out of the closure, mutate the
+captured value, neither move nor mutate the value, or capture nothing from the
+environment to begin with.</p>
 <p>The way a closure captures and handles values from the environment affects
 which traits the closure implements, and traits are how functions and structs
 can specify what kinds of closures they can use. Closures will automatically
-implement one, two, or all three of these <code>Fn</code> traits, in an additive fashion:</p>
+implement one, two, or all three of these <code>Fn</code> traits, in an additive fashion,
+depending on how the closure’s body handles the values:</p>
 <ol>
-<li><code>FnOnce</code> applies to closures that can be called at least once. All closures
-implement at least this trait, because all closures can be called. A closure
-that moves captured values out of its body will only implement <code>FnOnce</code>
-and none of the other <code>Fn</code> traits, because it can only be called once.</li>
+<li><code>FnOnce</code> applies to closures that can be called once. All closures implement
+at least this trait, because all closures can be called. A closure that
+moves captured values out of its body will only implement <code>FnOnce</code> and none
+of the other <code>Fn</code> traits, because it can only be called once.</li>
 <li><code>FnMut</code> applies to closures that don’t move captured values out of their
 body, but that might mutate the captured values. These closures can be
 called more than once.</li>
@@ -481,7 +512,7 @@ without mutating their environment, which is important in cases such as
 calling a closure multiple times concurrently.</li>
 </ol>
 <p>Let’s look at the definition of the <code>unwrap_or_else</code> method on <code>Option&lt;T&gt;</code> that
-we used in Listing 13-6:</p>
+we used in Listing 13-1:</p>
 <pre><code class="language-rust ignore">impl&lt;T&gt; Option&lt;T&gt; {
     pub fn unwrap_or_else&lt;F&gt;(self, f: F) -&gt; T
     where
@@ -502,8 +533,8 @@ we used in Listing 13-6:</p>
 parameter <code>F</code>. The <code>F</code> type is the type of the parameter named <code>f</code>, which is
 the closure we provide when calling <code>unwrap_or_else</code>.</p>
 <p>The trait bound specified on the generic type <code>F</code> is <code>FnOnce() -&gt; T</code>, which
-means <code>F</code> must be able to be called at least once, take no arguments, and
-return a <code>T</code>. Using <code>FnOnce</code> in the trait bound expresses the constraint that
+means <code>F</code> must be able to be called once, take no arguments, and return a <code>T</code>.
+Using <code>FnOnce</code> in the trait bound expresses the constraint that
 <code>unwrap_or_else</code> is only going to call <code>f</code> at most one time. In the body of
 <code>unwrap_or_else</code>, we can see that if the <code>Option</code> is <code>Some</code>, <code>f</code> won’t be
 called. If the <code>Option</code> is <code>None</code>, <code>f</code> will be called once. Because all
@@ -519,12 +550,12 @@ value is <code>None</code>.</p>
 </blockquote>
 <p>Now let’s look at the standard library method <code>sort_by_key</code> defined on slices,
 to see how that differs from <code>unwrap_or_else</code> and why <code>sort_by_key</code> uses
-<code>FnMut</code> instead of <code>FnOnce</code> for the trait bound.</p>
-<p>The closure gets one argument, a reference to the current item in the slice
-being considered, and returns a value of type <code>K</code> that can be ordered. This
-function is useful when you want to sort a slice by a particular attribute of
-each item. In Listing 13-x, we have a list of <code>Rectangle</code> instances and we use
-<code>sort_by_key</code> to order them by their <code>width</code> attribute from low to high:</p>
+<code>FnMut</code> instead of <code>FnOnce</code> for the trait bound. The closure gets one argument
+in the form of a reference to the current item in the slice being considered,
+and returns a value of type <code>K</code> that can be ordered. This function is useful
+when you want to sort a slice by a particular attribute of each item. In
+Listing 13-7, we have a list of <code>Rectangle</code> instances and we use <code>sort_by_key</code>
+to order them by their <code>width</code> attribute from low to high:</p>
 <p><span class="filename">Filename: src/main.rs</span></p>
 <pre><pre class="playground"><code class="language-rust">#[derive(Debug)]
 struct Rectangle {
@@ -611,17 +642,17 @@ implement <code>FnMut</code>:</p>
 <pre><code class="language-console">$ cargo run
    Compiling rectangles v0.1.0 (file:///projects/rectangles)
 error[E0507]: cannot move out of `value`, a captured variable in an `FnMut` closure
-  --&gt; src/main.rs:27:30
+  --&gt; src/main.rs:18:30
    |
-24 |       let value = String::from(&quot;by key called&quot;);
+15 |       let value = String::from(&quot;by key called&quot;);
    |           ----- captured outer variable
-25 | 
-26 |       list.sort_by_key(|r| {
+16 | 
+17 |       list.sort_by_key(|r| {
    |  ______________________-
-27 | |         sort_operations.push(value);
+18 | |         sort_operations.push(value);
    | |                              ^^^^^ move occurs because `value` has type `String`, which does not implement the `Copy` trait
-28 | |         r.width
-29 | |     });
+19 | |         r.width
+20 | |     });
    | |_____- captured by this `FnMut` closure
 
 For more information about this error, try `rustc --explain E0507`.
@@ -632,7 +663,7 @@ environment. To fix this, we need to change the closure body so that it doesn’
 move values out of the environment. To count the number of times <code>sort_by_key</code>
 is called, keeping a counter in the environment and incrementing its value in
 the closure body is a more straightforward way to calculate that. The closure
-in Listing 13-x works with <code>sort_by_key</code> because it is only capturing a mutable
+in Listing 13-9 works with <code>sort_by_key</code> because it is only capturing a mutable
 reference to the <code>num_sort_operations</code> counter and can therefore be called more
 than once:</p>
 <p><span class="filename">Filename: src/main.rs</span></p>

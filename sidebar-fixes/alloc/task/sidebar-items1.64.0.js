@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"trait":[["Wake","The implementation of waking a task on an executor."]]};

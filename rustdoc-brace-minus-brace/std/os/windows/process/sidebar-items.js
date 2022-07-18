@@ -1,1 +1,0 @@
-initSidebarItems({"trait":[["CommandExt","Windows-specific extensions to the [`process::Command`] builder."],["ExitStatusExt","Windows-specific extensions to [`process::ExitStatus`]."]]});

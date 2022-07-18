@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"trait":[["OsStrExt","Platform-specific extensions to [`OsStr`]."],["OsStringExt","Platform-specific extensions to [`OsString`]."]]};

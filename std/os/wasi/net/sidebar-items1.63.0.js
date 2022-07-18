@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"trait":[["TcpListenerExt","WASI-specific extensions to `std::net::TcpListener`."]]};
