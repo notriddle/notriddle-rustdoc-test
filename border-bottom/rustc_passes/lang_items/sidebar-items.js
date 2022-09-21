@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["get_lang_items","Traverses and collects all the lang items in all crates."],["provide",""]],"struct":[["LanguageItemCollector",""]]};

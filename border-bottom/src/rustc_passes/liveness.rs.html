@@ -1,0 +1,3540 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_passes/src/liveness.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>liveness.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_passes/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_passes/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_passes/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+<span id="1041">1041</span>
+<span id="1042">1042</span>
+<span id="1043">1043</span>
+<span id="1044">1044</span>
+<span id="1045">1045</span>
+<span id="1046">1046</span>
+<span id="1047">1047</span>
+<span id="1048">1048</span>
+<span id="1049">1049</span>
+<span id="1050">1050</span>
+<span id="1051">1051</span>
+<span id="1052">1052</span>
+<span id="1053">1053</span>
+<span id="1054">1054</span>
+<span id="1055">1055</span>
+<span id="1056">1056</span>
+<span id="1057">1057</span>
+<span id="1058">1058</span>
+<span id="1059">1059</span>
+<span id="1060">1060</span>
+<span id="1061">1061</span>
+<span id="1062">1062</span>
+<span id="1063">1063</span>
+<span id="1064">1064</span>
+<span id="1065">1065</span>
+<span id="1066">1066</span>
+<span id="1067">1067</span>
+<span id="1068">1068</span>
+<span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
+<span id="1086">1086</span>
+<span id="1087">1087</span>
+<span id="1088">1088</span>
+<span id="1089">1089</span>
+<span id="1090">1090</span>
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+<span id="1193">1193</span>
+<span id="1194">1194</span>
+<span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+<span id="1411">1411</span>
+<span id="1412">1412</span>
+<span id="1413">1413</span>
+<span id="1414">1414</span>
+<span id="1415">1415</span>
+<span id="1416">1416</span>
+<span id="1417">1417</span>
+<span id="1418">1418</span>
+<span id="1419">1419</span>
+<span id="1420">1420</span>
+<span id="1421">1421</span>
+<span id="1422">1422</span>
+<span id="1423">1423</span>
+<span id="1424">1424</span>
+<span id="1425">1425</span>
+<span id="1426">1426</span>
+<span id="1427">1427</span>
+<span id="1428">1428</span>
+<span id="1429">1429</span>
+<span id="1430">1430</span>
+<span id="1431">1431</span>
+<span id="1432">1432</span>
+<span id="1433">1433</span>
+<span id="1434">1434</span>
+<span id="1435">1435</span>
+<span id="1436">1436</span>
+<span id="1437">1437</span>
+<span id="1438">1438</span>
+<span id="1439">1439</span>
+<span id="1440">1440</span>
+<span id="1441">1441</span>
+<span id="1442">1442</span>
+<span id="1443">1443</span>
+<span id="1444">1444</span>
+<span id="1445">1445</span>
+<span id="1446">1446</span>
+<span id="1447">1447</span>
+<span id="1448">1448</span>
+<span id="1449">1449</span>
+<span id="1450">1450</span>
+<span id="1451">1451</span>
+<span id="1452">1452</span>
+<span id="1453">1453</span>
+<span id="1454">1454</span>
+<span id="1455">1455</span>
+<span id="1456">1456</span>
+<span id="1457">1457</span>
+<span id="1458">1458</span>
+<span id="1459">1459</span>
+<span id="1460">1460</span>
+<span id="1461">1461</span>
+<span id="1462">1462</span>
+<span id="1463">1463</span>
+<span id="1464">1464</span>
+<span id="1465">1465</span>
+<span id="1466">1466</span>
+<span id="1467">1467</span>
+<span id="1468">1468</span>
+<span id="1469">1469</span>
+<span id="1470">1470</span>
+<span id="1471">1471</span>
+<span id="1472">1472</span>
+<span id="1473">1473</span>
+<span id="1474">1474</span>
+<span id="1475">1475</span>
+<span id="1476">1476</span>
+<span id="1477">1477</span>
+<span id="1478">1478</span>
+<span id="1479">1479</span>
+<span id="1480">1480</span>
+<span id="1481">1481</span>
+<span id="1482">1482</span>
+<span id="1483">1483</span>
+<span id="1484">1484</span>
+<span id="1485">1485</span>
+<span id="1486">1486</span>
+<span id="1487">1487</span>
+<span id="1488">1488</span>
+<span id="1489">1489</span>
+<span id="1490">1490</span>
+<span id="1491">1491</span>
+<span id="1492">1492</span>
+<span id="1493">1493</span>
+<span id="1494">1494</span>
+<span id="1495">1495</span>
+<span id="1496">1496</span>
+<span id="1497">1497</span>
+<span id="1498">1498</span>
+<span id="1499">1499</span>
+<span id="1500">1500</span>
+<span id="1501">1501</span>
+<span id="1502">1502</span>
+<span id="1503">1503</span>
+<span id="1504">1504</span>
+<span id="1505">1505</span>
+<span id="1506">1506</span>
+<span id="1507">1507</span>
+<span id="1508">1508</span>
+<span id="1509">1509</span>
+<span id="1510">1510</span>
+<span id="1511">1511</span>
+<span id="1512">1512</span>
+<span id="1513">1513</span>
+<span id="1514">1514</span>
+<span id="1515">1515</span>
+<span id="1516">1516</span>
+<span id="1517">1517</span>
+<span id="1518">1518</span>
+<span id="1519">1519</span>
+<span id="1520">1520</span>
+<span id="1521">1521</span>
+<span id="1522">1522</span>
+<span id="1523">1523</span>
+<span id="1524">1524</span>
+<span id="1525">1525</span>
+<span id="1526">1526</span>
+<span id="1527">1527</span>
+<span id="1528">1528</span>
+<span id="1529">1529</span>
+<span id="1530">1530</span>
+<span id="1531">1531</span>
+<span id="1532">1532</span>
+<span id="1533">1533</span>
+<span id="1534">1534</span>
+<span id="1535">1535</span>
+<span id="1536">1536</span>
+<span id="1537">1537</span>
+<span id="1538">1538</span>
+<span id="1539">1539</span>
+<span id="1540">1540</span>
+<span id="1541">1541</span>
+<span id="1542">1542</span>
+<span id="1543">1543</span>
+<span id="1544">1544</span>
+<span id="1545">1545</span>
+<span id="1546">1546</span>
+<span id="1547">1547</span>
+<span id="1548">1548</span>
+<span id="1549">1549</span>
+<span id="1550">1550</span>
+<span id="1551">1551</span>
+<span id="1552">1552</span>
+<span id="1553">1553</span>
+<span id="1554">1554</span>
+<span id="1555">1555</span>
+<span id="1556">1556</span>
+<span id="1557">1557</span>
+<span id="1558">1558</span>
+<span id="1559">1559</span>
+<span id="1560">1560</span>
+<span id="1561">1561</span>
+<span id="1562">1562</span>
+<span id="1563">1563</span>
+<span id="1564">1564</span>
+<span id="1565">1565</span>
+<span id="1566">1566</span>
+<span id="1567">1567</span>
+<span id="1568">1568</span>
+<span id="1569">1569</span>
+<span id="1570">1570</span>
+<span id="1571">1571</span>
+<span id="1572">1572</span>
+<span id="1573">1573</span>
+<span id="1574">1574</span>
+<span id="1575">1575</span>
+<span id="1576">1576</span>
+<span id="1577">1577</span>
+<span id="1578">1578</span>
+<span id="1579">1579</span>
+<span id="1580">1580</span>
+<span id="1581">1581</span>
+<span id="1582">1582</span>
+<span id="1583">1583</span>
+<span id="1584">1584</span>
+<span id="1585">1585</span>
+<span id="1586">1586</span>
+<span id="1587">1587</span>
+<span id="1588">1588</span>
+<span id="1589">1589</span>
+<span id="1590">1590</span>
+<span id="1591">1591</span>
+<span id="1592">1592</span>
+<span id="1593">1593</span>
+<span id="1594">1594</span>
+<span id="1595">1595</span>
+<span id="1596">1596</span>
+<span id="1597">1597</span>
+<span id="1598">1598</span>
+<span id="1599">1599</span>
+<span id="1600">1600</span>
+<span id="1601">1601</span>
+<span id="1602">1602</span>
+<span id="1603">1603</span>
+<span id="1604">1604</span>
+<span id="1605">1605</span>
+<span id="1606">1606</span>
+<span id="1607">1607</span>
+<span id="1608">1608</span>
+<span id="1609">1609</span>
+<span id="1610">1610</span>
+<span id="1611">1611</span>
+<span id="1612">1612</span>
+<span id="1613">1613</span>
+<span id="1614">1614</span>
+<span id="1615">1615</span>
+<span id="1616">1616</span>
+<span id="1617">1617</span>
+<span id="1618">1618</span>
+<span id="1619">1619</span>
+<span id="1620">1620</span>
+<span id="1621">1621</span>
+<span id="1622">1622</span>
+<span id="1623">1623</span>
+<span id="1624">1624</span>
+<span id="1625">1625</span>
+<span id="1626">1626</span>
+<span id="1627">1627</span>
+<span id="1628">1628</span>
+<span id="1629">1629</span>
+<span id="1630">1630</span>
+<span id="1631">1631</span>
+<span id="1632">1632</span>
+<span id="1633">1633</span>
+<span id="1634">1634</span>
+<span id="1635">1635</span>
+<span id="1636">1636</span>
+<span id="1637">1637</span>
+<span id="1638">1638</span>
+<span id="1639">1639</span>
+<span id="1640">1640</span>
+<span id="1641">1641</span>
+<span id="1642">1642</span>
+<span id="1643">1643</span>
+<span id="1644">1644</span>
+<span id="1645">1645</span>
+<span id="1646">1646</span>
+<span id="1647">1647</span>
+<span id="1648">1648</span>
+<span id="1649">1649</span>
+<span id="1650">1650</span>
+<span id="1651">1651</span>
+<span id="1652">1652</span>
+<span id="1653">1653</span>
+<span id="1654">1654</span>
+<span id="1655">1655</span>
+<span id="1656">1656</span>
+<span id="1657">1657</span>
+<span id="1658">1658</span>
+<span id="1659">1659</span>
+<span id="1660">1660</span>
+<span id="1661">1661</span>
+<span id="1662">1662</span>
+<span id="1663">1663</span>
+<span id="1664">1664</span>
+<span id="1665">1665</span>
+<span id="1666">1666</span>
+<span id="1667">1667</span>
+<span id="1668">1668</span>
+<span id="1669">1669</span>
+<span id="1670">1670</span>
+<span id="1671">1671</span>
+<span id="1672">1672</span>
+<span id="1673">1673</span>
+<span id="1674">1674</span>
+<span id="1675">1675</span>
+<span id="1676">1676</span>
+<span id="1677">1677</span>
+<span id="1678">1678</span>
+<span id="1679">1679</span>
+<span id="1680">1680</span>
+<span id="1681">1681</span>
+<span id="1682">1682</span>
+<span id="1683">1683</span>
+<span id="1684">1684</span>
+<span id="1685">1685</span>
+<span id="1686">1686</span>
+<span id="1687">1687</span>
+<span id="1688">1688</span>
+<span id="1689">1689</span>
+<span id="1690">1690</span>
+<span id="1691">1691</span>
+<span id="1692">1692</span>
+<span id="1693">1693</span>
+<span id="1694">1694</span>
+<span id="1695">1695</span>
+<span id="1696">1696</span>
+<span id="1697">1697</span>
+<span id="1698">1698</span>
+<span id="1699">1699</span>
+<span id="1700">1700</span>
+<span id="1701">1701</span>
+<span id="1702">1702</span>
+<span id="1703">1703</span>
+<span id="1704">1704</span>
+<span id="1705">1705</span>
+<span id="1706">1706</span>
+<span id="1707">1707</span>
+<span id="1708">1708</span>
+<span id="1709">1709</span>
+<span id="1710">1710</span>
+<span id="1711">1711</span>
+<span id="1712">1712</span>
+<span id="1713">1713</span>
+<span id="1714">1714</span>
+<span id="1715">1715</span>
+<span id="1716">1716</span>
+<span id="1717">1717</span>
+<span id="1718">1718</span>
+<span id="1719">1719</span>
+<span id="1720">1720</span>
+<span id="1721">1721</span>
+<span id="1722">1722</span>
+<span id="1723">1723</span>
+<span id="1724">1724</span>
+<span id="1725">1725</span>
+<span id="1726">1726</span>
+<span id="1727">1727</span>
+<span id="1728">1728</span>
+<span id="1729">1729</span>
+<span id="1730">1730</span>
+<span id="1731">1731</span>
+<span id="1732">1732</span>
+<span id="1733">1733</span>
+<span id="1734">1734</span>
+<span id="1735">1735</span>
+<span id="1736">1736</span>
+<span id="1737">1737</span>
+<span id="1738">1738</span>
+<span id="1739">1739</span>
+<span id="1740">1740</span>
+<span id="1741">1741</span>
+<span id="1742">1742</span>
+<span id="1743">1743</span>
+<span id="1744">1744</span>
+<span id="1745">1745</span>
+<span id="1746">1746</span>
+<span id="1747">1747</span>
+<span id="1748">1748</span>
+<span id="1749">1749</span>
+<span id="1750">1750</span>
+<span id="1751">1751</span>
+<span id="1752">1752</span>
+<span id="1753">1753</span>
+<span id="1754">1754</span>
+<span id="1755">1755</span>
+<span id="1756">1756</span>
+<span id="1757">1757</span>
+<span id="1758">1758</span>
+<span id="1759">1759</span>
+<span id="1760">1760</span>
+<span id="1761">1761</span>
+<span id="1762">1762</span>
+<span id="1763">1763</span>
+<span id="1764">1764</span>
+<span id="1765">1765</span>
+<span id="1766">1766</span>
+<span id="1767">1767</span>
+<span id="1768">1768</span>
+<span id="1769">1769</span>
+</pre><pre class="rust"><code><span class="doccomment">//! A classic liveness analysis based on dataflow over the AST. Computes,
+//! for each local variable in a function, whether that variable is live
+//! at a given point. Program execution points are identified by their
+//! IDs.
+//!
+//! # Basic idea
+//!
+//! The basic model is that each local variable is assigned an index. We
+//! represent sets of local variables using a vector indexed by this
+//! index. The value in the vector is either 0, indicating the variable
+//! is dead, or the ID of an expression that uses the variable.
+//!
+//! We conceptually walk over the AST in reverse execution order. If we
+//! find a use of a variable, we add it to the set of live variables. If
+//! we find an assignment to a variable, we remove it from the set of live
+//! variables. When we have to merge two flows, we take the union of
+//! those two flows -- if the variable is live on both paths, we simply
+//! pick one ID. In the event of loops, we continue doing this until a
+//! fixed point is reached.
+//!
+//! ## Checking initialization
+//!
+//! At the function entry point, all variables must be dead. If this is
+//! not the case, we can report an error using the ID found in the set of
+//! live variables, which identifies a use of the variable which is not
+//! dominated by an assignment.
+//!
+//! ## Checking moves
+//!
+//! After each explicit move, the variable must be dead.
+//!
+//! ## Computing last uses
+//!
+//! Any use of the variable where the variable is dead afterwards is a
+//! last use.
+//!
+//! # Implementation details
+//!
+//! The actual implementation contains two (nested) walks over the AST.
+//! The outer walk has the job of building up the ir_maps instance for the
+//! enclosing function. On the way down the tree, it identifies those AST
+//! nodes and variable IDs that will be needed for the liveness analysis
+//! and assigns them contiguous IDs. The liveness ID for an AST node is
+//! called a `live_node` (it&#39;s a newtype&#39;d `u32`) and the ID for a variable
+//! is called a `variable` (another newtype&#39;d `u32`).
+//!
+//! On the way back up the tree, as we are about to exit from a function
+//! declaration we allocate a `liveness` instance. Now that we know
+//! precisely how many nodes and variables we need, we can allocate all
+//! the various arrays that we will need to precisely the right size. We then
+//! perform the actual propagation on the `liveness` instance.
+//!
+//! This propagation is encoded in the various `propagate_through_*()`
+//! methods. It effectively does a reverse walk of the AST; whenever we
+//! reach a loop node, we iterate until a fixed point is reached.
+//!
+//! ## The `RWU` struct
+//!
+//! At each live node `N`, we track three pieces of information for each
+//! variable `V` (these are encapsulated in the `RWU` struct):
+//!
+//! - `reader`: the `LiveNode` ID of some node which will read the value
+//!    that `V` holds on entry to `N`. Formally: a node `M` such
+//!    that there exists a path `P` from `N` to `M` where `P` does not
+//!    write `V`. If the `reader` is `None`, then the current
+//!    value will never be read (the variable is dead, essentially).
+//!
+//! - `writer`: the `LiveNode` ID of some node which will write the
+//!    variable `V` and which is reachable from `N`. Formally: a node `M`
+//!    such that there exists a path `P` from `N` to `M` and `M` writes
+//!    `V`. If the `writer` is `None`, then there is no writer
+//!    of `V` that follows `N`.
+//!
+//! - `used`: a boolean value indicating whether `V` is *used*. We
+//!   distinguish a *read* from a *use* in that a *use* is some read that
+//!   is not just used to generate a new value. For example, `x += 1` is
+//!   a read but not a use. This is used to generate better warnings.
+//!
+//! ## Special nodes and variables
+//!
+//! We generate various special nodes for various, well, special purposes.
+//! These are described in the `Liveness` struct.
+
+</span><span class="kw">use </span><a href="#122"><span class="self">self</span>::LiveNodeKind</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="#226"><span class="self">self</span>::VarKind</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="../../rustc_ast/ast/struct.InlineAsmOptions.html">rustc_ast::InlineAsmOptions</a>;
+<span class="kw">use </span><a href="../../rustc_data_structures/fx/type.FxIndexMap.html">rustc_data_structures::fx::FxIndexMap</a>;
+<span class="kw">use </span><a href="../../rustc_lint_defs/enum.Applicability.html">rustc_errors::Applicability</a>;
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../rustc_hir/def/index.html">rustc_hir::def</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>};
+<span class="kw">use </span>rustc_hir::intravisit::{<a class="self" href="../../rustc_hir/intravisit/index.html">self</a>, <a href="../../rustc_hir/intravisit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_hir::{<a href="../../rustc_hir/hir/struct.Expr.html">Expr</a>, <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_hir/hir_id/type.HirIdMap.html">HirIdMap</a>, <a href="../../rustc_hir/hir_id/type.HirIdSet.html">HirIdSet</a>};
+<span class="kw">use </span><a href="../../rustc_index/vec/struct.IndexVec.html">rustc_index::vec::IndexVec</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">rustc_middle::ty::query::Providers</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">DefIdTree</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/closure/type.RootVariableMinCaptureList.html">RootVariableMinCaptureList</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_lint_defs/index.html">rustc_session::lint</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_span::{BytePos, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>};
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/vec_deque/struct.VecDeque.html">std::collections::VecDeque</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/index.html">std::io</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/prelude/index.html">std::io::prelude</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">std::rc::Rc</a>;
+
+<span class="kw">mod </span><a href="liveness/rwu_table.rs.html#1-145">rwu_table</a>;
+
+<a class="macro" href="../../rustc_macros/rustc_macros/macro.newtype_index.html">rustc_index::newtype_index! </a>{
+    <span class="kw">pub struct </span><a href="#109-113">Variable</a> {
+        DEBUG_FORMAT = <span class="string">&quot;v({})&quot;</span>,
+    }
+}
+
+<a class="macro" href="../../rustc_macros/rustc_macros/macro.newtype_index.html">rustc_index::newtype_index! </a>{
+    <span class="kw">pub struct </span><a href="#115-119">LiveNode</a> {
+        DEBUG_FORMAT = <span class="string">&quot;ln({})&quot;</span>,
+    }
+}
+
+<span class="attribute">#[derive(Copy, Clone, PartialEq, Debug)]
+</span><span class="kw">enum </span>LiveNodeKind {
+    UpvarNode(<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    ExprNode(<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>),
+    VarDefNode(<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>),
+    ClosureNode,
+    ExitNode,
+}
+
+<span class="kw">fn </span>live_node_kind_to_string(lnk: <a href="#122">LiveNodeKind</a>, tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+    <span class="kw">let </span>sm = <a href="#130">tcx</a>.sess.source_map();
+    <span class="kw">match </span><a href="#130">lnk</a> {
+        <a href="#123">UpvarNode</a>(s) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;Upvar node [{}]&quot;</span>, sm.span_to_diagnostic_string(s)),
+        <a href="#124">ExprNode</a>(s, <span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;Expr node [{}]&quot;</span>, sm.span_to_diagnostic_string(s)),
+        <a href="#125">VarDefNode</a>(s, <span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;Var def node [{}]&quot;</span>, sm.span_to_diagnostic_string(s)),
+        <a href="#126">ClosureNode</a> =&gt; <span class="string">&quot;Closure node&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>(),
+        <a href="#127">ExitNode</a> =&gt; <span class="string">&quot;Exit node&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>(),
+    }
+}
+
+<span class="kw">fn </span>check_liveness(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) {
+    <span class="kw">let </span>local_def_id = <span class="kw">match </span><a href="#141">def_id</a>.as_local() {
+        <span class="prelude-val">None </span>=&gt; <span class="kw">return</span>,
+        <span class="prelude-val">Some</span>(def_id) =&gt; <a href="#144">def_id</a>,
+    };
+
+    <span class="comment">// Don&#39;t run unused pass for #[derive()]
+    </span><span class="kw">let </span>parent = <a href="#141">tcx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">local_parent</a>(<a href="#142">local_def_id</a>);
+    <span class="kw">if let </span>DefKind::Impl = <a href="#141">tcx</a>.def_kind(<a href="#148">parent</a>)
+        &amp;&amp; <a href="#141">tcx</a>.has_attr(<a href="#148">parent</a>.to_def_id(), sym::automatically_derived)
+    {
+        <span class="kw">return</span>;
+    }
+
+    <span class="comment">// Don&#39;t run unused pass for #[naked]
+    </span><span class="kw">if </span>tcx.has_attr(def_id, sym::naked) {
+        <span class="kw">return</span>;
+    }
+
+    <span class="kw">let </span><span class="kw-2">mut </span>maps = IrMaps::new(<a href="#141">tcx</a>);
+    <span class="kw">let </span>body_id = <a href="#141">tcx</a>.hir().body_owned_by(<a href="#142">local_def_id</a>);
+    <span class="kw">let </span>hir_id = <a href="#141">tcx</a>.hir().body_owner(<a href="#161">body_id</a>);
+    <span class="kw">let </span>body = <a href="#141">tcx</a>.hir().body(<a href="#161">body_id</a>);
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(upvars) = <a href="#141">tcx</a>.upvars_mentioned(<a href="#141">def_id</a>) {
+        <span class="kw">for </span><span class="kw-2">&amp;</span>var_hir_id <span class="kw">in </span>upvars.keys() {
+            <span class="kw">let </span>var_name = tcx.hir().name(var_hir_id);
+            maps.add_variable(Upvar(var_hir_id, var_name));
+        }
+    }
+
+    <span class="comment">// gather up the various local variables, significant expressions,
+    // and so forth:
+    </span><a href="#160">maps</a>.<a href="../../rustc_hir/intravisit/trait.Visitor.html">visit_body</a>(<a href="#163">body</a>);
+
+    <span class="comment">// compute liveness
+    </span><span class="kw">let </span><span class="kw-2">mut </span>lsets = Liveness::new(<span class="kw-2">&amp;mut </span><a href="#160">maps</a>, <a href="#142">local_def_id</a>);
+    <span class="kw">let </span>entry_ln = <a href="#177">lsets</a>.<a href="#702">compute</a>(<span class="kw-2">&amp;</span><a href="#163">body</a>, <a href="#162">hir_id</a>);
+    <a href="#177">lsets</a>.<a href="#631">log_liveness</a>(<a href="#178">entry_ln</a>, <a href="#161">body_id</a>.hir_id);
+
+    <span class="comment">// check for various error conditions
+    </span><a href="#177">lsets</a>.<a href="../../rustc_hir/intravisit/trait.Visitor.html">visit_body</a>(<a href="#163">body</a>);
+    <a href="#177">lsets</a>.<a href="#1473">warn_about_unused_upvars</a>(<a href="#178">entry_ln</a>);
+    <a href="#177">lsets</a>.<a href="#1523">warn_about_unused_args</a>(<a href="#163">body</a>, <a href="#178">entry_ln</a>);
+}
+
+<span class="kw">pub fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <span class="kw-2">*</span><a href="#187">providers</a> = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a> { <a href="#141">check_liveness</a>, ..<span class="kw-2">*</span><a href="#187">providers</a> };
+}
+
+<span class="comment">// ______________________________________________________________________
+// Creating ir_maps
+//
+// This is the first pass and the one that drives the main
+// computation.  It walks up and down the IR once.  On the way down,
+// we count for each function the number of variables as well as
+// liveness nodes.  A liveness node is basically an expression or
+// capture clause that does something of interest: either it has
+// interesting control flow or it uses/defines a local variable.
+//
+// On the way back up, at each function node we create liveness sets
+// (we now know precisely how big to make our various vectors and so
+// forth) and then do the data-flow propagation to compute the set
+// of live variables at each program point.
+//
+// Finally, we run back over the IR one last time and, using the
+// computed liveness, check various safety conditions.  For example,
+// there must be no live nodes at the definition site for a variable
+// unless it has an initializer.  Similarly, each non-mutable local
+// variable must not be assigned if there is some successor
+// assignment.  And so forth.
+
+</span><span class="kw">struct </span>CaptureInfo {
+    ln: <a href="#115-119">LiveNode</a>,
+    var_hid: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">struct </span>LocalInfo {
+    id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    is_shorthand: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">enum </span>VarKind {
+    Param(<a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>),
+    Local(<a href="#219">LocalInfo</a>),
+    Upvar(<a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>),
+}
+
+<span class="kw">struct </span>CollectLitsVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    lit_exprs: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>CollectLitsVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">if let </span>hir::ExprKind::Lit(<span class="kw">_</span>) = <a href="#237">expr</a>.kind {
+            <a class="self" href="#237">self</a>.lit_exprs.push(<a href="#237">expr</a>);
+        }
+        intravisit::walk_expr(<a class="self" href="#237">self</a>, <a href="#237">expr</a>);
+    }
+}
+
+<span class="kw">struct </span>IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    live_node_map: HirIdMap&lt;<a href="#115-119">LiveNode</a>&gt;,
+    variable_map: HirIdMap&lt;<a href="#109-113">Variable</a>&gt;,
+    capture_info_map: HirIdMap&lt;Rc&lt;Vec&lt;<a href="#213">CaptureInfo</a>&gt;&gt;&gt;,
+    var_kinds: IndexVec&lt;<a href="#109-113">Variable</a>, <a href="#226">VarKind</a>&gt;,
+    lnks: IndexVec&lt;<a href="#115-119">LiveNode</a>, <a href="#122">LiveNodeKind</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#245">IrMaps</a> {
+            <a href="#255">tcx</a>,
+            live_node_map: HirIdMap::default(),
+            variable_map: HirIdMap::default(),
+            capture_info_map: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            var_kinds: IndexVec::new(),
+            lnks: IndexVec::new(),
+        }
+    }
+
+    <span class="kw">fn </span>add_live_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lnk: <a href="#122">LiveNodeKind</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">let </span>ln = <a class="self" href="#266">self</a>.lnks.push(<a href="#266">lnk</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} is of kind {}&quot;</span>, ln, live_node_kind_to_string(lnk, <span class="self">self</span>.tcx));
+
+        <a href="#267">ln</a>
+    }
+
+    <span class="kw">fn </span>add_live_node_for_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, lnk: <a href="#122">LiveNodeKind</a>) {
+        <span class="kw">let </span>ln = <a class="self" href="#274">self</a>.<a href="#266">add_live_node</a>(<a href="#274">lnk</a>);
+        <a class="self" href="#274">self</a>.live_node_map.insert(<a href="#274">hir_id</a>, <a href="#275">ln</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} is node {:?}&quot;</span>, ln, hir_id);
+    }
+
+    <span class="kw">fn </span>add_variable(<span class="kw-2">&amp;mut </span><span class="self">self</span>, vk: <a href="#226">VarKind</a>) -&gt; <a href="#109-113">Variable</a> {
+        <span class="kw">let </span>v = <a class="self" href="#281">self</a>.var_kinds.push(<a href="#281">vk</a>);
+
+        <span class="kw">match </span><a href="#281">vk</a> {
+            <a href="#228">Local</a>(<a href="#219">LocalInfo</a> { id: node_id, .. }) | <a href="#227">Param</a>(node_id, <span class="kw">_</span>) | <a href="#229">Upvar</a>(node_id, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#281">self</a>.variable_map.insert(<a href="#285">node_id</a>, <a href="#282">v</a>);
+            }
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} is {:?}&quot;</span>, v, vk);
+
+        <a href="#282">v</a>
+    }
+
+    <span class="kw">fn </span>variable(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#109-113">Variable</a> {
+        <span class="kw">match </span><a class="self" href="#295">self</a>.variable_map.get(<span class="kw-2">&amp;</span><a href="#295">hir_id</a>) {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>var) =&gt; <a href="#297">var</a>,
+            <span class="prelude-val">None </span>=&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(span, <span class="string">&quot;no variable registered for id {:?}&quot;</span>, hir_id);
+            }
+        }
+    }
+
+    <span class="kw">fn </span>variable_name(<span class="kw-2">&amp;</span><span class="self">self</span>, var: <a href="#109-113">Variable</a>) -&gt; <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a> {
+        <span class="kw">match </span><a class="self" href="#304">self</a>.var_kinds[<a href="#304">var</a>] {
+            <a href="#228">Local</a>(<a href="#219">LocalInfo</a> { name, .. }) | <a href="#227">Param</a>(<span class="kw">_</span>, name) | <a href="#229">Upvar</a>(<span class="kw">_</span>, name) =&gt; <a href="#306">name</a>,
+        }
+    }
+
+    <span class="kw">fn </span>variable_is_shorthand(<span class="kw-2">&amp;</span><span class="self">self</span>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a class="self" href="#310">self</a>.var_kinds[<a href="#310">var</a>] {
+            <a href="#228">Local</a>(<a href="#219">LocalInfo</a> { is_shorthand, .. }) =&gt; <a href="#312">is_shorthand</a>,
+            <a href="#227">Param</a>(..) | <a href="#229">Upvar</a>(..) =&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">fn </span>set_captures(<span class="kw-2">&amp;mut </span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, cs: Vec&lt;<a href="#213">CaptureInfo</a>&gt;) {
+        <a class="self" href="#317">self</a>.capture_info_map.insert(<a href="#317">hir_id</a>, Rc::new(<a href="#317">cs</a>));
+    }
+
+    <span class="kw">fn </span>collect_shorthand_field_ids(<span class="kw-2">&amp;</span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="../../rustc_hir/hir_id/type.HirIdSet.html">HirIdSet</a> {
+        <span class="comment">// For struct patterns, take note of which fields used shorthand
+        // (`x` rather than `x: x`).
+        </span><span class="kw">let </span><span class="kw-2">mut </span>shorthand_field_ids = HirIdSet::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>pats = VecDeque::new();
+        <a href="#325">pats</a>.push_back(<a href="#321">pat</a>);
+
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(pat) = pats.pop_front() {
+            <span class="kw">use </span>rustc_hir::PatKind::<span class="kw-2">*</span>;
+            <span class="kw">match </span><span class="kw-2">&amp;</span>pat.kind {
+                Binding(.., inner_pat) =&gt; {
+                    pats.extend(inner_pat.iter());
+                }
+                Struct(<span class="kw">_</span>, fields, <span class="kw">_</span>) =&gt; {
+                    <span class="kw">let </span>(short, not_short): (Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>) =
+                        fields.iter().partition(|f| f.is_shorthand);
+                    shorthand_field_ids.extend(short.iter().map(|f| f.pat.hir_id));
+                    pats.extend(not_short.iter().map(|f| f.pat));
+                }
+                Ref(inner_pat, <span class="kw">_</span>) | Box(inner_pat) =&gt; {
+                    pats.push_back(inner_pat);
+                }
+                TupleStruct(<span class="kw">_</span>, inner_pats, <span class="kw">_</span>) | Tuple(inner_pats, <span class="kw">_</span>) | Or(inner_pats) =&gt; {
+                    pats.extend(inner_pats.iter());
+                }
+                Slice(pre_pats, inner_pat, post_pats) =&gt; {
+                    pats.extend(pre_pats.iter());
+                    pats.extend(inner_pat.iter());
+                    pats.extend(post_pats.iter());
+                }
+                <span class="kw">_ </span>=&gt; {}
+            }
+        }
+
+        <a href="#324">shorthand_field_ids</a>
+    }
+
+    <span class="kw">fn </span>add_from_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span>shorthand_field_ids = <a class="self" href="#358">self</a>.<a href="#321">collect_shorthand_field_ids</a>(<a href="#358">pat</a>);
+
+        <a href="#358">pat</a>.each_binding(|<span class="kw">_</span>, hir_id, <span class="kw">_</span>, ident| {
+            <a class="self" href="#358">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#361">hir_id</a>, <a href="#125">VarDefNode</a>(<a href="#361">ident</a>.span, <a href="#361">hir_id</a>));
+            <a class="self" href="#358">self</a>.<a href="#281">add_variable</a>(<a href="#228">Local</a>(<a href="#219">LocalInfo</a> {
+                id: <a href="#361">hir_id</a>,
+                name: <a href="#361">ident</a>.name,
+                is_shorthand: <a href="#359">shorthand_field_ids</a>.contains(<span class="kw-2">&amp;</span><a href="#361">hir_id</a>),
+            }));
+        });
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_local(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Local&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#373">self</a>.<a href="#358">add_from_pat</a>(<span class="kw-2">&amp;</span><a href="#373">local</a>.pat);
+        <span class="kw">if </span>local.els.is_some() {
+            <a class="self" href="#373">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#373">local</a>.hir_id, <a href="#124">ExprNode</a>(<a href="#373">local</a>.span, <a href="#373">local</a>.hir_id));
+        }
+        intravisit::walk_local(<a class="self" href="#373">self</a>, <a href="#373">local</a>);
+    }
+
+    <span class="kw">fn </span>visit_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, arm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Arm&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#381">self</a>.<a href="#358">add_from_pat</a>(<span class="kw-2">&amp;</span><a href="#381">arm</a>.pat);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(hir::Guard::IfLet(<span class="kw-2">ref </span>let_expr)) = <a href="#381">arm</a>.guard {
+            <a class="self" href="#381">self</a>.<a href="#358">add_from_pat</a>(<a href="#383">let_expr</a>.pat);
+        }
+        intravisit::walk_arm(<a class="self" href="#381">self</a>, <a href="#381">arm</a>);
+    }
+
+    <span class="kw">fn </span>visit_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, param: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Param&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span>shorthand_field_ids = <a class="self" href="#389">self</a>.<a href="#321">collect_shorthand_field_ids</a>(<a href="#389">param</a>.pat);
+        <a href="#389">param</a>.pat.each_binding(|_bm, hir_id, _x, ident| {
+            <span class="kw">let </span>var = <span class="kw">match </span><a href="#389">param</a>.pat.kind {
+                rustc_hir::PatKind::Struct(..) =&gt; <a href="#228">Local</a>(<a href="#219">LocalInfo</a> {
+                    id: <a href="#391">hir_id</a>,
+                    name: <a href="#391">ident</a>.name,
+                    is_shorthand: <a href="#390">shorthand_field_ids</a>.contains(<span class="kw-2">&amp;</span><a href="#391">hir_id</a>),
+                }),
+                <span class="kw">_ </span>=&gt; <a href="#227">Param</a>(<a href="#391">hir_id</a>, <a href="#391">ident</a>.name),
+            };
+            <a class="self" href="#389">self</a>.<a href="#281">add_variable</a>(<a href="#392">var</a>);
+        });
+        intravisit::walk_param(<a class="self" href="#389">self</a>, <a href="#389">param</a>);
+    }
+
+    <span class="kw">fn </span>visit_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">match </span><a href="#405">expr</a>.kind {
+            <span class="comment">// live nodes required for uses or definitions of variables:
+            </span>hir::ExprKind::Path(hir::QPath::Resolved(<span class="kw">_</span>, <span class="kw-2">ref </span>path)) =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;expr {}: path that leads to {:?}&quot;</span>, expr.hir_id, path.res);
+                <span class="kw">if let </span>Res::Local(_var_hir_id) = <a href="#408">path</a>.res {
+                    <a class="self" href="#405">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#405">expr</a>.hir_id, <a href="#124">ExprNode</a>(<a href="#405">expr</a>.span, <a href="#405">expr</a>.hir_id));
+                }
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+            <a href="../../rustc_hir/hir/enum.ExprKind.html">hir::ExprKind::Closure</a> { .. } =&gt; {
+                <span class="comment">// Interesting control flow (for loops can contain labeled
+                // breaks or continues)
+                </span><a class="self" href="#405">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#405">expr</a>.hir_id, <a href="#124">ExprNode</a>(<a href="#405">expr</a>.span, <a href="#405">expr</a>.hir_id));
+
+                <span class="comment">// Make a live_node for each mentioned variable, with the span
+                // being the location that the variable is used.  This results
+                // in better error messages than just pointing at the closure
+                // construction site.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>call_caps = Vec::new();
+                <span class="kw">let </span>closure_def_id = <a class="self" href="#405">self</a>.tcx.hir().local_def_id(<a href="#405">expr</a>.hir_id);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(upvars) = <a class="self" href="#405">self</a>.tcx.upvars_mentioned(<a href="#425">closure_def_id</a>) {
+                    <a href="#424">call_caps</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#426">upvars</a>.keys().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|var_id| {
+                        <span class="kw">let </span>upvar = <a href="#426">upvars</a>[<a href="#427">var_id</a>];
+                        <span class="kw">let </span>upvar_ln = <a class="self" href="#405">self</a>.<a href="#266">add_live_node</a>(<a href="#123">UpvarNode</a>(<a href="#428">upvar</a>.span));
+                        <a href="#213">CaptureInfo</a> { ln: <a href="#429">upvar_ln</a>, var_hid: <span class="kw-2">*</span><a href="#427">var_id</a> }
+                    }));
+                }
+                <a class="self" href="#405">self</a>.<a href="#317">set_captures</a>(<a href="#405">expr</a>.hir_id, <a href="#424">call_caps</a>);
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+
+            hir::ExprKind::Let(let_expr) =&gt; {
+                <a class="self" href="#405">self</a>.<a href="#358">add_from_pat</a>(<a href="#437">let_expr</a>.pat);
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+
+            <span class="comment">// live nodes required for interesting control flow:
+            </span>hir::ExprKind::If(..)
+            | hir::ExprKind::Match(..)
+            | hir::ExprKind::Loop(..)
+            | hir::ExprKind::Yield(..) =&gt; {
+                <a class="self" href="#405">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#405">expr</a>.hir_id, <a href="#124">ExprNode</a>(<a href="#405">expr</a>.span, <a href="#405">expr</a>.hir_id));
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+            hir::ExprKind::Binary(op, ..) <span class="kw">if </span><a href="#450">op</a>.node.is_lazy() =&gt; {
+                <a class="self" href="#405">self</a>.<a href="#274">add_live_node_for_node</a>(<a href="#405">expr</a>.hir_id, <a href="#124">ExprNode</a>(<a href="#405">expr</a>.span, <a href="#405">expr</a>.hir_id));
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+
+            <span class="comment">// otherwise, live nodes are not required:
+            </span>hir::ExprKind::Index(..)
+            | hir::ExprKind::Field(..)
+            | hir::ExprKind::Array(..)
+            | hir::ExprKind::Call(..)
+            | hir::ExprKind::MethodCall(..)
+            | hir::ExprKind::Tup(..)
+            | hir::ExprKind::Binary(..)
+            | hir::ExprKind::AddrOf(..)
+            | hir::ExprKind::Cast(..)
+            | hir::ExprKind::DropTemps(..)
+            | hir::ExprKind::Unary(..)
+            | hir::ExprKind::Break(..)
+            | hir::ExprKind::Continue(<span class="kw">_</span>)
+            | hir::ExprKind::Lit(<span class="kw">_</span>)
+            | hir::ExprKind::ConstBlock(..)
+            | hir::ExprKind::Ret(..)
+            | hir::ExprKind::Block(..)
+            | hir::ExprKind::Assign(..)
+            | hir::ExprKind::AssignOp(..)
+            | hir::ExprKind::Struct(..)
+            | hir::ExprKind::Repeat(..)
+            | hir::ExprKind::InlineAsm(..)
+            | hir::ExprKind::Box(..)
+            | hir::ExprKind::Type(..)
+            | hir::ExprKind::Err
+            | hir::ExprKind::Path(hir::QPath::TypeRelative(..))
+            | hir::ExprKind::Path(hir::QPath::LangItem(..)) =&gt; {
+                intravisit::walk_expr(<a class="self" href="#405">self</a>, <a href="#405">expr</a>);
+            }
+        }
+    }
+}
+
+<span class="comment">// ______________________________________________________________________
+// Computing liveness sets
+//
+// Actually we compute just a bit more than just liveness, but we use
+// the same basic propagation framework in all cases.
+
+</span><span class="kw">const </span>ACC_READ: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = <span class="number">1</span>;
+<span class="kw">const </span>ACC_WRITE: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = <span class="number">2</span>;
+<span class="kw">const </span>ACC_USE: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = <span class="number">4</span>;
+
+<span class="kw">struct </span>Liveness&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    ir: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    typeck_results: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ty::TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    closure_min_captures: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>RootVariableMinCaptureList&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    successors: IndexVec&lt;<a href="#115-119">LiveNode</a>, <span class="prelude-ty">Option</span>&lt;<a href="#115-119">LiveNode</a>&gt;&gt;,
+    rwu_table: <a href="liveness/rwu_table.rs.html#13">rwu_table::RWUTable</a>,
+
+    <span class="doccomment">/// A live node representing a point of execution before closure entry &amp;
+    /// after closure exit. Used to calculate liveness of captured variables
+    /// through calls to the same closure. Used for Fn &amp; FnMut closures only.
+    </span>closure_ln: <a href="#115-119">LiveNode</a>,
+    <span class="doccomment">/// A live node representing every &#39;exit&#39; from the function, whether it be
+    /// by explicit return, panic, or other means.
+    </span>exit_ln: <a href="#115-119">LiveNode</a>,
+
+    <span class="comment">// mappings from loop node ID to LiveNode
+    // (&quot;break&quot; label should map to loop node ID,
+    // it probably doesn&#39;t now)
+    </span>break_ln: HirIdMap&lt;<a href="#115-119">LiveNode</a>&gt;,
+    cont_ln: HirIdMap&lt;<a href="#115-119">LiveNode</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Liveness&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new(ir: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>IrMaps&lt;<span class="lifetime">&#39;tcx</span>&gt;, body_owner: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>) -&gt; Liveness&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>typeck_results = <a href="#523">ir</a>.tcx.typeck(<a href="#523">body_owner</a>);
+        <span class="kw">let </span>param_env = <a href="#523">ir</a>.tcx.param_env(<a href="#523">body_owner</a>);
+        <span class="kw">let </span>closure_min_captures = <a href="#524">typeck_results</a>.closure_min_captures.get(<span class="kw-2">&amp;</span><a href="#523">body_owner</a>);
+        <span class="kw">let </span>closure_ln = <a href="#523">ir</a>.<a href="#266">add_live_node</a>(<a href="#126">ClosureNode</a>);
+        <span class="kw">let </span>exit_ln = <a href="#523">ir</a>.<a href="#266">add_live_node</a>(<a href="#127">ExitNode</a>);
+
+        <span class="kw">let </span>num_live_nodes = <a href="#523">ir</a>.lnks.len();
+        <span class="kw">let </span>num_vars = <a href="#523">ir</a>.var_kinds.len();
+
+        <a href="#499">Liveness</a> {
+            <a href="#523">ir</a>,
+            <a href="#524">typeck_results</a>,
+            <a href="#525">param_env</a>,
+            <a href="#526">closure_min_captures</a>,
+            successors: IndexVec::from_elem_n(<span class="prelude-val">None</span>, <a href="#530">num_live_nodes</a>),
+            rwu_table: rwu_table::RWUTable::new(<a href="#530">num_live_nodes</a>, <a href="#531">num_vars</a>),
+            <a href="#527">closure_ln</a>,
+            <a href="#528">exit_ln</a>,
+            break_ln: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            cont_ln: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        }
+    }
+
+    <span class="kw">fn </span>live_node(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">match </span><a class="self" href="#547">self</a>.ir.live_node_map.get(<span class="kw-2">&amp;</span><a href="#547">hir_id</a>) {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ln) =&gt; <a href="#549">ln</a>,
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="comment">// This must be a mismatch between the ir_map construction
+                // above and the propagation code below; the two sets of
+                // code have to agree about which AST nodes are worth
+                // creating liveness nodes for.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(span, <span class="string">&quot;no live node registered for node {:?}&quot;</span>, hir_id);
+            }
+        }
+    }
+
+    <span class="kw">fn </span>variable(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#109-113">Variable</a> {
+        <a class="self" href="#560">self</a>.ir.<a href="#295">variable</a>(<a href="#560">hir_id</a>, <a href="#560">span</a>)
+    }
+
+    <span class="kw">fn </span>define_bindings_in_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw-2">mut </span>succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="comment">// In an or-pattern, only consider the first pattern; any later patterns
+        // must have the same bindings, and we also consider the first pattern
+        // to be the &quot;authoritative&quot; set of ids.
+        </span><a href="#564">pat</a>.each_binding_or_first(<span class="kw-2">&amp;mut </span>|<span class="kw">_</span>, hir_id, pat_sp, ident| {
+            <span class="kw">let </span>ln = <a class="self" href="#564">self</a>.<a href="#547">live_node</a>(<a href="#568">hir_id</a>, <a href="#568">pat_sp</a>);
+            <span class="kw">let </span>var = <a class="self" href="#564">self</a>.<a href="#560">variable</a>(<a href="#568">hir_id</a>, <a href="#568">ident</a>.span);
+            <a class="self" href="#564">self</a>.<a href="#652">init_from_succ</a>(<a href="#569">ln</a>, <a href="#564">succ</a>);
+            <a class="self" href="#564">self</a>.<a href="#672">define</a>(<a href="#569">ln</a>, <a href="#570">var</a>);
+            <a href="#564">succ</a> = <a href="#569">ln</a>;
+        });
+        <a href="#564">succ</a>
+    }
+
+    <span class="kw">fn </span>live_on_entry(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#578">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#104">get_reader</a>(<a href="#578">ln</a>, <a href="#578">var</a>)
+    }
+
+    <span class="comment">// Is this variable live on entry to any of its successor nodes?
+    </span><span class="kw">fn </span>live_on_exit(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>successor = <a class="self" href="#583">self</a>.successors[<a href="#583">ln</a>].unwrap();
+        <a class="self" href="#583">self</a>.<a href="#578">live_on_entry</a>(<a href="#584">successor</a>, <a href="#583">var</a>)
+    }
+
+    <span class="kw">fn </span>used_on_entry(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#588">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#114">get_used</a>(<a href="#588">ln</a>, <a href="#588">var</a>)
+    }
+
+    <span class="kw">fn </span>assigned_on_entry(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#592">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#109">get_writer</a>(<a href="#592">ln</a>, <a href="#592">var</a>)
+    }
+
+    <span class="kw">fn </span>assigned_on_exit(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>successor = <a class="self" href="#596">self</a>.successors[<a href="#596">ln</a>].unwrap();
+        <a class="self" href="#596">self</a>.<a href="#592">assigned_on_entry</a>(<a href="#597">successor</a>, <a href="#596">var</a>)
+    }
+
+    <span class="kw">fn </span>write_vars&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, wr: <span class="kw-2">&amp;mut </span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html">Write</a>, <span class="kw-2">mut </span>test: F) -&gt; io::Result&lt;()&gt;
+    <span class="kw">where
+        </span>F: FnMut(<a href="#109-113">Variable</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    {
+        <span class="kw">for </span>var_idx <span class="kw">in </span><span class="number">0</span>..<span class="self">self</span>.ir.var_kinds.len() {
+            <span class="kw">let </span>var = Variable::from(var_idx);
+            <span class="kw">if </span>test(var) {
+                <span class="macro">write!</span>(wr, <span class="string">&quot; {:?}&quot;</span>, var)<span class="question-mark">?</span>;
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="attribute">#[allow(unused_must_use)]
+    </span><span class="kw">fn </span>ln_str(<span class="kw-2">&amp;</span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>wr = Vec::new();
+        {
+            <span class="kw">let </span>wr = <span class="kw-2">&amp;mut </span><a href="#616">wr</a> <span class="kw">as </span><span class="kw-2">&amp;mut </span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html">Write</a>;
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#618">wr</a>, <span class="string">&quot;[{:?} of kind {:?} reads&quot;</span>, ln, <span class="self">self</span>.ir.lnks[ln]);
+            <a class="self" href="#615">self</a>.<a href="#601-603">write_vars</a>(<a href="#618">wr</a>, |var| <a class="self" href="#615">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#104">get_reader</a>(<a href="#615">ln</a>, <a href="#620">var</a>));
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#618">wr</a>, <span class="string">&quot;  writes&quot;</span>);
+            <a class="self" href="#615">self</a>.<a href="#601-603">write_vars</a>(<a href="#618">wr</a>, |var| <a class="self" href="#615">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#109">get_writer</a>(<a href="#615">ln</a>, <a href="#622">var</a>));
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#618">wr</a>, <span class="string">&quot;  uses&quot;</span>);
+            <a class="self" href="#615">self</a>.<a href="#601-603">write_vars</a>(<a href="#618">wr</a>, |var| <a class="self" href="#615">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#114">get_used</a>(<a href="#615">ln</a>, <a href="#624">var</a>));
+
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#618">wr</a>, <span class="string">&quot;  precedes {:?}]&quot;</span>, <span class="self">self</span>.successors[ln]);
+        }
+        String::from_utf8(<a href="#616">wr</a>).unwrap()
+    }
+
+    <span class="kw">fn </span>log_liveness(<span class="kw-2">&amp;</span><span class="self">self</span>, entry_ln: <a href="#115-119">LiveNode</a>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <span class="comment">// hack to skip the loop unless debug! is enabled:
+        </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;^^ liveness computation results for body {} (entry={:?})&quot;</span>,
+            {
+                <span class="kw">for </span>ln_idx <span class="kw">in </span><span class="number">0</span>..<span class="self">self</span>.ir.lnks.len() {
+                    <span class="macro">debug!</span>(<span class="string">&quot;{:?}&quot;</span>, <span class="self">self</span>.ln_str(LiveNode::from(ln_idx)));
+                }
+                hir_id
+            },
+            entry_ln
+        );
+    }
+
+    <span class="kw">fn </span>init_empty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, succ_ln: <a href="#115-119">LiveNode</a>) {
+        <a class="self" href="#645">self</a>.successors[<a href="#645">ln</a>] = <span class="prelude-val">Some</span>(<a href="#645">succ_ln</a>);
+
+        <span class="comment">// It is not necessary to initialize the RWUs here because they are all
+        // empty when created, and the sets only grow during iterations.
+    </span>}
+
+    <span class="kw">fn </span>init_from_succ(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, succ_ln: <a href="#115-119">LiveNode</a>) {
+        <span class="comment">// more efficient version of init_empty() / merge_from_succ()
+        </span><a class="self" href="#652">self</a>.successors[<a href="#652">ln</a>] = <span class="prelude-val">Some</span>(<a href="#652">succ_ln</a>);
+        <a class="self" href="#652">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#77">copy</a>(<a href="#652">ln</a>, <a href="#652">succ_ln</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;init_from_succ(ln={}, succ={})&quot;</span>, <span class="self">self</span>.ln_str(ln), <span class="self">self</span>.ln_str(succ_ln));
+    }
+
+    <span class="kw">fn </span>merge_from_succ(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, succ_ln: <a href="#115-119">LiveNode</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">if </span>ln == succ_ln {
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        }
+
+        <span class="kw">let </span>changed = <a class="self" href="#659">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#88">union</a>(<a href="#659">ln</a>, <a href="#659">succ_ln</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;merge_from_succ(ln={:?}, succ={}, changed={})&quot;</span>, ln, <span class="self">self</span>.ln_str(succ_ln), changed);
+        <a href="#664">changed</a>
+    }
+
+    <span class="comment">// Indicates that a local variable was *defined*; we know that no
+    // uses of the variable can precede the definition (resolve checks
+    // this) so we just clear out all the data.
+    </span><span class="kw">fn </span>define(<span class="kw-2">&amp;mut </span><span class="self">self</span>, writer: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) {
+        <span class="kw">let </span>used = <a class="self" href="#672">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#114">get_used</a>(<a href="#672">writer</a>, <a href="#672">var</a>);
+        <a class="self" href="#672">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#129">set</a>(<a href="#672">writer</a>, <a href="#672">var</a>, <a href="liveness/rwu_table.rs.html#5">rwu_table::RWU</a> { reader: <span class="bool-val">false</span>, writer: <span class="bool-val">false</span>, <a href="#673">used</a> });
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} defines {:?}: {}&quot;</span>, writer, var, <span class="self">self</span>.ln_str(writer));
+    }
+
+    <span class="comment">// Either read, write, or both depending on the acc bitset
+    </span><span class="kw">fn </span>acc(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>, acc: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} accesses[{:x}] {:?}: {}&quot;</span>, ln, acc, var, <span class="self">self</span>.ln_str(ln));
+
+        <span class="kw">let </span><span class="kw-2">mut </span>rwu = <a class="self" href="#679">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#119">get</a>(<a href="#679">ln</a>, <a href="#679">var</a>);
+
+        <span class="kw">if </span>(acc &amp; ACC_WRITE) != <span class="number">0 </span>{
+            <a href="#682">rwu</a>.reader = <span class="bool-val">false</span>;
+            <a href="#682">rwu</a>.writer = <span class="bool-val">true</span>;
+        }
+
+        <span class="comment">// Important: if we both read/write, must do read second
+        // or else the write will override.
+        </span><span class="kw">if </span>(acc &amp; ACC_READ) != <span class="number">0 </span>{
+            <a href="#682">rwu</a>.reader = <span class="bool-val">true</span>;
+        }
+
+        <span class="kw">if </span>(acc &amp; ACC_USE) != <span class="number">0 </span>{
+            <a href="#682">rwu</a>.used = <span class="bool-val">true</span>;
+        }
+
+        <a class="self" href="#679">self</a>.rwu_table.<a href="liveness/rwu_table.rs.html#129">set</a>(<a href="#679">ln</a>, <a href="#679">var</a>, <a href="#682">rwu</a>);
+    }
+
+    <span class="kw">fn </span>compute(<span class="kw-2">&amp;mut </span><span class="self">self</span>, body: <span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute: for body {:?}&quot;</span>, body.id().hir_id);
+
+        <span class="comment">// # Liveness of captured variables
+        //
+        // When computing the liveness for captured variables we take into
+        // account how variable is captured (ByRef vs ByValue) and what is the
+        // closure kind (Generator / FnOnce vs Fn / FnMut).
+        //
+        // Variables captured by reference are assumed to be used on the exit
+        // from the closure.
+        //
+        // In FnOnce closures, variables captured by value are known to be dead
+        // on exit since it is impossible to call the closure again.
+        //
+        // In Fn / FnMut closures, variables captured by value are live on exit
+        // if they are live on the entry to the closure, since only the closure
+        // itself can access them on subsequent calls.
+
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(closure_min_captures) = <a class="self" href="#702">self</a>.closure_min_captures {
+            <span class="comment">// Mark upvars captured by reference as used after closure exits.
+            </span><span class="kw">for </span>(<span class="kw-2">&amp;</span>var_hir_id, min_capture_list) <span class="kw">in </span>closure_min_captures {
+                <span class="kw">for </span>captured_place <span class="kw">in </span>min_capture_list {
+                    <span class="kw">match </span>captured_place.info.capture_kind {
+                        ty::UpvarCapture::ByRef(<span class="kw">_</span>) =&gt; {
+                            <span class="kw">let </span>var = <span class="self">self</span>.variable(
+                                var_hir_id,
+                                captured_place.get_capture_kind_span(<span class="self">self</span>.ir.tcx),
+                            );
+                            <span class="self">self</span>.acc(<span class="self">self</span>.exit_ln, var, ACC_READ | ACC_USE);
+                        }
+                        ty::UpvarCapture::ByValue =&gt; {}
+                    }
+                }
+            }
+        }
+
+        <span class="kw">let </span>succ = <a class="self" href="#702">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#702">body</a>.value, <a class="self" href="#702">self</a>.exit_ln);
+
+        <span class="kw">if </span><span class="self">self</span>.closure_min_captures.is_none() {
+            <span class="comment">// Either not a closure, or closure without any captured variables.
+            // No need to determine liveness of captured variables, since there
+            // are none.
+            </span><span class="kw">return </span><a href="#739">succ</a>;
+        }
+
+        <span class="kw">let </span>ty = <a class="self" href="#702">self</a>.typeck_results.node_type(<a href="#702">hir_id</a>);
+        <span class="kw">match </span><a href="#748">ty</a>.kind() {
+            ty::Closure(_def_id, substs) =&gt; <span class="kw">match </span><a href="#750">substs</a>.as_closure().kind() {
+                ty::ClosureKind::Fn =&gt; {}
+                ty::ClosureKind::FnMut =&gt; {}
+                ty::ClosureKind::FnOnce =&gt; <span class="kw">return </span><a href="#739">succ</a>,
+            },
+            ty::Generator(..) =&gt; <span class="kw">return </span><a href="#739">succ</a>,
+            <span class="kw">_ </span>=&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                    body.value.span,
+                    <span class="string">&quot;{} has upvars so it should have a closure type: {:?}&quot;</span>,
+                    hir_id,
+                    ty
+                );
+            }
+        };
+
+        <span class="comment">// Propagate through calls to the closure.
+        </span><span class="kw">loop </span>{
+            <a class="self" href="#702">self</a>.<a href="#652">init_from_succ</a>(<a class="self" href="#702">self</a>.closure_ln, <a href="#739">succ</a>);
+            <span class="kw">for </span>param <span class="kw">in </span>body.params {
+                param.pat.each_binding(|_bm, hir_id, _x, ident| {
+                    <span class="kw">let </span>var = <span class="self">self</span>.variable(hir_id, ident.span);
+                    <span class="self">self</span>.define(<span class="self">self</span>.closure_ln, var);
+                })
+            }
+
+            <span class="kw">if </span>!<span class="self">self</span>.merge_from_succ(<span class="self">self</span>.exit_ln, <span class="self">self</span>.closure_ln) {
+                <span class="kw">break</span>;
+            }
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(succ, <span class="self">self</span>.propagate_through_expr(<span class="kw-2">&amp;</span>body.value, <span class="self">self</span>.exit_ln));
+        }
+
+        <a href="#739">succ</a>
+    }
+
+    <span class="kw">fn </span>propagate_through_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, blk: <span class="kw-2">&amp;</span>hir::Block&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">if </span>blk.targeted_by_break {
+            <a class="self" href="#785">self</a>.break_ln.insert(<a href="#785">blk</a>.hir_id, <a href="#785">succ</a>);
+        }
+        <span class="kw">let </span>succ = <a class="self" href="#785">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#785">blk</a>.expr, <a href="#785">succ</a>);
+        <a href="#785">blk</a>.stmts.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">fold</a>(<a href="#789">succ</a>, |succ, stmt| <a class="self" href="#785">self</a>.<a href="#793">propagate_through_stmt</a>(<a href="#790">stmt</a>, <a href="#790">succ</a>))
+    }
+
+    <span class="kw">fn </span>propagate_through_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stmt: <span class="kw-2">&amp;</span>hir::Stmt&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">match </span><a href="#793">stmt</a>.kind {
+            hir::StmtKind::Local(<span class="kw-2">ref </span>local) =&gt; {
+                <span class="comment">// Note: we mark the variable as defined regardless of whether
+                // there is an initializer.  Initially I had thought to only mark
+                // the live variable as defined if it was initialized, and then we
+                // could check for uninit variables just by scanning what is live
+                // at the start of the function. But that doesn&#39;t work so well for
+                // immutable variables defined in a loop:
+                //     loop { let x; x = 5; }
+                // because the &quot;assignment&quot; loops back around and generates an error.
+                //
+                // So now we just check that variables defined w/o an
+                // initializer are not live at the point of their
+                // initialization, which is mildly more complex than checking
+                // once at the func header but otherwise equivalent.
+
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(els) = <a href="#795">local</a>.els {
+                    <span class="comment">// Eventually, `let pat: ty = init else { els };` is mostly equivalent to
+                    // `let (bindings, ...) = match init { pat =&gt; (bindings, ...), _ =&gt; els };`
+                    // except that extended lifetime applies at the `init` location.
+                    //
+                    //       (e)
+                    //        |
+                    //        v
+                    //      (expr)
+                    //      /   \
+                    //     |     |
+                    //     v     v
+                    // bindings  els
+                    //     |
+                    //     v
+                    // ( succ )
+                    //
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(init) = <a href="#795">local</a>.init {
+                        <span class="kw">let </span>else_ln = <a class="self" href="#793">self</a>.<a href="#785">propagate_through_block</a>(<a href="#810">els</a>, <a href="#793">succ</a>);
+                        <span class="kw">let </span>ln = <a class="self" href="#793">self</a>.<a href="#547">live_node</a>(<a href="#795">local</a>.hir_id, <a href="#795">local</a>.span);
+                        <a class="self" href="#793">self</a>.<a href="#652">init_from_succ</a>(<a href="#829">ln</a>, <a href="#793">succ</a>);
+                        <a class="self" href="#793">self</a>.<a href="#659">merge_from_succ</a>(<a href="#829">ln</a>, <a href="#828">else_ln</a>);
+                        <span class="kw">let </span>succ = <a class="self" href="#793">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#827">init</a>, <a href="#829">ln</a>);
+                        <a class="self" href="#793">self</a>.<a href="#564">define_bindings_in_pat</a>(<span class="kw-2">&amp;</span><a href="#795">local</a>.pat, <a href="#832">succ</a>)
+                    } <span class="kw">else </span>{
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                            stmt.span,
+                            <span class="string">&quot;variable is uninitialized but an unexpected else branch is found&quot;
+                        </span>)
+                    }
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>succ = <a class="self" href="#793">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#795">local</a>.init, <a href="#793">succ</a>);
+                    <a class="self" href="#793">self</a>.<a href="#564">define_bindings_in_pat</a>(<span class="kw-2">&amp;</span><a href="#795">local</a>.pat, <a href="#841">succ</a>)
+                }
+            }
+            hir::StmtKind::Item(..) =&gt; <a href="#793">succ</a>,
+            hir::StmtKind::Expr(<span class="kw-2">ref </span>expr) | hir::StmtKind::Semi(<span class="kw-2">ref </span>expr) =&gt; {
+                <a class="self" href="#793">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#846">expr</a>, <a href="#793">succ</a>)
+            }
+        }
+    }
+
+    <span class="kw">fn </span>propagate_through_exprs(<span class="kw-2">&amp;mut </span><span class="self">self</span>, exprs: <span class="kw-2">&amp;</span>[Expr&lt;<span class="lifetime">&#39;_</span>&gt;], succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <a href="#852">exprs</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">fold</a>(<a href="#852">succ</a>, |succ, expr| <a class="self" href="#852">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#853">expr</a>, <a href="#853">succ</a>))
+    }
+
+    <span class="kw">fn </span>propagate_through_opt_expr(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        opt_expr: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+        succ: <a href="#115-119">LiveNode</a>,
+    ) -&gt; <a href="#115-119">LiveNode</a> {
+        <a href="#858">opt_expr</a>.map_or(<a href="#859">succ</a>, |expr| <a class="self" href="#857">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#861">expr</a>, <a href="#859">succ</a>))
+    }
+
+    <span class="kw">fn </span>propagate_through_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;propagate_through_expr: {:?}&quot;</span>, expr);
+
+        <span class="kw">match </span><a href="#864">expr</a>.kind {
+            <span class="comment">// Interesting cases with control flow or which gen/kill
+            </span>hir::ExprKind::Path(hir::QPath::Resolved(<span class="kw">_</span>, <span class="kw-2">ref </span>path)) =&gt; {
+                <a class="self" href="#864">self</a>.<a href="#1234-1240">access_path</a>(<a href="#864">expr</a>.hir_id, <a href="#869">path</a>, <a href="#864">succ</a>, <a href="#495">ACC_READ</a> | <a href="#497">ACC_USE</a>)
+            }
+
+            hir::ExprKind::Field(<span class="kw-2">ref </span>e, <span class="kw">_</span>) =&gt; <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#873">e</a>, <a href="#864">succ</a>),
+
+            <a href="../../rustc_hir/hir/enum.ExprKind.html">hir::ExprKind::Closure</a> { .. } =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} is an ExprKind::Closure&quot;</span>, expr);
+
+                <span class="comment">// the construction of a closure itself is not important,
+                // but we have to consider the closed over variables.
+                </span><span class="kw">let </span>caps = <span class="self"><a href="#864">self</a>
+                    </span>.ir
+                    .capture_info_map
+                    .get(<span class="kw-2">&amp;</span><a href="#864">expr</a>.hir_id)
+                    .cloned()
+                    .unwrap_or_else(|| <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(expr.span, <span class="string">&quot;no registered caps&quot;</span>));
+
+                <a href="#880">caps</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">fold</a>(<a href="#864">succ</a>, |succ, cap| {
+                    <a class="self" href="#864">self</a>.<a href="#652">init_from_succ</a>(<a href="#887">cap</a>.ln, <a href="#887">succ</a>);
+                    <span class="kw">let </span>var = <a class="self" href="#864">self</a>.<a href="#560">variable</a>(<a href="#887">cap</a>.var_hid, <a href="#864">expr</a>.span);
+                    <a class="self" href="#864">self</a>.<a href="#679">acc</a>(<a href="#887">cap</a>.ln, <a href="#889">var</a>, <a href="#495">ACC_READ</a> | <a href="#497">ACC_USE</a>);
+                    <a href="#887">cap</a>.ln
+                })
+            }
+
+            hir::ExprKind::Let(let_expr) =&gt; {
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#895">let_expr</a>.init, <a href="#864">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#564">define_bindings_in_pat</a>(<a href="#895">let_expr</a>.pat, <a href="#896">succ</a>)
+            }
+
+            <span class="comment">// Note that labels have been resolved, so we don&#39;t need to look
+            // at the label ident
+            </span>hir::ExprKind::Loop(<span class="kw-2">ref </span>blk, ..) =&gt; <a class="self" href="#864">self</a>.<a href="#1247-1252">propagate_through_loop</a>(<a href="#864">expr</a>, <span class="kw-2">&amp;</span><a href="#902">blk</a>, <a href="#864">succ</a>),
+
+            hir::ExprKind::Yield(<span class="kw-2">ref </span>e, ..) =&gt; {
+                <span class="kw">let </span>yield_ln = <a class="self" href="#864">self</a>.<a href="#547">live_node</a>(<a href="#864">expr</a>.hir_id, <a href="#864">expr</a>.span);
+                <a class="self" href="#864">self</a>.<a href="#652">init_from_succ</a>(<a href="#905">yield_ln</a>, <a href="#864">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#659">merge_from_succ</a>(<a href="#905">yield_ln</a>, <a class="self" href="#864">self</a>.exit_ln);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#904">e</a>, <a href="#905">yield_ln</a>)
+            }
+
+            hir::ExprKind::If(<span class="kw-2">ref </span>cond, <span class="kw-2">ref </span>then, <span class="kw-2">ref </span>else_opt) =&gt; {
+                <span class="comment">//
+                //     (cond)
+                //       |
+                //       v
+                //     (expr)
+                //     /   \
+                //    |     |
+                //    v     v
+                //  (then)(els)
+                //    |     |
+                //    v     v
+                //   (  succ  )
+                //
+                </span><span class="kw">let </span>else_ln =
+                    <a class="self" href="#864">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#911">else_opt</a>.as_ref().map(|e| <span class="kw-2">&amp;**</span><a href="#926">e</a>), <a href="#864">succ</a>);
+                <span class="kw">let </span>then_ln = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#911">then</a>, <a href="#864">succ</a>);
+                <span class="kw">let </span>ln = <a class="self" href="#864">self</a>.<a href="#547">live_node</a>(<a href="#864">expr</a>.hir_id, <a href="#864">expr</a>.span);
+                <a class="self" href="#864">self</a>.<a href="#652">init_from_succ</a>(<a href="#928">ln</a>, <a href="#925">else_ln</a>);
+                <a class="self" href="#864">self</a>.<a href="#659">merge_from_succ</a>(<a href="#928">ln</a>, <a href="#927">then_ln</a>);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#911">cond</a>, <a href="#928">ln</a>)
+            }
+
+            hir::ExprKind::Match(<span class="kw-2">ref </span>e, arms, <span class="kw">_</span>) =&gt; {
+                <span class="comment">//
+                //      (e)
+                //       |
+                //       v
+                //     (expr)
+                //     / | \
+                //    |  |  |
+                //    v  v  v
+                //   (..arms..)
+                //    |  |  |
+                //    v  v  v
+                //   (  succ  )
+                //
+                //
+                </span><span class="kw">let </span>ln = <a class="self" href="#864">self</a>.<a href="#547">live_node</a>(<a href="#864">expr</a>.hir_id, <a href="#864">expr</a>.span);
+                <a class="self" href="#864">self</a>.<a href="#645">init_empty</a>(<a href="#949">ln</a>, <a href="#864">succ</a>);
+                <span class="kw">for </span>arm <span class="kw">in </span>arms {
+                    <span class="kw">let </span>body_succ = <span class="self">self</span>.propagate_through_expr(<span class="kw-2">&amp;</span>arm.body, succ);
+
+                    <span class="kw">let </span>guard_succ = arm.guard.as_ref().map_or(body_succ, |g| <span class="kw">match </span>g {
+                        hir::Guard::If(e) =&gt; <span class="self">self</span>.propagate_through_expr(e, body_succ),
+                        hir::Guard::IfLet(let_expr) =&gt; {
+                            <span class="kw">let </span>let_bind = <span class="self">self</span>.define_bindings_in_pat(let_expr.pat, body_succ);
+                            <span class="self">self</span>.propagate_through_expr(let_expr.init, let_bind)
+                        }
+                    });
+                    <span class="kw">let </span>arm_succ = <span class="self">self</span>.define_bindings_in_pat(<span class="kw-2">&amp;</span>arm.pat, guard_succ);
+                    <span class="self">self</span>.merge_from_succ(ln, arm_succ);
+                }
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#934">e</a>, <a href="#949">ln</a>)
+            }
+
+            hir::ExprKind::Ret(<span class="kw-2">ref </span>o_e) =&gt; {
+                <span class="comment">// Ignore succ and subst exit_ln.
+                </span><a class="self" href="#864">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#967">o_e</a>.as_ref().map(|e| <span class="kw-2">&amp;**</span><a href="#969">e</a>), <a class="self" href="#864">self</a>.exit_ln)
+            }
+
+            hir::ExprKind::Break(label, <span class="kw-2">ref </span>opt_expr) =&gt; {
+                <span class="comment">// Find which label this break jumps to
+                </span><span class="kw">let </span>target = <span class="kw">match </span><a href="#972">label</a>.target_id {
+                    <span class="prelude-val">Ok</span>(hir_id) =&gt; <a class="self" href="#864">self</a>.break_ln.get(<span class="kw-2">&amp;</span><a href="#975">hir_id</a>),
+                    <span class="prelude-val">Err</span>(err) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(expr.span, <span class="string">&quot;loop scope error: {}&quot;</span>, err),
+                }
+                .cloned();
+
+                <span class="comment">// Now that we know the label we&#39;re going to,
+                // look it up in the break loop nodes table
+
+                </span><span class="kw">match </span><a href="#974">target</a> {
+                    <span class="prelude-val">Some</span>(b) =&gt; <a class="self" href="#864">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#972">opt_expr</a>.as_ref().map(|e| <span class="kw-2">&amp;**</span><a href="#984">e</a>), <a href="#984">b</a>),
+                    <span class="prelude-val">None </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(expr.span, <span class="string">&quot;`break` to unknown label&quot;</span>),
+                }
+            }
+
+            hir::ExprKind::Continue(label) =&gt; {
+                <span class="comment">// Find which label this expr continues to
+                </span><span class="kw">let </span>sc = <a href="#989">label</a>
+                    .target_id
+                    .unwrap_or_else(|err| <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(expr.span, <span class="string">&quot;loop scope error: {}&quot;</span>, err));
+
+                <span class="comment">// Now that we know the label we&#39;re going to,
+                // look it up in the continue loop nodes table
+                </span><a class="self" href="#864">self</a>.cont_ln
+                    .get(<span class="kw-2">&amp;</span><a href="#991">sc</a>)
+                    .cloned()
+                    .unwrap_or_else(|| <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(expr.span, <span class="string">&quot;continue to unknown label&quot;</span>))
+            }
+
+            hir::ExprKind::Assign(<span class="kw-2">ref </span>l, <span class="kw-2">ref </span>r, <span class="kw">_</span>) =&gt; {
+                <span class="comment">// see comment on places in
+                // propagate_through_place_components()
+                </span><span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#1203">write_place</a>(<span class="kw-2">&amp;</span><a href="#1003">l</a>, <a href="#864">succ</a>, <a href="#496">ACC_WRITE</a>);
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#1145">propagate_through_place_components</a>(<span class="kw-2">&amp;</span><a href="#1003">l</a>, <a href="#1006">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1003">r</a>, <a href="#1007">succ</a>)
+            }
+
+            hir::ExprKind::AssignOp(<span class="kw">_</span>, <span class="kw-2">ref </span>l, <span class="kw-2">ref </span>r) =&gt; {
+                <span class="comment">// an overloaded assign op is like a method call
+                </span><span class="kw">if </span><span class="self">self</span>.typeck_results.is_method_call(expr) {
+                    <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1011">l</a>, <a href="#864">succ</a>);
+                    <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1011">r</a>, <a href="#1014">succ</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// see comment on places in
+                    // propagate_through_place_components()
+                    </span><span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#1203">write_place</a>(<span class="kw-2">&amp;</span><a href="#1011">l</a>, <a href="#864">succ</a>, <a href="#496">ACC_WRITE</a> | <a href="#495">ACC_READ</a>);
+                    <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1011">r</a>, <a href="#1019">succ</a>);
+                    <a class="self" href="#864">self</a>.<a href="#1145">propagate_through_place_components</a>(<span class="kw-2">&amp;</span><a href="#1011">l</a>, <a href="#1020">succ</a>)
+                }
+            }
+
+            <span class="comment">// Uninteresting cases: just propagate in rev exec order
+            </span>hir::ExprKind::Array(<span class="kw-2">ref </span>exprs) =&gt; <a class="self" href="#864">self</a>.<a href="#852">propagate_through_exprs</a>(<a href="#1026">exprs</a>, <a href="#864">succ</a>),
+
+            hir::ExprKind::Struct(<span class="kw">_</span>, <span class="kw-2">ref </span>fields, <span class="kw-2">ref </span>with_expr) =&gt; {
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#856-860">propagate_through_opt_expr</a>(<a href="#1028">with_expr</a>.as_ref().map(|e| <span class="kw-2">&amp;**</span><a href="#1029">e</a>), <a href="#864">succ</a>);
+                <a href="#1028">fields</a>
+                    .iter()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">fold</a>(<a href="#1029">succ</a>, |succ, field| <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1033">field</a>.expr, <a href="#1033">succ</a>))
+            }
+
+            hir::ExprKind::Call(<span class="kw-2">ref </span>f, <span class="kw-2">ref </span>args) =&gt; {
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#1284">check_is_ty_uninhabited</a>(<a href="#864">expr</a>, <a href="#864">succ</a>);
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#852">propagate_through_exprs</a>(<a href="#1036">args</a>, <a href="#1037">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1036">f</a>, <a href="#1038">succ</a>)
+            }
+
+            hir::ExprKind::MethodCall(.., receiver, <span class="kw-2">ref </span>args, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#1284">check_is_ty_uninhabited</a>(<a href="#864">expr</a>, <a href="#864">succ</a>);
+                <span class="kw">let </span>succ = <a class="self" href="#864">self</a>.<a href="#852">propagate_through_exprs</a>(<a href="#1042">args</a>, <a href="#1043">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#1042">receiver</a>, <a href="#1044">succ</a>)
+            }
+
+            hir::ExprKind::Tup(<span class="kw-2">ref </span>exprs) =&gt; <a class="self" href="#864">self</a>.<a href="#852">propagate_through_exprs</a>(<a href="#1048">exprs</a>, <a href="#864">succ</a>),
+
+            hir::ExprKind::Binary(op, <span class="kw-2">ref </span>l, <span class="kw-2">ref </span>r) <span class="kw">if </span><a href="#1050">op</a>.node.is_lazy() =&gt; {
+                <span class="kw">let </span>r_succ = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1050">r</a>, <a href="#864">succ</a>);
+
+                <span class="kw">let </span>ln = <a class="self" href="#864">self</a>.<a href="#547">live_node</a>(<a href="#864">expr</a>.hir_id, <a href="#864">expr</a>.span);
+                <a class="self" href="#864">self</a>.<a href="#652">init_from_succ</a>(<a href="#1053">ln</a>, <a href="#864">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#659">merge_from_succ</a>(<a href="#1053">ln</a>, <a href="#1051">r_succ</a>);
+
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1050">l</a>, <a href="#1053">ln</a>)
+            }
+
+            hir::ExprKind::Index(<span class="kw-2">ref </span>l, <span class="kw-2">ref </span>r) | hir::ExprKind::Binary(<span class="kw">_</span>, <span class="kw-2">ref </span>l, <span class="kw-2">ref </span>r) =&gt; {
+                <span class="kw">let </span>r_succ = <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1060">r</a>, <a href="#864">succ</a>);
+                <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1060">l</a>, <a href="#1061">r_succ</a>)
+            }
+
+            hir::ExprKind::Box(<span class="kw-2">ref </span>e)
+            | hir::ExprKind::AddrOf(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw-2">ref </span>e)
+            | hir::ExprKind::Cast(<span class="kw-2">ref </span>e, <span class="kw">_</span>)
+            | hir::ExprKind::Type(<span class="kw-2">ref </span>e, <span class="kw">_</span>)
+            | hir::ExprKind::DropTemps(<span class="kw-2">ref </span>e)
+            | hir::ExprKind::Unary(<span class="kw">_</span>, <span class="kw-2">ref </span>e)
+            | hir::ExprKind::Repeat(<span class="kw-2">ref </span>e, <span class="kw">_</span>) =&gt; <a class="self" href="#864">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1065">e</a>, <a href="#864">succ</a>),
+
+            hir::ExprKind::InlineAsm(<span class="kw-2">ref </span>asm) =&gt; {
+                <span class="comment">// Handle non-returning asm
+                </span><span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="kw">if </span>asm.options.contains(InlineAsmOptions::NORETURN) {
+                    <a class="self" href="#864">self</a>.exit_ln
+                } <span class="kw">else </span>{
+                    <a href="#864">succ</a>
+                };
+
+                <span class="comment">// Do a first pass for writing outputs only
+                </span><span class="kw">for </span>(op, _op_sp) <span class="kw">in </span>asm.operands.iter().rev() {
+                    <span class="kw">match </span>op {
+                        hir::InlineAsmOperand::In { .. }
+                        | hir::InlineAsmOperand::Const { .. }
+                        | hir::InlineAsmOperand::SymFn { .. }
+                        | hir::InlineAsmOperand::SymStatic { .. } =&gt; {}
+                        hir::InlineAsmOperand::Out { expr, .. } =&gt; {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                                succ = <span class="self">self</span>.write_place(expr, succ, ACC_WRITE);
+                            }
+                        }
+                        hir::InlineAsmOperand::InOut { expr, .. } =&gt; {
+                            succ = <span class="self">self</span>.write_place(expr, succ, ACC_READ | ACC_WRITE | ACC_USE);
+                        }
+                        hir::InlineAsmOperand::SplitInOut { out_expr, .. } =&gt; {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = out_expr {
+                                succ = <span class="self">self</span>.write_place(expr, succ, ACC_WRITE);
+                            }
+                        }
+                    }
+                }
+
+                <span class="comment">// Then do a second pass for inputs
+                </span><span class="kw">let </span><span class="kw-2">mut </span>succ = <a href="#1075">succ</a>;
+                <span class="kw">for </span>(op, _op_sp) <span class="kw">in </span>asm.operands.iter().rev() {
+                    <span class="kw">match </span>op {
+                        hir::InlineAsmOperand::In { expr, .. } =&gt; {
+                            succ = <span class="self">self</span>.propagate_through_expr(expr, succ)
+                        }
+                        hir::InlineAsmOperand::Out { expr, .. } =&gt; {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                                succ = <span class="self">self</span>.propagate_through_place_components(expr, succ);
+                            }
+                        }
+                        hir::InlineAsmOperand::InOut { expr, .. } =&gt; {
+                            succ = <span class="self">self</span>.propagate_through_place_components(expr, succ);
+                        }
+                        hir::InlineAsmOperand::SplitInOut { in_expr, out_expr, .. } =&gt; {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = out_expr {
+                                succ = <span class="self">self</span>.propagate_through_place_components(expr, succ);
+                            }
+                            succ = <span class="self">self</span>.propagate_through_expr(in_expr, succ);
+                        }
+                        hir::InlineAsmOperand::Const { .. }
+                        | hir::InlineAsmOperand::SymFn { .. }
+                        | hir::InlineAsmOperand::SymStatic { .. } =&gt; {}
+                    }
+                }
+                <a href="#1105">succ</a>
+            }
+
+            hir::ExprKind::Lit(..)
+            | hir::ExprKind::ConstBlock(..)
+            | hir::ExprKind::Err
+            | hir::ExprKind::Path(hir::QPath::TypeRelative(..))
+            | hir::ExprKind::Path(hir::QPath::LangItem(..)) =&gt; <a href="#864">succ</a>,
+
+            <span class="comment">// Note that labels have been resolved, so we don&#39;t need to look
+            // at the label ident
+            </span>hir::ExprKind::Block(<span class="kw-2">ref </span>blk, <span class="kw">_</span>) =&gt; <a class="self" href="#864">self</a>.<a href="#785">propagate_through_block</a>(<span class="kw-2">&amp;</span><a href="#1141">blk</a>, <a href="#864">succ</a>),
+        }
+    }
+
+    <span class="kw">fn </span>propagate_through_place_components(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="comment">// # Places
+        //
+        // In general, the full flow graph structure for an
+        // assignment/move/etc can be handled in one of two ways,
+        // depending on whether what is being assigned is a &quot;tracked
+        // value&quot; or not. A tracked value is basically a local
+        // variable or argument.
+        //
+        // The two kinds of graphs are:
+        //
+        //    Tracked place          Untracked place
+        // ----------------------++-----------------------
+        //                       ||
+        //         |             ||           |
+        //         v             ||           v
+        //     (rvalue)          ||       (rvalue)
+        //         |             ||           |
+        //         v             ||           v
+        // (write of place)      ||   (place components)
+        //         |             ||           |
+        //         v             ||           v
+        //      (succ)           ||        (succ)
+        //                       ||
+        // ----------------------++-----------------------
+        //
+        // I will cover the two cases in turn:
+        //
+        // # Tracked places
+        //
+        // A tracked place is a local variable/argument `x`.  In
+        // these cases, the link_node where the write occurs is linked
+        // to node id of `x`.  The `write_place()` routine generates
+        // the contents of this node.  There are no subcomponents to
+        // consider.
+        //
+        // # Non-tracked places
+        //
+        // These are places like `x[5]` or `x.f`.  In that case, we
+        // basically ignore the value which is written to but generate
+        // reads for the components---`x` in these two examples.  The
+        // components reads are generated by
+        // `propagate_through_place_components()` (this fn).
+        //
+        // # Illegal places
+        //
+        // It is still possible to observe assignments to non-places;
+        // these errors are detected in the later pass borrowck.  We
+        // just ignore such cases and treat them as reads.
+
+        </span><span class="kw">match </span><a href="#1145">expr</a>.kind {
+            hir::ExprKind::Path(<span class="kw">_</span>) =&gt; <a href="#1145">succ</a>,
+            hir::ExprKind::Field(<span class="kw-2">ref </span>e, <span class="kw">_</span>) =&gt; <a class="self" href="#1145">self</a>.<a href="#864">propagate_through_expr</a>(<span class="kw-2">&amp;</span><a href="#1197">e</a>, <a href="#1145">succ</a>),
+            <span class="kw">_ </span>=&gt; <a class="self" href="#1145">self</a>.<a href="#864">propagate_through_expr</a>(<a href="#1145">expr</a>, <a href="#1145">succ</a>),
+        }
+    }
+
+    <span class="comment">// see comment on propagate_through_place()
+    </span><span class="kw">fn </span>write_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>, acc: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">match </span><a href="#1203">expr</a>.kind {
+            hir::ExprKind::Path(hir::QPath::Resolved(<span class="kw">_</span>, <span class="kw-2">ref </span>path)) =&gt; {
+                <a class="self" href="#1203">self</a>.<a href="#1234-1240">access_path</a>(<a href="#1203">expr</a>.hir_id, <a href="#1205">path</a>, <a href="#1203">succ</a>, <a href="#1203">acc</a>)
+            }
+
+            <span class="comment">// We do not track other places, so just propagate through
+            // to their subcomponents.  Also, it may happen that
+            // non-places occur here, because those are detected in the
+            // later pass borrowck.
+            </span><span class="kw">_ </span>=&gt; <a href="#1203">succ</a>,
+        }
+    }
+
+    <span class="kw">fn </span>access_var(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        var_hid: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        succ: <a href="#115-119">LiveNode</a>,
+        acc: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">let </span>ln = <a class="self" href="#1218">self</a>.<a href="#547">live_node</a>(<a href="#1219">hir_id</a>, <a href="#1223">span</a>);
+        <span class="kw">if </span>acc != <span class="number">0 </span>{
+            <a class="self" href="#1218">self</a>.<a href="#652">init_from_succ</a>(<a href="#1225">ln</a>, <a href="#1221">succ</a>);
+            <span class="kw">let </span>var = <a class="self" href="#1218">self</a>.<a href="#560">variable</a>(<a href="#1220">var_hid</a>, <a href="#1223">span</a>);
+            <a class="self" href="#1218">self</a>.<a href="#679">acc</a>(<a href="#1225">ln</a>, <a href="#1228">var</a>, <a href="#1222">acc</a>);
+        }
+        <a href="#1225">ln</a>
+    }
+
+    <span class="kw">fn </span>access_path(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        path: <span class="kw-2">&amp;</span>hir::Path&lt;<span class="lifetime">&#39;_</span>&gt;,
+        succ: <a href="#115-119">LiveNode</a>,
+        acc: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    ) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">match </span><a href="#1237">path</a>.res {
+            Res::Local(hid) =&gt; <a class="self" href="#1235">self</a>.<a href="#1217-1224">access_var</a>(<a href="#1236">hir_id</a>, <a href="#1242">hid</a>, <a href="#1238">succ</a>, <a href="#1239">acc</a>, <a href="#1237">path</a>.span),
+            <span class="kw">_ </span>=&gt; <a href="#1238">succ</a>,
+        }
+    }
+
+    <span class="kw">fn </span>propagate_through_loop(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+        body: <span class="kw-2">&amp;</span>hir::Block&lt;<span class="lifetime">&#39;_</span>&gt;,
+        succ: <a href="#115-119">LiveNode</a>,
+    ) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="comment">/*
+        We model control flow like this:
+
+              (expr) &lt;-+
+                |      |
+                v      |
+              (body) --+
+
+        Note that a `continue` expression targeting the `loop` will have a successor of `expr`.
+        Meanwhile, a `break` expression will have a successor of `succ`.
+        */
+
+        // first iteration:
+        </span><span class="kw">let </span>ln = <a class="self" href="#1248">self</a>.<a href="#547">live_node</a>(<a href="#1249">expr</a>.hir_id, <a href="#1249">expr</a>.span);
+        <a class="self" href="#1248">self</a>.<a href="#645">init_empty</a>(<a href="#1266">ln</a>, <a href="#1251">succ</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;propagate_through_loop: using id for loop body {} {:?}&quot;</span>, expr.hir_id, body);
+
+        <a class="self" href="#1248">self</a>.break_ln.insert(<a href="#1249">expr</a>.hir_id, <a href="#1251">succ</a>);
+
+        <a class="self" href="#1248">self</a>.cont_ln.insert(<a href="#1249">expr</a>.hir_id, <a href="#1266">ln</a>);
+
+        <span class="kw">let </span>body_ln = <a class="self" href="#1248">self</a>.<a href="#785">propagate_through_block</a>(<a href="#1250">body</a>, <a href="#1266">ln</a>);
+
+        <span class="comment">// repeat until fixed point is reached:
+        </span><span class="kw">while </span><span class="self">self</span>.merge_from_succ(ln, body_ln) {
+            <span class="macro">assert_eq!</span>(body_ln, <span class="self">self</span>.propagate_through_block(body, ln));
+        }
+
+        <a href="#1266">ln</a>
+    }
+
+    <span class="kw">fn </span>check_is_ty_uninhabited(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, succ: <a href="#115-119">LiveNode</a>) -&gt; <a href="#115-119">LiveNode</a> {
+        <span class="kw">let </span>ty = <a class="self" href="#1284">self</a>.typeck_results.expr_ty(<a href="#1284">expr</a>);
+        <span class="kw">let </span>m = <a class="self" href="#1284">self</a>.ir.tcx.parent_module(<a href="#1284">expr</a>.hir_id).to_def_id();
+        <span class="kw">if </span><span class="self">self</span>.ir.tcx.is_ty_uninhabited_from(m, ty, <span class="self">self</span>.param_env) {
+            <span class="kw">match </span><a class="self" href="#1284">self</a>.ir.lnks[<a href="#1284">succ</a>] {
+                <a href="#124">LiveNodeKind::ExprNode</a>(succ_span, succ_id) =&gt; {
+                    <a class="self" href="#1284">self</a>.<a href="#1303-1310">warn_about_unreachable</a>(<a href="#1284">expr</a>.span, <a href="#1285">ty</a>, <a href="#1289">succ_span</a>, <a href="#1289">succ_id</a>, <span class="string">&quot;expression&quot;</span>);
+                }
+                <a href="#125">LiveNodeKind::VarDefNode</a>(succ_span, succ_id) =&gt; {
+                    <a class="self" href="#1284">self</a>.<a href="#1303-1310">warn_about_unreachable</a>(<a href="#1284">expr</a>.span, <a href="#1285">ty</a>, <a href="#1292">succ_span</a>, <a href="#1292">succ_id</a>, <span class="string">&quot;definition&quot;</span>);
+                }
+                <span class="kw">_ </span>=&gt; {}
+            };
+            <a class="self" href="#1284">self</a>.exit_ln
+        } <span class="kw">else </span>{
+            <a href="#1284">succ</a>
+        }
+    }
+
+    <span class="kw">fn </span>warn_about_unreachable(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        orig_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        orig_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        expr_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        descr: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    ) {
+        <span class="kw">if </span>!orig_ty.is_never() {
+            <span class="comment">// Unreachable code warnings are already emitted during type checking.
+            // However, during type checking, full type information is being
+            // calculated but not yet available, so the check for diverging
+            // expressions due to uninhabited result types is pretty crude and
+            // only checks whether ty.is_never(). Here, we have full type
+            // information available and can issue warnings for less obviously
+            // uninhabited types (e.g. empty enums). The check above is used so
+            // that we do not emit the same warning twice if the uninhabited type
+            // is indeed `!`.
+
+            </span><a class="self" href="#1304">self</a>.ir.tcx.struct_span_lint_hir(
+                lint::builtin::UNREACHABLE_CODE,
+                <a href="#1308">expr_id</a>,
+                <a href="#1307">expr_span</a>,
+                |lint| {
+                    <span class="kw">let </span>msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;unreachable {}&quot;</span>, descr);
+                    <a href="#1326">lint</a>.build(<span class="kw-2">&amp;</span><a href="#1327">msg</a>)
+                        .span_label(<a href="#1307">expr_span</a>, <span class="kw-2">&amp;</span><a href="#1327">msg</a>)
+                        .span_label(<a href="#1305">orig_span</a>, <span class="string">&quot;any code following this expression is unreachable&quot;</span>)
+                        .span_note(
+                            <a href="#1305">orig_span</a>,
+                            <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                                <span class="string">&quot;this expression has type `{}`, which is uninhabited&quot;</span>,
+                                orig_ty
+                            ),
+                        )
+                        .emit();
+                },
+            );
+        }
+    }
+}
+
+<span class="comment">// _______________________________________________________________________
+// Checking for error conditions
+
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Liveness&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_local(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Local&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#1349">self</a>.<a href="#1540-1546">check_unused_vars_in_pat</a>(<span class="kw-2">&amp;</span><a href="#1349">local</a>.pat, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, |spans, hir_id, ln, var| {
+            <span class="kw">if </span>local.init.is_some() {
+                <a class="self" href="#1349">self</a>.<a href="#1741">warn_about_dead_assign</a>(<a href="#1350">spans</a>, <a href="#1350">hir_id</a>, <a href="#1350">ln</a>, <a href="#1350">var</a>);
+            }
+        });
+
+        intravisit::walk_local(<a class="self" href="#1349">self</a>, <a href="#1349">local</a>);
+    }
+
+    <span class="kw">fn </span>visit_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ex: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a href="#1370">check_expr</a>(<a class="self" href="#1359">self</a>, <a href="#1359">ex</a>);
+        intravisit::walk_expr(<a class="self" href="#1359">self</a>, <a href="#1359">ex</a>);
+    }
+
+    <span class="kw">fn </span>visit_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, arm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Arm&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#1364">self</a>.<a href="#1540-1546">check_unused_vars_in_pat</a>(<span class="kw-2">&amp;</span><a href="#1364">arm</a>.pat, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, |<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>| {});
+        intravisit::walk_arm(<a class="self" href="#1364">self</a>, <a href="#1364">arm</a>);
+    }
+}
+
+<span class="kw">fn </span>check_expr&lt;<span class="lifetime">&#39;tcx</span>&gt;(this: <span class="kw-2">&amp;mut </span>Liveness&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;, expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+    <span class="kw">match </span><a href="#1370">expr</a>.kind {
+        hir::ExprKind::Assign(<span class="kw-2">ref </span>l, ..) =&gt; {
+            <a href="#1370">this</a>.<a href="#1440">check_place</a>(<span class="kw-2">&amp;</span><a href="#1372">l</a>);
+        }
+
+        hir::ExprKind::AssignOp(<span class="kw">_</span>, <span class="kw-2">ref </span>l, <span class="kw">_</span>) =&gt; {
+            <span class="kw">if </span>!this.typeck_results.is_method_call(expr) {
+                <a href="#1370">this</a>.<a href="#1440">check_place</a>(<span class="kw-2">&amp;</span><a href="#1376">l</a>);
+            }
+        }
+
+        hir::ExprKind::InlineAsm(<span class="kw-2">ref </span>asm) =&gt; {
+            <span class="kw">for </span>(op, _op_sp) <span class="kw">in </span>asm.operands {
+                <span class="kw">match </span>op {
+                    hir::InlineAsmOperand::Out { expr, .. } =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                            this.check_place(expr);
+                        }
+                    }
+                    hir::InlineAsmOperand::InOut { expr, .. } =&gt; {
+                        this.check_place(expr);
+                    }
+                    hir::InlineAsmOperand::SplitInOut { out_expr, .. } =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(out_expr) = out_expr {
+                            this.check_place(out_expr);
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; {}
+                }
+            }
+        }
+
+        hir::ExprKind::Let(let_expr) =&gt; {
+            <a href="#1370">this</a>.<a href="#1540-1546">check_unused_vars_in_pat</a>(<a href="#1403">let_expr</a>.pat, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, |<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>| {});
+        }
+
+        <span class="comment">// no correctness conditions related to liveness
+        </span>hir::ExprKind::Call(..)
+        | hir::ExprKind::MethodCall(..)
+        | hir::ExprKind::Match(..)
+        | hir::ExprKind::Loop(..)
+        | hir::ExprKind::Index(..)
+        | hir::ExprKind::Field(..)
+        | hir::ExprKind::Array(..)
+        | hir::ExprKind::Tup(..)
+        | hir::ExprKind::Binary(..)
+        | hir::ExprKind::Cast(..)
+        | hir::ExprKind::If(..)
+        | hir::ExprKind::DropTemps(..)
+        | hir::ExprKind::Unary(..)
+        | hir::ExprKind::Ret(..)
+        | hir::ExprKind::Break(..)
+        | hir::ExprKind::Continue(..)
+        | hir::ExprKind::Lit(<span class="kw">_</span>)
+        | hir::ExprKind::ConstBlock(..)
+        | hir::ExprKind::Block(..)
+        | hir::ExprKind::AddrOf(..)
+        | hir::ExprKind::Struct(..)
+        | hir::ExprKind::Repeat(..)
+        | <a href="../../rustc_hir/hir/enum.ExprKind.html">hir::ExprKind::Closure</a> { .. }
+        | hir::ExprKind::Path(<span class="kw">_</span>)
+        | hir::ExprKind::Yield(..)
+        | hir::ExprKind::Box(..)
+        | hir::ExprKind::Type(..)
+        | hir::ExprKind::Err =&gt; {}
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Liveness&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>check_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">match </span><a href="#1440">expr</a>.kind {
+            hir::ExprKind::Path(hir::QPath::Resolved(<span class="kw">_</span>, <span class="kw-2">ref </span>path)) =&gt; {
+                <span class="kw">if let </span>Res::Local(var_hid) = <a href="#1442">path</a>.res {
+                    <span class="comment">// Assignment to an immutable variable or argument: only legal
+                    // if there is no later assignment. If this local is actually
+                    // mutable, then check for a reassignment to flag the mutability
+                    // as being used.
+                    </span><span class="kw">let </span>ln = <a class="self" href="#1440">self</a>.<a href="#547">live_node</a>(<a href="#1440">expr</a>.hir_id, <a href="#1440">expr</a>.span);
+                    <span class="kw">let </span>var = <a class="self" href="#1440">self</a>.<a href="#560">variable</a>(<a href="#1443">var_hid</a>, <a href="#1440">expr</a>.span);
+                    <a class="self" href="#1440">self</a>.<a href="#1741">warn_about_dead_assign</a>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[expr.span], <a href="#1440">expr</a>.hir_id, <a href="#1448">ln</a>, <a href="#1449">var</a>);
+                }
+            }
+            <span class="kw">_ </span>=&gt; {
+                <span class="comment">// For other kinds of places, no checks are required,
+                // and any embedded expressions are actually rvalues
+                </span>intravisit::walk_expr(<a class="self" href="#1440">self</a>, <a href="#1440">expr</a>);
+            }
+        }
+    }
+
+    <span class="kw">fn </span>should_warn(<span class="kw-2">&amp;</span><span class="self">self</span>, var: <a href="#109-113">Variable</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt; {
+        <span class="kw">let </span>name = <a class="self" href="#1461">self</a>.ir.<a href="#304">variable_name</a>(<a href="#1461">var</a>);
+        <span class="kw">if </span>name == kw::Empty {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+        <span class="kw">let </span>name = <a href="#1462">name</a>.as_str();
+        <span class="kw">if </span>name.as_bytes()[<span class="number">0</span>] == <span class="string">b&#39;_&#39; </span>{
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+        <span class="prelude-val">Some</span>(<a href="#1466">name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>())
+    }
+
+    <span class="kw">fn </span>warn_about_unused_upvars(<span class="kw-2">&amp;</span><span class="self">self</span>, entry_ln: <a href="#115-119">LiveNode</a>) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(closure_min_captures) = <a class="self" href="#1473">self</a>.closure_min_captures <span class="kw">else </span>{
+            <span class="kw">return</span>;
+        };
+
+        <span class="comment">// If closure_min_captures is Some(), upvars must be Some() too.
+        </span><span class="kw">for </span>(<span class="kw-2">&amp;</span>var_hir_id, min_capture_list) <span class="kw">in </span>closure_min_captures {
+            <span class="kw">for </span>captured_place <span class="kw">in </span>min_capture_list {
+                <span class="kw">match </span>captured_place.info.capture_kind {
+                    ty::UpvarCapture::ByValue =&gt; {}
+                    ty::UpvarCapture::ByRef(..) =&gt; <span class="kw">continue</span>,
+                };
+                <span class="kw">let </span>span = captured_place.get_capture_kind_span(<span class="self">self</span>.ir.tcx);
+                <span class="kw">let </span>var = <span class="self">self</span>.variable(var_hir_id, span);
+                <span class="kw">if </span><span class="self">self</span>.used_on_entry(entry_ln, var) {
+                    <span class="kw">if </span>!<span class="self">self</span>.live_on_entry(entry_ln, var) {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = <span class="self">self</span>.should_warn(var) {
+                            <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                                lint::builtin::UNUSED_ASSIGNMENTS,
+                                var_hir_id,
+                                <span class="macro">vec!</span>[span],
+                                |lint| {
+                                    lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                                        <span class="string">&quot;value captured by `{}` is never read&quot;</span>,
+                                        name
+                                    ))
+                                    .help(<span class="string">&quot;did you mean to capture by reference instead?&quot;</span>)
+                                    .emit();
+                                },
+                            );
+                        }
+                    }
+                } <span class="kw">else </span>{
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = <span class="self">self</span>.should_warn(var) {
+                        <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                            lint::builtin::UNUSED_VARIABLES,
+                            var_hir_id,
+                            <span class="macro">vec!</span>[span],
+                            |lint| {
+                                lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unused variable: `{}`&quot;</span>, name))
+                                    .help(<span class="string">&quot;did you mean to capture by reference instead?&quot;</span>)
+                                    .emit();
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>warn_about_unused_args(<span class="kw-2">&amp;</span><span class="self">self</span>, body: <span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;, entry_ln: <a href="#115-119">LiveNode</a>) {
+        <span class="kw">for </span>p <span class="kw">in </span>body.params {
+            <span class="self">self</span>.check_unused_vars_in_pat(
+                <span class="kw-2">&amp;</span>p.pat,
+                <span class="prelude-val">Some</span>(entry_ln),
+                <span class="prelude-val">Some</span>(body),
+                |spans, hir_id, ln, var| {
+                    <span class="kw">if </span>!<span class="self">self</span>.live_on_entry(ln, var) {
+                        <span class="self">self</span>.report_unused_assign(hir_id, spans, var, |name| {
+                            <span class="macro">format!</span>(<span class="string">&quot;value passed to `{}` is never read&quot;</span>, name)
+                        });
+                    }
+                },
+            );
+        }
+    }
+
+    <span class="kw">fn </span>check_unused_vars_in_pat(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;,
+        entry_ln: <span class="prelude-ty">Option</span>&lt;<a href="#115-119">LiveNode</a>&gt;,
+        opt_body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+        on_used_on_entry: <span class="kw">impl </span>Fn(Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="#115-119">LiveNode</a>, <a href="#109-113">Variable</a>),
+    ) {
+        <span class="comment">// In an or-pattern, only consider the variable; any later patterns must have the same
+        // bindings, and we also consider the first pattern to be the &quot;authoritative&quot; set of ids.
+        // However, we should take the ids and spans of variables with the same name from the later
+        // patterns so the suggestions to prefix with underscores will apply to those too.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>vars: FxIndexMap&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, (<a href="#115-119">LiveNode</a>, <a href="#109-113">Variable</a>, Vec&lt;(<a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt;)&gt; =
+            &lt;<span class="kw">_</span>&gt;::default();
+
+        <a href="#1542">pat</a>.each_binding(|<span class="kw">_</span>, hir_id, pat_sp, ident| {
+            <span class="kw">let </span>ln = <a href="#1543">entry_ln</a>.unwrap_or_else(|| <a class="self" href="#1541">self</a>.<a href="#547">live_node</a>(<a href="#1554">hir_id</a>, <a href="#1554">pat_sp</a>));
+            <span class="kw">let </span>var = <a class="self" href="#1541">self</a>.<a href="#560">variable</a>(<a href="#1554">hir_id</a>, <a href="#1554">ident</a>.span);
+            <span class="kw">let </span>id_and_sp = (<a href="#1554">hir_id</a>, <a href="#1554">pat_sp</a>, <a href="#1554">ident</a>.span);
+            <a href="#1551">vars</a>.entry(<a class="self" href="#1541">self</a>.ir.<a href="#304">variable_name</a>(<a href="#1556">var</a>))
+                .and_modify(|(.., hir_ids_and_spans)| <a href="#1559">hir_ids_and_spans</a>.push(<a href="#1557">id_and_sp</a>))
+                .or_insert_with(|| (<a href="#1555">ln</a>, <a href="#1556">var</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[id_and_sp]));
+        });
+
+        <span class="kw">let </span>can_remove = <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(<span class="kw-2">&amp;</span>pat.kind, hir::PatKind::Struct(<span class="kw">_</span>, <span class="kw">_</span>, <span class="bool-val">true</span>));
+
+        <span class="kw">for </span>(<span class="kw">_</span>, (ln, var, hir_ids_and_spans)) <span class="kw">in </span>vars {
+            <span class="kw">if </span><span class="self">self</span>.used_on_entry(ln, var) {
+                <span class="kw">let </span>id = hir_ids_and_spans[<span class="number">0</span>].<span class="number">0</span>;
+                <span class="kw">let </span>spans =
+                    hir_ids_and_spans.into_iter().map(|(<span class="kw">_</span>, <span class="kw">_</span>, ident_span)| ident_span).collect();
+                on_used_on_entry(spans, id, ln, var);
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.report_unused(hir_ids_and_spans, ln, var, can_remove, pat, opt_body);
+            }
+        }
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;INFO&quot;</span>)]
+    </span><span class="kw">fn </span>report_unused(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        hir_ids_and_spans: Vec&lt;(<a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt;,
+        ln: <a href="#115-119">LiveNode</a>,
+        var: <a href="#109-113">Variable</a>,
+        can_remove: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;,
+        opt_body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+    ) {
+        <span class="kw">let </span>first_hir_id = hir_ids_and_spans[<span class="number">0</span>].<span class="number">0</span>;
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = <span class="self">self</span>.should_warn(var).filter(|name| name != <span class="string">&quot;self&quot;</span>) {
+            <span class="comment">// annoying: for parameters in funcs like `fn(x: i32)
+            // {ret}`, there is only one node, so asking about
+            // assigned_on_exit() is not meaningful.
+            </span><span class="kw">let </span>is_assigned =
+                <span class="kw">if </span>ln == <span class="self">self</span>.exit_ln { <span class="bool-val">false </span>} <span class="kw">else </span>{ <span class="self">self</span>.assigned_on_exit(ln, var) };
+
+            <span class="kw">if </span>is_assigned {
+                <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                    lint::builtin::UNUSED_VARIABLES,
+                    first_hir_id,
+                    hir_ids_and_spans
+                        .into_iter()
+                        .map(|(<span class="kw">_</span>, <span class="kw">_</span>, ident_span)| ident_span)
+                        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+                    |lint| {
+                        lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;variable `{}` is assigned to, but never used&quot;</span>, name))
+                            .note(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;consider using `_{}` instead&quot;</span>, name))
+                            .emit();
+                    },
+                )
+            } <span class="kw">else if </span>can_remove {
+                <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                    lint::builtin::UNUSED_VARIABLES,
+                    first_hir_id,
+                    hir_ids_and_spans.iter().map(|(<span class="kw">_</span>, pat_span, <span class="kw">_</span>)| <span class="kw-2">*</span>pat_span).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+                    |lint| {
+                        <span class="kw">let </span><span class="kw-2">mut </span>err = lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unused variable: `{}`&quot;</span>, name));
+                        err.multipart_suggestion(
+                            <span class="string">&quot;try removing the field&quot;</span>,
+                            hir_ids_and_spans
+                                .iter()
+                                .map(|(<span class="kw">_</span>, pat_span, <span class="kw">_</span>)| {
+                                    <span class="kw">let </span>span = <span class="self">self
+                                        </span>.ir
+                                        .tcx
+                                        .sess
+                                        .source_map()
+                                        .span_extend_to_next_char(<span class="kw-2">*</span>pat_span, <span class="string">&#39;,&#39;</span>, <span class="bool-val">true</span>);
+                                    (span.with_hi(BytePos(span.hi().<span class="number">0 </span>+ <span class="number">1</span>)), String::new())
+                                })
+                                .collect(),
+                            Applicability::MachineApplicable,
+                        );
+                        err.emit();
+                    },
+                );
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>(shorthands, non_shorthands): (Vec&lt;<span class="kw">_</span>&gt;, Vec&lt;<span class="kw">_</span>&gt;) =
+                    hir_ids_and_spans.iter().copied().partition(|(hir_id, <span class="kw">_</span>, ident_span)| {
+                        <span class="kw">let </span>var = <span class="self">self</span>.variable(<span class="kw-2">*</span>hir_id, <span class="kw-2">*</span>ident_span);
+                        <span class="self">self</span>.ir.variable_is_shorthand(var)
+                    });
+
+                <span class="comment">// If we have both shorthand and non-shorthand, prefer the &quot;try ignoring
+                // the field&quot; message, and suggest `_` for the non-shorthands. If we only
+                // have non-shorthand, then prefix with an underscore instead.
+                </span><span class="kw">if </span>!shorthands.is_empty() {
+                    <span class="kw">let </span>shorthands = shorthands
+                        .into_iter()
+                        .map(|(<span class="kw">_</span>, pat_span, <span class="kw">_</span>)| (pat_span, <span class="macro">format!</span>(<span class="string">&quot;{}: _&quot;</span>, name)))
+                        .chain(
+                            non_shorthands
+                                .into_iter()
+                                .map(|(<span class="kw">_</span>, pat_span, <span class="kw">_</span>)| (pat_span, <span class="string">&quot;_&quot;</span>.to_string())),
+                        )
+                        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+                    <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                        lint::builtin::UNUSED_VARIABLES,
+                        first_hir_id,
+                        hir_ids_and_spans
+                            .iter()
+                            .map(|(<span class="kw">_</span>, pat_span, <span class="kw">_</span>)| <span class="kw-2">*</span>pat_span)
+                            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+                        |lint| {
+                            <span class="kw">let </span><span class="kw-2">mut </span>err = lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unused variable: `{}`&quot;</span>, name));
+                            err.multipart_suggestion(
+                                <span class="string">&quot;try ignoring the field&quot;</span>,
+                                shorthands,
+                                Applicability::MachineApplicable,
+                            );
+                            err.emit();
+                        },
+                    );
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>non_shorthands = non_shorthands
+                        .into_iter()
+                        .map(|(<span class="kw">_</span>, <span class="kw">_</span>, ident_span)| (ident_span, <span class="macro">format!</span>(<span class="string">&quot;_{}&quot;</span>, name)))
+                        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+                    <span class="self">self</span>.ir.tcx.struct_span_lint_hir(
+                        lint::builtin::UNUSED_VARIABLES,
+                        first_hir_id,
+                        hir_ids_and_spans
+                            .iter()
+                            .map(|(<span class="kw">_</span>, <span class="kw">_</span>, ident_span)| <span class="kw-2">*</span>ident_span)
+                            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+                        |lint| {
+                            <span class="kw">let </span><span class="kw-2">mut </span>err = lint.build(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unused variable: `{}`&quot;</span>, name));
+                            <span class="kw">if </span><span class="self">self</span>.has_added_lit_match_name_span(<span class="kw-2">&amp;</span>name, opt_body, <span class="kw-2">&amp;mut </span>err) {
+                                err.span_label(pat.span, <span class="string">&quot;unused variable&quot;</span>);
+                            }
+                            err.multipart_suggestion(
+                                <span class="string">&quot;if this is intentional, prefix it with an underscore&quot;</span>,
+                                non_shorthands,
+                                Applicability::MachineApplicable,
+                            );
+                            err.emit();
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>has_added_lit_match_name_span(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        opt_body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+        err: <span class="kw-2">&amp;mut </span>rustc_errors::DiagnosticBuilder&lt;<span class="lifetime">&#39;_</span>, ()&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>has_litstring = <span class="bool-val">false</span>;
+        <span class="kw">let </span><span class="prelude-val">Some</span>(opt_body) = <a href="#1708">opt_body</a> <span class="kw">else </span>{<span class="kw">return </span><span class="bool-val">false</span>;};
+        <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#232">CollectLitsVisitor</a> { lit_exprs: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[] };
+        intravisit::walk_body(<span class="kw-2">&amp;mut </span><a href="#1713">visitor</a>, <a href="#1712">opt_body</a>);
+        <span class="kw">for </span>lit_expr <span class="kw">in </span>visitor.lit_exprs {
+            <span class="kw">let </span>hir::ExprKind::Lit(litx) = <span class="kw-2">&amp;</span>lit_expr.kind <span class="kw">else </span>{ <span class="kw">continue </span>};
+            <span class="kw">let </span>rustc_ast::LitKind::Str(syb, <span class="kw">_</span>) = litx.node <span class="kw">else</span>{ <span class="kw">continue</span>; };
+            <span class="kw">let </span>name_str: <span class="kw-2">&amp;</span>str = syb.as_str();
+            <span class="kw">let </span><span class="kw-2">mut </span>name_pa = String::from(<span class="string">&quot;{&quot;</span>);
+            name_pa.push_str(<span class="kw-2">&amp;</span>name);
+            name_pa.push(<span class="string">&#39;}&#39;</span>);
+            <span class="kw">if </span>name_str.contains(<span class="kw-2">&amp;</span>name_pa) {
+                err.span_label(
+                    lit_expr.span,
+                    <span class="string">&quot;you might have meant to use string interpolation in this string literal&quot;</span>,
+                );
+                err.multipart_suggestion(
+                    <span class="string">&quot;string interpolation only works in `format!` invocations&quot;</span>,
+                    <span class="macro">vec!</span>[
+                        (lit_expr.span.shrink_to_lo(), <span class="string">&quot;format!(&quot;</span>.to_string()),
+                        (lit_expr.span.shrink_to_hi(), <span class="string">&quot;)&quot;</span>.to_string()),
+                    ],
+                    Applicability::MachineApplicable,
+                );
+                has_litstring = <span class="bool-val">true</span>;
+            }
+        }
+        <a href="#1711">has_litstring</a>
+    }
+
+    <span class="kw">fn </span>warn_about_dead_assign(<span class="kw-2">&amp;</span><span class="self">self</span>, spans: Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, ln: <a href="#115-119">LiveNode</a>, var: <a href="#109-113">Variable</a>) {
+        <span class="kw">if </span>!<span class="self">self</span>.live_on_exit(ln, var) {
+            <a class="self" href="#1741">self</a>.<a href="#1749-1755">report_unused_assign</a>(<a href="#1741">hir_id</a>, <a href="#1741">spans</a>, <a href="#1741">var</a>, |name| {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;value assigned to `{}` is never read&quot;</span>, name)
+            });
+        }
+    }
+
+    <span class="kw">fn </span>report_unused_assign(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        spans: Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;,
+        var: <a href="#109-113">Variable</a>,
+        message: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    ) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = <a class="self" href="#1750">self</a>.<a href="#1461">should_warn</a>(<a href="#1753">var</a>) {
+            <a class="self" href="#1750">self</a>.ir.tcx.struct_span_lint_hir(
+                lint::builtin::UNUSED_ASSIGNMENTS,
+                <a href="#1751">hir_id</a>,
+                <a href="#1752">spans</a>,
+                |lint| {
+                    <a href="#1761">lint</a>.build(<span class="kw-2">&amp;</span><a href="#1754">message</a>(<span class="kw-2">&amp;</span><a href="#1756">name</a>))
+                        .help(<span class="string">&quot;maybe it is overwritten before being read?&quot;</span>)
+                        .emit();
+                },
+            )
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_passes" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

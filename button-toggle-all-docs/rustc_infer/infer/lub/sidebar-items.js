@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Lub","“Least upper bound” (common supertype)"]]};

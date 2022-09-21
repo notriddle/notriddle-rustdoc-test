@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["VecMap","A map type implemented as a vector of pairs `K` (key) and `V` (value). It currently provides a subset of all the map operations, the rest could be added as needed."]]};

@@ -1,0 +1,266 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/transform/check_consts/mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Check the bodies of `const`s, `static`s and `const fn`s for illegal operations.
+//!
+//! This module will eventually replace the parts of `qualify_consts.rs` that check whether a local
+//! has interior mutability or needs to be dropped, as well as the visitor that emits errors when
+//! it finds operations that are invalid in a certain context.
+
+</span><span class="kw">use </span><a href="../../../../rustc_attr/index.html">rustc_attr</a> <span class="kw">as </span>attr;
+<span class="kw">use </span><a href="../../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>};
+<span class="kw">use </span><a href="../../../../rustc_middle/mir/index.html">rustc_middle::mir</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../../rustc_middle/ty/index.html">self</a>, <a href="../../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../../rustc_span/symbol/struct.Symbol.html">rustc_span::Symbol</a>;
+
+<span class="kw">pub use </span><a href="qualifs.rs.html#42"><span class="self">self</span>::qualifs::Qualif</a>;
+
+<span class="kw">pub mod </span><a href="check.rs.html#1-1036">check</a>;
+<span class="kw">mod </span><a href="ops.rs.html#1-722">ops</a>;
+<span class="kw">pub mod </span><a href="post_drop_elaboration.rs.html#1-123">post_drop_elaboration</a>;
+<span class="kw">pub mod </span><a href="qualifs.rs.html#1-388">qualifs</a>;
+<span class="kw">mod </span><a href="resolver.rs.html#1-384">resolver</a>;
+
+<span class="doccomment">/// Information about the item currently being const-checked, as well as a reference to the global
+/// context.
+</span><span class="kw">pub struct </span>ConstCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>const_kind: <span class="prelude-ty">Option</span>&lt;<a href="../../../../rustc_hir/hir/enum.ConstContext.html">hir::ConstContext</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; ConstCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>def_id = <a href="#32">body</a>.source.def_id().expect_local();
+        <span class="kw">let </span>param_env = <a href="#32">tcx</a>.param_env(<a href="#33">def_id</a>);
+        <span class="self">Self</span>::new_with_param_env(<a href="#32">tcx</a>, <a href="#32">body</a>, <a href="#34">param_env</a>)
+    }
+
+    <span class="kw">pub fn </span>new_with_param_env(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>const_kind = <a href="#39">tcx</a>.hir().body_const_context(<a href="#40">body</a>.source.def_id().expect_local());
+        <a href="#24">ConstCx</a> { <a href="#40">body</a>, <a href="#39">tcx</a>, <a href="#41">param_env</a>, <a href="#43">const_kind</a> }
+    }
+
+    <span class="kw">pub fn </span>def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a> {
+        <a class="self" href="#47">self</a>.body.source.def_id().expect_local()
+    }
+
+    <span class="doccomment">/// Returns the kind of const context this `Item` represents (`const`, `static`, etc.).
+    ///
+    /// Panics if this `Item` is not const.
+    </span><span class="kw">pub fn </span>const_kind(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../../../rustc_hir/hir/enum.ConstContext.html">hir::ConstContext</a> {
+        <a class="self" href="#54">self</a>.const_kind.expect(<span class="string">&quot;`const_kind` must not be called on a non-const fn&quot;</span>)
+    }
+
+    <span class="kw">pub fn </span>is_const_stable_const_fn(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#58">self</a>.const_kind == <span class="prelude-val">Some</span>(hir::ConstContext::ConstFn)
+            &amp;&amp; <a class="self" href="#58">self</a>.tcx.features().staged_api
+            &amp;&amp; <a href="#86">is_const_stable_const_fn</a>(<a class="self" href="#58">self</a>.tcx, <a class="self" href="#58">self</a>.<a href="#47">def_id</a>().to_def_id())
+    }
+
+    <span class="kw">fn </span>is_async(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#64">self</a>.tcx.asyncness(<a class="self" href="#64">self</a>.<a href="#47">def_id</a>()) == hir::IsAsync::Async
+    }
+}
+
+<span class="kw">pub fn </span>rustc_allow_const_fn_unstable(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    def_id: <a href="../../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+    feature_gate: <a href="../../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>attrs = <a href="#70">tcx</a>.hir().attrs(<a href="#70">tcx</a>.hir().local_def_id_to_hir_id(<a href="#71">def_id</a>));
+    attr::rustc_allow_const_fn_unstable(<span class="kw-2">&amp;</span><a href="#70">tcx</a>.sess, <a href="#74">attrs</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|name| <a href="#75">name</a> == <a href="#72">feature_gate</a>)
+}
+
+<span class="comment">// Returns `true` if the given `const fn` is &quot;const-stable&quot;.
+//
+// Panics if the given `DefId` does not refer to a `const fn`.
+//
+// Const-stability is only relevant for `const fn` within a `staged_api` crate. Only &quot;const-stable&quot;
+// functions can be called in a const-context by users of the stable compiler. &quot;const-stable&quot;
+// functions are subject to more stringent restrictions than &quot;const-unstable&quot; functions: They
+// cannot use unstable features and can only call other &quot;const-stable&quot; functions.
+</span><span class="kw">pub fn </span>is_const_stable_const_fn(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="comment">// A default body in a `#[const_trait]` is not const-stable because const
+    // trait fns currently cannot be const-stable. We shouldn&#39;t
+    // restrict default bodies to only call const-stable functions.
+    </span><span class="kw">if </span>tcx.is_const_default_method(def_id) {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Const-stability is only relevant for `const fn`.
+    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(tcx.is_const_fn_raw(def_id));
+
+    <span class="comment">// A function is only const-stable if it has `#[rustc_const_stable]` or it the trait it belongs
+    // to is const-stable.
+    </span><span class="kw">match </span><a href="#86">tcx</a>.lookup_const_stability(<a href="#86">def_id</a>) {
+        <span class="prelude-val">Some</span>(stab) =&gt; <a href="#100">stab</a>.is_const_stable(),
+        <span class="prelude-val">None </span><span class="kw">if </span><a href="#114">is_parent_const_stable_trait</a>(<a href="#86">tcx</a>, <a href="#86">def_id</a>) =&gt; {
+            <span class="comment">// Remove this when `#![feature(const_trait_impl)]` is stabilized,
+            // returning `true` unconditionally.
+            </span><a href="#86">tcx</a>.sess.delay_span_bug(
+                <a href="#86">tcx</a>.def_span(<a href="#86">def_id</a>),
+                <span class="string">&quot;trait implementations cannot be const stable yet&quot;</span>,
+            );
+            <span class="bool-val">true
+        </span>}
+        <span class="prelude-val">None </span>=&gt; <span class="bool-val">false</span>, <span class="comment">// By default, items are not const stable.
+    </span>}
+}
+
+<span class="kw">fn </span>is_parent_const_stable_trait(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>local_def_id = <a href="#114">def_id</a>.expect_local();
+    <span class="kw">let </span>hir_id = <a href="#114">tcx</a>.local_def_id_to_hir_id(<a href="#115">local_def_id</a>);
+
+    <span class="kw">let </span><span class="prelude-val">Some</span>(parent) = <a href="#114">tcx</a>.hir().find_parent_node(<a href="#116">hir_id</a>) <span class="kw">else </span>{ <span class="kw">return </span><span class="bool-val">false </span>};
+    <span class="kw">let </span>parent_def = <a href="#114">tcx</a>.hir().get(<a href="#118">parent</a>);
+
+    <span class="kw">if </span>!<span class="macro">matches!</span>(
+        parent_def,
+        hir::Node::Item(hir::Item {
+            kind: hir::ItemKind::Impl(hir::Impl { constness: hir::Constness::Const, .. }),
+            ..
+        })
+    ) {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <a href="#114">tcx</a>.lookup_const_stability(<a href="#118">parent</a>.owner).map_or(<span class="bool-val">false</span>, |stab| <a href="#131">stab</a>.is_const_stable())
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

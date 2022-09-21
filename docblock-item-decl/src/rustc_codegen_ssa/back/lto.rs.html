@@ -1,0 +1,210 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_ssa/src/back/lto.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lto.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_ssa/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="write.rs.html#317"><span class="kw">super</span>::write::CodegenContext</a>;
+<span class="kw">use </span><a href="../lib.rs.html#52"><span class="kw">crate</span>::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../lib.rs.html#54"><span class="kw">crate</span>::ModuleCodegen</a>;
+
+<span class="kw">use </span><a href="../../../rustc_data_structures/memmap/struct.Mmap.html">rustc_data_structures::memmap::Mmap</a>;
+<span class="kw">use </span>rustc_errors::FatalError;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">std::ffi::CString</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">std::sync::Arc</a>;
+
+<span class="kw">pub struct </span>ThinModule&lt;B: <a href="../traits/write.rs.html#8">WriteBackendMethods</a>&gt; {
+    <span class="kw">pub </span>shared: Arc&lt;ThinShared&lt;B&gt;&gt;,
+    <span class="kw">pub </span>idx: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl</span>&lt;B: <a href="../traits/write.rs.html#8">WriteBackendMethods</a>&gt; ThinModule&lt;B&gt; {
+    <span class="kw">pub fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <a class="self" href="#17">self</a>.shared.module_names[<a class="self" href="#17">self</a>.idx].to_str().unwrap()
+    }
+
+    <span class="kw">pub fn </span>cost(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <span class="comment">// Yes, that&#39;s correct, we&#39;re using the size of the bytecode as an
+        // indicator for how costly this codegen unit is.
+        </span><a class="self" href="#21">self</a>.<a href="#27">data</a>().len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>
+    }
+
+    <span class="kw">pub fn </span>data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>] {
+        <span class="kw">let </span>a = <a class="self" href="#27">self</a>.shared.thin_buffers.get(<a class="self" href="#27">self</a>.idx).map(|b| <a href="#28">b</a>.<a href="../traits/write.rs.html#63">data</a>());
+        <a href="#28">a</a>.unwrap_or_else(|| {
+            <span class="kw">let </span>len = <a class="self" href="#27">self</a>.shared.thin_buffers.len();
+            <a class="self" href="#27">self</a>.shared.serialized_modules[<a class="self" href="#27">self</a>.idx - <a href="#30">len</a>].<a href="#97">data</a>()
+        })
+    }
+}
+
+<span class="kw">pub struct </span>ThinShared&lt;B: <a href="../traits/write.rs.html#8">WriteBackendMethods</a>&gt; {
+    <span class="kw">pub </span>data: B::ThinData,
+    <span class="kw">pub </span>thin_buffers: Vec&lt;B::ThinBuffer&gt;,
+    <span class="kw">pub </span>serialized_modules: Vec&lt;SerializedModule&lt;B::ModuleBuffer&gt;&gt;,
+    <span class="kw">pub </span>module_names: Vec&lt;<a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>&gt;,
+}
+
+<span class="kw">pub enum </span>LtoModuleCodegen&lt;B: <a href="../traits/write.rs.html#8">WriteBackendMethods</a>&gt; {
+    Fat {
+        module: ModuleCodegen&lt;B::Module&gt;,
+        _serialized_bitcode: Vec&lt;SerializedModule&lt;B::ModuleBuffer&gt;&gt;,
+    },
+
+    Thin(ThinModule&lt;B&gt;),
+}
+
+<span class="kw">impl</span>&lt;B: <a href="../traits/write.rs.html#8">WriteBackendMethods</a>&gt; LtoModuleCodegen&lt;B&gt; {
+    <span class="kw">pub fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#53">self</a> </span>{
+            <a href="#44">LtoModuleCodegen::Fat</a> { .. } =&gt; <span class="string">&quot;everything&quot;</span>,
+            <a href="#49">LtoModuleCodegen::Thin</a>(<span class="kw-2">ref </span>m) =&gt; <a href="#56">m</a>.<a href="#17">name</a>(),
+        }
+    }
+
+    <span class="doccomment">/// Optimize this module within the given codegen context.
+    ///
+    /// This function is unsafe as it&#39;ll return a `ModuleCodegen` still
+    /// points to LLVM data structures owned by this `LtoModuleCodegen`.
+    /// It&#39;s intended that the module returned is immediately code generated and
+    /// dropped, and then this LTO module is dropped.
+    </span><span class="kw">pub unsafe fn </span>optimize(
+        <span class="self">self</span>,
+        cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;B&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ModuleCodegen&lt;B::Module&gt;, <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+        <span class="kw">match </span><span class="self"><a href="#67">self</a> </span>{
+            <a href="#44">LtoModuleCodegen::Fat</a> { <span class="kw-2">mut </span>module, .. } =&gt; {
+                B::optimize_fat(cgcx, <span class="kw-2">&amp;mut </span>module)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(<a href="#71">module</a>)
+            }
+            <a href="#49">LtoModuleCodegen::Thin</a>(thin) =&gt; B::optimize_thin(<a href="#68">cgcx</a>, <a href="#75">thin</a>),
+        }
+    }
+
+    <span class="doccomment">/// A &quot;gauge&quot; of how costly it is to optimize this module, used to sort
+    /// biggest modules first.
+    </span><span class="kw">pub fn </span>cost(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#81">self</a> </span>{
+            <span class="comment">// Only one module with fat LTO, so the cost doesn&#39;t matter.
+            </span><a href="#44">LtoModuleCodegen::Fat</a> { .. } =&gt; <span class="number">0</span>,
+            <a href="#49">LtoModuleCodegen::Thin</a>(<span class="kw-2">ref </span>m) =&gt; <a href="#85">m</a>.<a href="#21">cost</a>(),
+        }
+    }
+}
+
+<span class="kw">pub enum </span>SerializedModule&lt;M: <a href="../traits/write.rs.html#66">ModuleBufferMethods</a>&gt; {
+    Local(M),
+    FromRlib(Vec&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;),
+    FromUncompressedFile(<a href="../../../rustc_data_structures/memmap/struct.Mmap.html">Mmap</a>),
+}
+
+<span class="kw">impl</span>&lt;M: <a href="../traits/write.rs.html#66">ModuleBufferMethods</a>&gt; SerializedModule&lt;M&gt; {
+    <span class="kw">pub fn </span>data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>] {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#97">self</a> </span>{
+            <a href="#91">SerializedModule::Local</a>(<span class="kw-2">ref </span>m) =&gt; <a href="#99">m</a>.<a href="../traits/write.rs.html#67">data</a>(),
+            <a href="#92">SerializedModule::FromRlib</a>(<span class="kw-2">ref </span>m) =&gt; <a href="#100">m</a>,
+            <a href="#93">SerializedModule::FromUncompressedFile</a>(<span class="kw-2">ref </span>m) =&gt; <a href="#101">m</a>,
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_ssa" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

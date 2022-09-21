@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["insert_outlives_predicate","Given a requirement `T: 'a` or `'b: 'a`, deduce the outlives_component and add it to `required_predicates`"],["is_free_region",""]],"type":[["RequiredPredicates","Tracks the `T: 'a` or `'a: 'a` predicates that we have inferred must be added to the struct header."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["alloc_env_var_as_c_str",""],["alloc_env_var_as_wide_str",""],["windows_check_buffer_size","Check whether an operation that writes to a target buffer was successful. Accordingly select return value. Local helper function to be used in Windows shims."]],"struct":[["EnvVars",""]],"trait":[["EvalContextExt",""]]};

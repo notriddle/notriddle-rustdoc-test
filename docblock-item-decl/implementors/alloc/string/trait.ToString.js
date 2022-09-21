@@ -1,0 +1,4 @@
+(function() {var implementors = {
+"rustc_hir":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html\" title=\"trait alloc::string::ToString\">ToString</a> for <a class=\"struct\" href=\"rustc_hir/errors/struct.LangItemError.html\" title=\"struct rustc_hir::errors::LangItemError\">LangItemError</a>"]],
+"rustc_index":[["impl&lt;T:&nbsp;<a class=\"trait\" href=\"rustc_index/vec/trait.Idx.html\" title=\"trait rustc_index::vec::Idx\">Idx</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html\" title=\"trait alloc::string::ToString\">ToString</a> for <a class=\"struct\" href=\"rustc_index/bit_set/struct.BitSet.html\" title=\"struct rustc_index::bit_set::BitSet\">BitSet</a>&lt;T&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

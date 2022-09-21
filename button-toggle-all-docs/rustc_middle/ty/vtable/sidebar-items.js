@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["COMMON_VTABLE_ENTRIES_ALIGN",""],["COMMON_VTABLE_ENTRIES_DROPINPLACE",""],["COMMON_VTABLE_ENTRIES_SIZE",""]],"enum":[["VtblEntry",""]],"fn":[["vtable_allocation_provider","Retrieves an allocation that represents the contents of a vtable. Since this is a query, allocations are cached and not duplicated."]]};

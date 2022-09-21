@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["CHECK_BARE_URLS",""]],"fn":[["check_bare_urls",""]],"static":[["URL_REGEX",""]],"struct":[["BareUrlsLinter",""]]};

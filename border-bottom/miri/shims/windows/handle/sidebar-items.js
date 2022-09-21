@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Handle","Miri representation of a Windows `HANDLE`"],["PseudoHandle",""]],"trait":[["EvalContextExt",""]]};

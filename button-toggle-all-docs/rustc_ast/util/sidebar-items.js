@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["classify","Routines the parser uses to classify AST nodes"],["comments",""],["literal","Code related to parsing literals."],["parser",""],["unicode",""]]};

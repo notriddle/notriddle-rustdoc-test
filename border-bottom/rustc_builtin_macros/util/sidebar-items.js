@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["check_builtin_macro_attribute",""],["warn_on_duplicate_attribute","Emit a warning if the item is annotated with the given attribute. This is used to diagnose when an attribute may have been mistakenly duplicated."]]};

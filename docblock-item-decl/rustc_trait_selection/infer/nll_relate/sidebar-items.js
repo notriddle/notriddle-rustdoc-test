@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["NormalizationStrategy",""]],"struct":[["TypeRelating",""]],"trait":[["TypeRelatingDelegate",""]]};

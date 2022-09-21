@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["CopyTaggedPtr","A `Copy` TaggedPtr."]]};

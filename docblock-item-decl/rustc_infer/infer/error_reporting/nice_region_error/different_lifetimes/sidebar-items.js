@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["suggest_adding_lifetime_params","Currently only used in rustc_borrowck, probably should be removed in favour of public_errors::AddLifetimeParamsSuggestion"]]};

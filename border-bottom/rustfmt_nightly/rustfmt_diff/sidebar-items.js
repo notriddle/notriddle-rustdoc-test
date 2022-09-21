@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["DiffLine",""]],"fn":[["make_diff",""],["print_diff",""]],"struct":[["Mismatch",""],["ModifiedChunk","A single span of changed lines, with 0 or more removed lines and a vector of 0 or more inserted lines."],["ModifiedLines","Set of changed sections of a file."],["OutputWriter",""]]};

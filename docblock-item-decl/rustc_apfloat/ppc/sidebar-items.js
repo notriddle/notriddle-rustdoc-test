@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["DoubleFloat",""],["FallbackExtendedS",""],["FallbackS",""]],"type":[["DoubleDouble",""],["Fallback",""],["FallbackExtended",""]]};

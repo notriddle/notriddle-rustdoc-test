@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Escape","Wrapper struct which will emit the HTML-escaped version of the contained string when passed to a format string."]]};

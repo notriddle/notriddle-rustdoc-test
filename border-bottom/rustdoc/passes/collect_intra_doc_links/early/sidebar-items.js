@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["doc_attrs",""],["early_resolve_intra_doc_links",""]],"struct":[["EarlyDocLinkResolver",""]]};

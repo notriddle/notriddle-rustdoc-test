@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Unhasher","This no-op hasher expects only a single `write_u64` call. It’s intended for map keys that already have hash-like quality, like `Fingerprint`."]],"type":[["UnhashMap",""],["UnhashSet",""]]};

@@ -1,0 +1,340 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/outlives/utils.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>utils.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_infer::infer::outlives::components::{<a href="../../../rustc_infer/infer/outlives/components/fn.push_outlives_components.html">push_outlives_components</a>, <a href="../../../rustc_infer/infer/outlives/components/enum.Component.html">Component</a>};
+<span class="kw">use </span>rustc_middle::ty::subst::{<a href="../../../rustc_middle/ty/subst/struct.GenericArg.html">GenericArg</a>, <a href="../../../rustc_middle/ty/subst/enum.GenericArgKind.html">GenericArgKind</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, Region, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec::smallvec</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">std::collections::BTreeMap</a>;
+
+<span class="doccomment">/// Tracks the `T: &#39;a` or `&#39;a: &#39;a` predicates that we have inferred
+/// must be added to the struct header.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type </span>RequiredPredicates&lt;<span class="lifetime">&#39;tcx</span>&gt; =
+    BTreeMap&lt;ty::OutlivesPredicate&lt;GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;, ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;;
+
+<span class="doccomment">/// Given a requirement `T: &#39;a` or `&#39;b: &#39;a`, deduce the
+/// outlives_component and add it to `required_predicates`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_outlives_predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    kind: GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    outlived_region: Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    required_predicates: <span class="kw-2">&amp;mut </span>RequiredPredicates&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) {
+    <span class="comment">// If the `&#39;a` region is bound within the field type itself, we
+    // don&#39;t want to propagate this constraint to the header.
+    </span><span class="kw">if </span>!is_free_region(outlived_region) {
+        <span class="kw">return</span>;
+    }
+
+    <span class="kw">match </span><a href="#17">kind</a>.unpack() {
+        GenericArgKind::Type(ty) =&gt; {
+            <span class="comment">// `T: &#39;outlived_region` for some type `T`
+            // But T could be a lot of things:
+            // e.g., if `T = &amp;&#39;b u32`, then `&#39;b: &#39;outlived_region` is
+            // what we want to add.
+            //
+            // Or if within `struct Foo&lt;U&gt;` you had `T = Vec&lt;U&gt;`, then
+            // we would want to add `U: &#39;outlived_region`
+            </span><span class="kw">let </span><span class="kw-2">mut </span>components = <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[];
+            <a href="../../../rustc_infer/infer/outlives/components/fn.push_outlives_components.html">push_outlives_components</a>(<a href="#16">tcx</a>, <a href="#29">ty</a>, <span class="kw-2">&amp;mut </span><a href="#37">components</a>);
+            <span class="kw">for </span>component <span class="kw">in </span>components {
+                <span class="kw">match </span>component {
+                    Component::Region(r) =&gt; {
+                        <span class="comment">// This would arise from something like:
+                        //
+                        // ```
+                        // struct Foo&lt;&#39;a, &#39;b&gt; {
+                        //    x:  &amp;&#39;a &amp;&#39;b u32
+                        // }
+                        // ```
+                        //
+                        // Here `outlived_region = &#39;a` and `kind = &amp;&#39;b
+                        // u32`.  Decomposing `&amp;&#39;b u32` into
+                        // components would yield `&#39;b`, and we add the
+                        // where clause that `&#39;b: &#39;a`.
+                        </span>insert_outlives_predicate(
+                            tcx,
+                            r.into(),
+                            outlived_region,
+                            span,
+                            required_predicates,
+                        );
+                    }
+
+                    Component::Param(param_ty) =&gt; {
+                        <span class="comment">// param_ty: ty::ParamTy
+                        // This would arise from something like:
+                        //
+                        // ```
+                        // struct Foo&lt;&#39;a, U&gt; {
+                        //    x:  &amp;&#39;a Vec&lt;U&gt;
+                        // }
+                        // ```
+                        //
+                        // Here `outlived_region = &#39;a` and `kind =
+                        // Vec&lt;U&gt;`.  Decomposing `Vec&lt;U&gt;` into
+                        // components would yield `U`, and we add the
+                        // where clause that `U: &#39;a`.
+                        </span><span class="kw">let </span>ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; = param_ty.to_ty(tcx);
+                        required_predicates
+                            .entry(ty::OutlivesPredicate(ty.into(), outlived_region))
+                            .or_insert(span);
+                    }
+
+                    Component::Projection(proj_ty) =&gt; {
+                        <span class="comment">// This would arise from something like:
+                        //
+                        // ```
+                        // struct Foo&lt;&#39;a, T: Iterator&gt; {
+                        //    x:  &amp;&#39;a &lt;T as Iterator&gt;::Item
+                        // }
+                        // ```
+                        //
+                        // Here we want to add an explicit `where &lt;T as Iterator&gt;::Item: &#39;a`.
+                        </span><span class="kw">let </span>ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; = tcx.mk_projection(proj_ty.item_def_id, proj_ty.substs);
+                        required_predicates
+                            .entry(ty::OutlivesPredicate(ty.into(), outlived_region))
+                            .or_insert(span);
+                    }
+
+                    Component::EscapingProjection(<span class="kw">_</span>) =&gt; {
+                        <span class="comment">// As above, but the projection involves
+                        // late-bound regions.  Therefore, the WF
+                        // requirement is not checked in type definition
+                        // but at fn call site, so ignore it.
+                        //
+                        // ```
+                        // struct Foo&lt;&#39;a, T: Iterator&gt; {
+                        //    x: for&lt;&#39;b&gt; fn(&lt;&amp;&#39;b T as Iterator&gt;::Item)
+                        //              //  ^^^^^^^^^^^^^^^^^^^^^^^^^
+                        // }
+                        // ```
+                        //
+                        // Since `&#39;b` is not in scope on `Foo`, can&#39;t
+                        // do anything here, ignore it.
+                    </span>}
+
+                    Component::UnresolvedInferenceVariable(<span class="kw">_</span>) =&gt; <span class="macro">bug!</span>(<span class="string">&quot;not using infcx&quot;</span>),
+                }
+            }
+        }
+
+        GenericArgKind::Lifetime(r) =&gt; {
+            <span class="kw">if </span>!is_free_region(r) {
+                <span class="kw">return</span>;
+            }
+            <a href="#20">required_predicates</a>.entry(ty::OutlivesPredicate(<a href="#17">kind</a>, <a href="#18">outlived_region</a>)).or_insert(<a href="#19">span</a>);
+        }
+
+        GenericArgKind::Const(<span class="kw">_</span>) =&gt; {
+            <span class="comment">// Generic consts don&#39;t impose any constraints.
+        </span>}
+    }
+}
+
+<span class="kw">fn </span>is_free_region(region: Region&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="comment">// First, screen for regions that might appear in a type header.
+    </span><span class="kw">match </span><span class="kw-2">*</span><a href="#134">region</a> {
+        <span class="comment">// These correspond to `T: &#39;a` relationships:
+        //
+        //     struct Foo&lt;&#39;a, T&gt; {
+        //         field: &amp;&#39;a T, // this would generate a ReEarlyBound referencing `&#39;a`
+        //     }
+        //
+        // We care about these, so fall through.
+        </span>ty::ReEarlyBound(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+
+        <span class="comment">// These correspond to `T: &#39;static` relationships which can be
+        // rather surprising.
+        //
+        //     struct Foo&lt;&#39;a, T&gt; {
+        //         field: &amp;&#39;static T, // this would generate a ReStatic
+        //     }
+        </span>ty::ReStatic =&gt; <span class="bool-val">false</span>,
+
+        <span class="comment">// Late-bound regions can appear in `fn` types:
+        //
+        //     struct Foo&lt;T&gt; {
+        //         field: for&lt;&#39;b&gt; fn(&amp;&#39;b T) // e.g., &#39;b here
+        //     }
+        //
+        // The type above might generate a `T: &#39;b` bound, but we can
+        // ignore it.  We can&#39;t put it on the struct header anyway.
+        </span>ty::ReLateBound(..) =&gt; <span class="bool-val">false</span>,
+
+        <span class="comment">// These regions don&#39;t appear in types from type declarations:
+        </span>ty::ReErased | ty::ReVar(..) | ty::RePlaceholder(..) | ty::ReFree(..) =&gt; {
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unexpected region in outlives inference: {:?}&quot;</span>, region);
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

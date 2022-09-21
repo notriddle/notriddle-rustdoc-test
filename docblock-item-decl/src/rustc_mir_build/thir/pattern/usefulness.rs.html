@@ -1,0 +1,1986 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_build/src/thir/pattern/usefulness.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>usefulness.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_mir_build/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_mir_build/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_mir_build/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Note: tests specific to this file can be found in:
+//!
+//!   - `ui/pattern/usefulness`
+//!   - `ui/or-patterns`
+//!   - `ui/consts/const_in_pattern`
+//!   - `ui/rfc-2008-non-exhaustive`
+//!   - `ui/half-open-range-patterns`
+//!   - probably many others
+//!
+//! I (Nadrieril) prefer to put new tests in `ui/pattern/usefulness` unless there&#39;s a specific
+//! reason not to, for example if they depend on a particular feature like `or_patterns`.
+//!
+//! -----
+//!
+//! This file includes the logic for exhaustiveness and reachability checking for pattern-matching.
+//! Specifically, given a list of patterns for a type, we can tell whether:
+//! (a) each pattern is reachable (reachability)
+//! (b) the patterns cover every possible value for the type (exhaustiveness)
+//!
+//! The algorithm implemented here is a modified version of the one described in [this
+//! paper](http://moscova.inria.fr/~maranget/papers/warn/index.html). We have however generalized
+//! it to accommodate the variety of patterns that Rust supports. We thus explain our version here,
+//! without being as rigorous.
+//!
+//!
+//! # Summary
+//!
+//! The core of the algorithm is the notion of &quot;usefulness&quot;. A pattern `q` is said to be *useful*
+//! relative to another pattern `p` of the same type if there is a value that is matched by `q` and
+//! not matched by `p`. This generalizes to many `p`s: `q` is useful w.r.t. a list of patterns
+//! `p_1 .. p_n` if there is a value that is matched by `q` and by none of the `p_i`. We write
+//! `usefulness(p_1 .. p_n, q)` for a function that returns a list of such values. The aim of this
+//! file is to compute it efficiently.
+//!
+//! This is enough to compute reachability: a pattern in a `match` expression is reachable iff it
+//! is useful w.r.t. the patterns above it:
+//! ```rust
+//! # fn foo(x: Option&lt;i32&gt;) {
+//! match x {
+//!     Some(_) =&gt; {},
+//!     None =&gt; {},    // reachable: `None` is matched by this but not the branch above
+//!     Some(0) =&gt; {}, // unreachable: all the values this matches are already matched by
+//!                    // `Some(_)` above
+//! }
+//! # }
+//! ```
+//!
+//! This is also enough to compute exhaustiveness: a match is exhaustive iff the wildcard `_`
+//! pattern is _not_ useful w.r.t. the patterns in the match. The values returned by `usefulness`
+//! are used to tell the user which values are missing.
+//! ```compile_fail,E0004
+//! # fn foo(x: Option&lt;i32&gt;) {
+//! match x {
+//!     Some(0) =&gt; {},
+//!     None =&gt; {},
+//!     // not exhaustive: `_` is useful because it matches `Some(1)`
+//! }
+//! # }
+//! ```
+//!
+//! The entrypoint of this file is the [`compute_match_usefulness`] function, which computes
+//! reachability for each match branch and exhaustiveness for the whole match.
+//!
+//!
+//! # Constructors and fields
+//!
+//! Note: we will often abbreviate &quot;constructor&quot; as &quot;ctor&quot;.
+//!
+//! The idea that powers everything that is done in this file is the following: a (matchable)
+//! value is made from a constructor applied to a number of subvalues. Examples of constructors are
+//! `Some`, `None`, `(,)` (the 2-tuple constructor), `Foo {..}` (the constructor for a struct
+//! `Foo`), and `2` (the constructor for the number `2`). This is natural when we think of
+//! pattern-matching, and this is the basis for what follows.
+//!
+//! Some of the ctors listed above might feel weird: `None` and `2` don&#39;t take any arguments.
+//! That&#39;s ok: those are ctors that take a list of 0 arguments; they are the simplest case of
+//! ctors. We treat `2` as a ctor because `u64` and other number types behave exactly like a huge
+//! `enum`, with one variant for each number. This allows us to see any matchable value as made up
+//! from a tree of ctors, each having a set number of children. For example: `Foo { bar: None,
+//! baz: Ok(0) }` is made from 4 different ctors, namely `Foo{..}`, `None`, `Ok` and `0`.
+//!
+//! This idea can be extended to patterns: they are also made from constructors applied to fields.
+//! A pattern for a given type is allowed to use all the ctors for values of that type (which we
+//! call &quot;value constructors&quot;), but there are also pattern-only ctors. The most important one is
+//! the wildcard (`_`), and the others are integer ranges (`0..=10`), variable-length slices (`[x,
+//! ..]`), and or-patterns (`Ok(0) | Err(_)`). Examples of valid patterns are `42`, `Some(_)`, `Foo
+//! { bar: Some(0) | None, baz: _ }`. Note that a binder in a pattern (e.g. `Some(x)`) matches the
+//! same values as a wildcard (e.g. `Some(_)`), so we treat both as wildcards.
+//!
+//! From this deconstruction we can compute whether a given value matches a given pattern; we
+//! simply look at ctors one at a time. Given a pattern `p` and a value `v`, we want to compute
+//! `matches!(v, p)`. It&#39;s mostly straightforward: we compare the head ctors and when they match
+//! we compare their fields recursively. A few representative examples:
+//!
+//! - `matches!(v, _) := true`
+//! - `matches!((v0,  v1), (p0,  p1)) := matches!(v0, p0) &amp;&amp; matches!(v1, p1)`
+//! - `matches!(Foo { bar: v0, baz: v1 }, Foo { bar: p0, baz: p1 }) := matches!(v0, p0) &amp;&amp; matches!(v1, p1)`
+//! - `matches!(Ok(v0), Ok(p0)) := matches!(v0, p0)`
+//! - `matches!(Ok(v0), Err(p0)) := false` (incompatible variants)
+//! - `matches!(v, 1..=100) := matches!(v, 1) || ... || matches!(v, 100)`
+//! - `matches!([v0], [p0, .., p1]) := false` (incompatible lengths)
+//! - `matches!([v0, v1, v2], [p0, .., p1]) := matches!(v0, p0) &amp;&amp; matches!(v2, p1)`
+//! - `matches!(v, p0 | p1) := matches!(v, p0) || matches!(v, p1)`
+//!
+//! Constructors, fields and relevant operations are defined in the [`super::deconstruct_pat`] module.
+//!
+//! Note: this constructors/fields distinction may not straightforwardly apply to every Rust type.
+//! For example a value of type `Rc&lt;u64&gt;` can&#39;t be deconstructed that way, and `&amp;str` has an
+//! infinitude of constructors. There are also subtleties with visibility of fields and
+//! uninhabitedness and various other things. The constructors idea can be extended to handle most
+//! of these subtleties though; caveats are documented where relevant throughout the code.
+//!
+//! Whether constructors cover each other is computed by [`Constructor::is_covered_by`].
+//!
+//!
+//! # Specialization
+//!
+//! Recall that we wish to compute `usefulness(p_1 .. p_n, q)`: given a list of patterns `p_1 ..
+//! p_n` and a pattern `q`, all of the same type, we want to find a list of values (called
+//! &quot;witnesses&quot;) that are matched by `q` and by none of the `p_i`. We obviously don&#39;t just
+//! enumerate all possible values. From the discussion above we see that we can proceed
+//! ctor-by-ctor: for each value ctor of the given type, we ask &quot;is there a value that starts with
+//! this constructor and matches `q` and none of the `p_i`?&quot;. As we saw above, there&#39;s a lot we can
+//! say from knowing only the first constructor of our candidate value.
+//!
+//! Let&#39;s take the following example:
+//! ```compile_fail,E0004
+//! # enum Enum { Variant1(()), Variant2(Option&lt;bool&gt;, u32)}
+//! # fn foo(x: Enum) {
+//! match x {
+//!     Enum::Variant1(_) =&gt; {} // `p1`
+//!     Enum::Variant2(None, 0) =&gt; {} // `p2`
+//!     Enum::Variant2(Some(_), 0) =&gt; {} // `q`
+//! }
+//! # }
+//! ```
+//!
+//! We can easily see that if our candidate value `v` starts with `Variant1` it will not match `q`.
+//! If `v = Variant2(v0, v1)` however, whether or not it matches `p2` and `q` will depend on `v0`
+//! and `v1`. In fact, such a `v` will be a witness of usefulness of `q` exactly when the tuple
+//! `(v0, v1)` is a witness of usefulness of `q&#39;` in the following reduced match:
+//!
+//! ```compile_fail,E0004
+//! # fn foo(x: (Option&lt;bool&gt;, u32)) {
+//! match x {
+//!     (None, 0) =&gt; {} // `p2&#39;`
+//!     (Some(_), 0) =&gt; {} // `q&#39;`
+//! }
+//! # }
+//! ```
+//!
+//! This motivates a new step in computing usefulness, that we call _specialization_.
+//! Specialization consist of filtering a list of patterns for those that match a constructor, and
+//! then looking into the constructor&#39;s fields. This enables usefulness to be computed recursively.
+//!
+//! Instead of acting on a single pattern in each row, we will consider a list of patterns for each
+//! row, and we call such a list a _pattern-stack_. The idea is that we will specialize the
+//! leftmost pattern, which amounts to popping the constructor and pushing its fields, which feels
+//! like a stack. We note a pattern-stack simply with `[p_1 ... p_n]`.
+//! Here&#39;s a sequence of specializations of a list of pattern-stacks, to illustrate what&#39;s
+//! happening:
+//! ```ignore (illustrative)
+//! [Enum::Variant1(_)]
+//! [Enum::Variant2(None, 0)]
+//! [Enum::Variant2(Some(_), 0)]
+//! //==&gt;&gt; specialize with `Variant2`
+//! [None, 0]
+//! [Some(_), 0]
+//! //==&gt;&gt; specialize with `Some`
+//! [_, 0]
+//! //==&gt;&gt; specialize with `true` (say the type was `bool`)
+//! [0]
+//! //==&gt;&gt; specialize with `0`
+//! []
+//! ```
+//!
+//! The function `specialize(c, p)` takes a value constructor `c` and a pattern `p`, and returns 0
+//! or more pattern-stacks. If `c` does not match the head constructor of `p`, it returns nothing;
+//! otherwise if returns the fields of the constructor. This only returns more than one
+//! pattern-stack if `p` has a pattern-only constructor.
+//!
+//! - Specializing for the wrong constructor returns nothing
+//!
+//!   `specialize(None, Some(p0)) := []`
+//!
+//! - Specializing for the correct constructor returns a single row with the fields
+//!
+//!   `specialize(Variant1, Variant1(p0, p1, p2)) := [[p0, p1, p2]]`
+//!
+//!   `specialize(Foo{..}, Foo { bar: p0, baz: p1 }) := [[p0, p1]]`
+//!
+//! - For or-patterns, we specialize each branch and concatenate the results
+//!
+//!   `specialize(c, p0 | p1) := specialize(c, p0) ++ specialize(c, p1)`
+//!
+//! - We treat the other pattern constructors as if they were a large or-pattern of all the
+//!   possibilities:
+//!
+//!   `specialize(c, _) := specialize(c, Variant1(_) | Variant2(_, _) | ...)`
+//!
+//!   `specialize(c, 1..=100) := specialize(c, 1 | ... | 100)`
+//!
+//!   `specialize(c, [p0, .., p1]) := specialize(c, [p0, p1] | [p0, _, p1] | [p0, _, _, p1] | ...)`
+//!
+//! - If `c` is a pattern-only constructor, `specialize` is defined on a case-by-case basis. See
+//!   the discussion about constructor splitting in [`super::deconstruct_pat`].
+//!
+//!
+//! We then extend this function to work with pattern-stacks as input, by acting on the first
+//! column and keeping the other columns untouched.
+//!
+//! Specialization for the whole matrix is done in [`Matrix::specialize_constructor`]. Note that
+//! or-patterns in the first column are expanded before being stored in the matrix. Specialization
+//! for a single patstack is done from a combination of [`Constructor::is_covered_by`] and
+//! [`PatStack::pop_head_constructor`]. The internals of how it&#39;s done mostly live in the
+//! [`Fields`] struct.
+//!
+//!
+//! # Computing usefulness
+//!
+//! We now have all we need to compute usefulness. The inputs to usefulness are a list of
+//! pattern-stacks `p_1 ... p_n` (one per row), and a new pattern_stack `q`. The paper and this
+//! file calls the list of patstacks a _matrix_. They must all have the same number of columns and
+//! the patterns in a given column must all have the same type. `usefulness` returns a (possibly
+//! empty) list of witnesses of usefulness. These witnesses will also be pattern-stacks.
+//!
+//! - base case: `n_columns == 0`.
+//!     Since a pattern-stack functions like a tuple of patterns, an empty one functions like the
+//!     unit type. Thus `q` is useful iff there are no rows above it, i.e. if `n == 0`.
+//!
+//! - inductive case: `n_columns &gt; 0`.
+//!     We need a way to list the constructors we want to try. We will be more clever in the next
+//!     section but for now assume we list all value constructors for the type of the first column.
+//!
+//!     - for each such ctor `c`:
+//!
+//!         - for each `q&#39;` returned by `specialize(c, q)`:
+//!
+//!             - we compute `usefulness(specialize(c, p_1) ... specialize(c, p_n), q&#39;)`
+//!
+//!         - for each witness found, we revert specialization by pushing the constructor `c` on top.
+//!
+//!     - We return the concatenation of all the witnesses found, if any.
+//!
+//! Example:
+//! ```ignore (illustrative)
+//! [Some(true)] // p_1
+//! [None] // p_2
+//! [Some(_)] // q
+//! //==&gt;&gt; try `None`: `specialize(None, q)` returns nothing
+//! //==&gt;&gt; try `Some`: `specialize(Some, q)` returns a single row
+//! [true] // p_1&#39;
+//! [_] // q&#39;
+//! //==&gt;&gt; try `true`: `specialize(true, q&#39;)` returns a single row
+//! [] // p_1&#39;&#39;
+//! [] // q&#39;&#39;
+//! //==&gt;&gt; base case; `n != 0` so `q&#39;&#39;` is not useful.
+//! //==&gt;&gt; go back up a step
+//! [true] // p_1&#39;
+//! [_] // q&#39;
+//! //==&gt;&gt; try `false`: `specialize(false, q&#39;)` returns a single row
+//! [] // q&#39;&#39;
+//! //==&gt;&gt; base case; `n == 0` so `q&#39;&#39;` is useful. We return the single witness `[]`
+//! witnesses:
+//! []
+//! //==&gt;&gt; undo the specialization with `false`
+//! witnesses:
+//! [false]
+//! //==&gt;&gt; undo the specialization with `Some`
+//! witnesses:
+//! [Some(false)]
+//! //==&gt;&gt; we have tried all the constructors. The output is the single witness `[Some(false)]`.
+//! ```
+//!
+//! This computation is done in [`is_useful`]. In practice we don&#39;t care about the list of
+//! witnesses when computing reachability; we only need to know whether any exist. We do keep the
+//! witnesses when computing exhaustiveness to report them to the user.
+//!
+//!
+//! # Making usefulness tractable: constructor splitting
+//!
+//! We&#39;re missing one last detail: which constructors do we list? Naively listing all value
+//! constructors cannot work for types like `u64` or `&amp;str`, so we need to be more clever. The
+//! first obvious insight is that we only want to list constructors that are covered by the head
+//! constructor of `q`. If it&#39;s a value constructor, we only try that one. If it&#39;s a pattern-only
+//! constructor, we use the final clever idea for this algorithm: _constructor splitting_, where we
+//! group together constructors that behave the same.
+//!
+//! The details are not necessary to understand this file, so we explain them in
+//! [`super::deconstruct_pat`]. Splitting is done by the [`Constructor::split`] function.
+
+</span><span class="kw">use </span><a href="#668"><span class="self">self</span>::ArmType</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="#544"><span class="self">self</span>::Usefulness</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><span class="kw">super</span>::check_match::{<a href="check_match.rs.html#901-904">joined_uncovered_patterns</a>, <a href="check_match.rs.html#922-925">pattern_not_covered_label</a>};
+<span class="kw">use </span><span class="kw">super</span>::deconstruct_pat::{<a href="deconstruct_pat.rs.html#645">Constructor</a>, <a href="deconstruct_pat.rs.html#1264">DeconstructedPat</a>, <a href="deconstruct_pat.rs.html#1151">Fields</a>, <a href="deconstruct_pat.rs.html#917">SplitWildcard</a>};
+
+<span class="kw">use </span><a href="../../../../rustc_data_structures/captures/trait.Captures.html">rustc_data_structures::captures::Captures</a>;
+
+<span class="kw">use </span><a href="../../../../rustc_arena/struct.TypedArena.html">rustc_arena::TypedArena</a>;
+<span class="kw">use </span><a href="../../../../rustc_data_structures/stack/fn.ensure_sufficient_stack.html">rustc_data_structures::stack::ensure_sufficient_stack</a>;
+<span class="kw">use </span><a href="../../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../../rustc_hir/hir_id/struct.HirId.html">rustc_hir::HirId</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../../rustc_middle/ty/index.html">self</a>, <a href="../../../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../../rustc_lint_defs/builtin/static.NON_EXHAUSTIVE_OMITTED_PATTERNS.html">rustc_session::lint::builtin::NON_EXHAUSTIVE_OMITTED_PATTERNS</a>;
+<span class="kw">use </span>rustc_span::{<a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+
+<span class="kw">use </span>smallvec::{<a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec</a>, <a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">SmallVec</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">std::fmt</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/sources/once/fn.once.html">std::iter::once</a>;
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MatchCheckCtxt&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="doccomment">/// The module in which the match occurs. This is necessary for
+    /// checking inhabited-ness of types because whether a type is (visibly)
+    /// inhabited can depend on whether it was defined in the current module or
+    /// not. E.g., `struct Foo { _private: ! }` cannot be seen to be empty
+    /// outside its module and should not be matchable with an empty match statement.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) module: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pattern_arena: <span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>TypedArena&lt;DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; MatchCheckCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>is_uninhabited(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">if </span><span class="self">self</span>.tcx.features().exhaustive_patterns {
+            <a class="self" href="#325">self</a>.tcx.is_ty_uninhabited_from(<a class="self" href="#325">self</a>.module, <a href="#325">ty</a>, <a class="self" href="#325">self</a>.param_env)
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="doccomment">/// Returns whether the given type is an enum from another crate declared `#[non_exhaustive]`.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>is_foreign_non_exhaustive_enum(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a href="#334">ty</a>.kind() {
+            ty::Adt(def, ..) =&gt; {
+                <a href="#336">def</a>.is_enum() &amp;&amp; <a href="#336">def</a>.is_variant_list_non_exhaustive() &amp;&amp; !<a href="#336">def</a>.did().is_local()
+            }
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+
+<span class="attribute">#[derive(Copy, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>PatCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MatchCheckCtxt&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="doccomment">/// Type of the current column under investigation.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="doccomment">/// Span of the current pattern under investigation.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    <span class="doccomment">/// Whether the current pattern is the whole pattern as found in a match arm, or if it&#39;s a
+    /// subpattern.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) is_top_level: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    <span class="doccomment">/// Whether the current pattern is from a `non_exhaustive` enum.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) is_non_exhaustive: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>PatCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a href="#359">f</a>.debug_struct(<span class="string">&quot;PatCtxt&quot;</span>).field(<span class="string">&quot;ty&quot;</span>, <span class="kw-2">&amp;</span><a class="self" href="#359">self</a>.ty).finish()
+    }
+}
+
+<span class="doccomment">/// A row of a matrix. Rows of len 1 are very common, which is why `SmallVec[_; 2]`
+/// works well.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pats: SmallVec&lt;[<span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;; <span class="number">2</span>]&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>from_pattern(pat: <span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::from_vec(<a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[pat])
+    }
+
+    <span class="kw">fn </span>from_vec(vec: SmallVec&lt;[<span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;; <span class="number">2</span>]&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#367">PatStack</a> { pats: <a href="#376">vec</a> }
+    }
+
+    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#380">self</a>.pats.is_empty()
+    }
+
+    <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#384">self</a>.pats.len()
+    }
+
+    <span class="kw">fn </span>head(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#388">self</a>.pats[<span class="number">0</span>]
+    }
+
+    <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="self" href="#392">self</a>.pats.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()
+    }
+
+    <span class="comment">// Recursively expand the first pattern into its subpatterns. Only useful if the pattern is an
+    // or-pattern. Panics if `self` is empty.
+    </span><span class="kw">fn </span>expand_or_pat&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; + Captures&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a class="self" href="#398">self</a>.<a href="#388">head</a>().<a href="deconstruct_pat.rs.html#1552-1554">iter_fields</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="kw">move </span>|pat| {
+            <span class="kw">let </span><span class="kw-2">mut </span>new_patstack = PatStack::from_pattern(<a href="#399">pat</a>);
+            <a href="#400">new_patstack</a>.pats.extend_from_slice(<span class="kw-2">&amp;</span><a class="self" href="#398">self</a>.pats[<span class="number">1</span>..]);
+            <a href="#400">new_patstack</a>
+        })
+    }
+
+    <span class="comment">// Recursively expand all patterns into their subpatterns and push each `PatStack` to matrix.
+    </span><span class="kw">fn </span>expand_and_extend&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, matrix: <span class="kw-2">&amp;mut </span>Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">if </span>!<span class="self">self</span>.is_empty() &amp;&amp; <span class="self">self</span>.head().is_or_pat() {
+            <span class="kw">for </span>pat <span class="kw">in </span><span class="self">self</span>.head().iter_fields() {
+                <span class="kw">let </span><span class="kw-2">mut </span>new_patstack = PatStack::from_pattern(pat);
+                new_patstack.pats.extend_from_slice(<span class="kw-2">&amp;</span><span class="self">self</span>.pats[<span class="number">1</span>..]);
+                <span class="kw">if </span>!new_patstack.is_empty() &amp;&amp; new_patstack.head().is_or_pat() {
+                    new_patstack.expand_and_extend(matrix);
+                } <span class="kw">else if </span>!new_patstack.is_empty() {
+                    matrix.push(new_patstack);
+                }
+            }
+        }
+    }
+
+    <span class="doccomment">/// This computes `S(self.head().ctor(), self)`. See top of the file for explanations.
+    ///
+    /// Structure patterns with a partial wild pattern (Foo { a: 42, .. }) have their missing
+    /// fields filled with wild patterns.
+    ///
+    /// This is roughly the inverse of `Constructor::apply`.
+    </span><span class="kw">fn </span>pop_head_constructor(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        pcx: <span class="kw-2">&amp;</span>PatCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        ctor: <span class="kw-2">&amp;</span>Constructor&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// We pop the head pattern and push the new fields extracted from the arguments of
+        // `self.head()`.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>new_fields: SmallVec&lt;[<span class="kw">_</span>; <span class="number">2</span>]&gt; = <a class="self" href="#428">self</a>.<a href="#388">head</a>().<a href="deconstruct_pat.rs.html#1560-1564">specialize</a>(<a href="#429">pcx</a>, <a href="#430">ctor</a>);
+        <a href="#434">new_fields</a>.extend_from_slice(<span class="kw-2">&amp;</span><a class="self" href="#428">self</a>.pats[<span class="number">1</span>..]);
+        PatStack::from_vec(<a href="#434">new_fields</a>)
+    }
+}
+
+<span class="doccomment">/// Pretty-printing for matrix row.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="macro">write!</span>(f, <span class="string">&quot;+&quot;</span>)<span class="question-mark">?</span>;
+        <span class="kw">for </span>pat <span class="kw">in </span><span class="self">self</span>.iter() {
+            <span class="macro">write!</span>(f, <span class="string">&quot; {:?} +&quot;</span>, pat)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+
+<span class="doccomment">/// A 2D matrix.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>patterns: Vec&lt;PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>empty() -&gt; <span class="self">Self </span>{
+        <a href="#453">Matrix</a> { patterns: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[] }
+    }
+
+    <span class="doccomment">/// Number of columns of this matrix. `None` is the matrix is empty.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>column_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt; {
+        <a class="self" href="#463">self</a>.patterns.get(<span class="number">0</span>).map(|r| <a href="#464">r</a>.<a href="#384">len</a>())
+    }
+
+    <span class="doccomment">/// Pushes a new row to the matrix. If the row starts with an or-pattern, this recursively
+    /// expands it.
+    </span><span class="kw">fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, row: PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">if </span>!row.is_empty() &amp;&amp; row.head().is_or_pat() {
+            <a href="#469">row</a>.<a href="#407">expand_and_extend</a>(<a class="self" href="#469">self</a>);
+        } <span class="kw">else </span>{
+            <a class="self" href="#469">self</a>.patterns.push(<a href="#469">row</a>);
+        }
+    }
+
+    <span class="doccomment">/// Iterate over the first component of each row
+    </span><span class="kw">fn </span>heads&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; + <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a> + Captures&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a class="self" href="#479">self</a>.patterns.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|r| <a href="#481">r</a>.<a href="#388">head</a>())
+    }
+
+    <span class="doccomment">/// This computes `S(constructor, self)`. See top of the file for explanations.
+    </span><span class="kw">fn </span>specialize_constructor(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        pcx: <span class="kw-2">&amp;</span>PatCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        ctor: <span class="kw-2">&amp;</span>Constructor&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>matrix = Matrix::empty();
+        <span class="kw">for </span>row <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.patterns {
+            <span class="kw">if </span>ctor.is_covered_by(pcx, row.head().ctor()) {
+                <span class="kw">let </span>new_row = row.pop_head_constructor(pcx, ctor);
+                matrix.push(new_row);
+            }
+        }
+        <a href="#490">matrix</a>
+    }
+}
+
+<span class="doccomment">/// Pretty-printer for matrices of patterns, example:
+///
+/// ```text
+/// + _     + []                +
+/// + true  + [First]           +
+/// + true  + [Second(true)]    +
+/// + false + [_]               +
+/// + _     + [_, _, tail @ ..] +
+/// ```
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="macro">write!</span>(f, <span class="string">&quot;\n&quot;</span>)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span><a href="#453">Matrix</a> { patterns: m, .. } = <a class="self" href="#511">self</a>;
+        <span class="kw">let </span>pretty_printed_matrix: Vec&lt;Vec&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;&gt; =
+            <a href="#514">m</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|row| <a href="#516">row</a>.<a href="#392">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|pat| <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, pat)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span>column_count = <a href="#514">m</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|row| <a href="#518">row</a>.<a href="#384">len</a>()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap_or(<span class="number">0</span>);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(m.iter().all(|row| row.len() == column_count));
+        <span class="kw">let </span>column_widths: Vec&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt; = (<span class="number">0</span>..<a href="#518">column_count</a>)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|col| <a href="#515">pretty_printed_matrix</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|row| <a href="#521">row</a>[<a href="#521">col</a>].len()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">max</a>().unwrap_or(<span class="number">0</span>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">for </span>row <span class="kw">in </span>pretty_printed_matrix {
+            <span class="macro">write!</span>(f, <span class="string">&quot;+&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">for </span>(column, pat_str) <span class="kw">in </span>row.into_iter().enumerate() {
+                <span class="macro">write!</span>(f, <span class="string">&quot; &quot;</span>)<span class="question-mark">?</span>;
+                <span class="macro">write!</span>(f, <span class="string">&quot;{:1$}&quot;</span>, pat_str, column_widths[column])<span class="question-mark">?</span>;
+                <span class="macro">write!</span>(f, <span class="string">&quot; +&quot;</span>)<span class="question-mark">?</span>;
+            }
+            <span class="macro">write!</span>(f, <span class="string">&quot;\n&quot;</span>)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+
+<span class="doccomment">/// This carries the results of computing usefulness, as described at the top of the file. When
+/// checking usefulness of a match branch, we use the `NoWitnesses` variant, which also keeps track
+/// of potential unreachable sub-patterns (in the presence of or-patterns). When checking
+/// exhaustiveness of a whole match, we use the `WithWitnesses` variant, which carries a list of
+/// witnesses of non-exhaustiveness when there are any.
+/// Which variant to use is dictated by `ArmType`.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">enum </span>Usefulness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// If we don&#39;t care about witnesses, simply remember if the pattern was useful.
+    </span>NoWitnesses { useful: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> },
+    <span class="doccomment">/// Carries a list of witnesses of non-exhaustiveness. If empty, indicates that the whole
+    /// pattern is unreachable.
+    </span>WithWitnesses(Vec&lt;Witness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; Usefulness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new_useful(preference: <a href="#668">ArmType</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span><a href="#553">preference</a> {
+            <span class="comment">// A single (empty) witness of reachability.
+            </span><a href="#669">FakeExtraWildcard</a> =&gt; <a href="#549">WithWitnesses</a>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[Witness(<span class="macro">vec!</span>[])]),
+            <a href="#670">RealArm</a> =&gt; <a href="#546">NoWitnesses</a> { useful: <span class="bool-val">true </span>},
+        }
+    }
+
+    <span class="kw">fn </span>new_not_useful(preference: <a href="#668">ArmType</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span><a href="#561">preference</a> {
+            <a href="#669">FakeExtraWildcard</a> =&gt; <a href="#549">WithWitnesses</a>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[]),
+            <a href="#670">RealArm</a> =&gt; <a href="#546">NoWitnesses</a> { useful: <span class="bool-val">false </span>},
+        }
+    }
+
+    <span class="kw">fn </span>is_useful(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#568">self</a> </span>{
+            <a href="#546">Usefulness::NoWitnesses</a> { useful } =&gt; <span class="kw-2">*</span><a href="#570">useful</a>,
+            <a href="#549">Usefulness::WithWitnesses</a>(witnesses) =&gt; !<a href="#571">witnesses</a>.is_empty(),
+        }
+    }
+
+    <span class="doccomment">/// Combine usefulnesses from two branches. This is an associative operation.
+    </span><span class="kw">fn </span>extend(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="self">Self</span>) {
+        <span class="kw">match </span>(<span class="kw-2">&amp;mut *</span><a class="self" href="#576">self</a>, <a href="#576">other</a>) {
+            (<a href="#549">WithWitnesses</a>(<span class="kw">_</span>), <a href="#549">WithWitnesses</a>(o)) <span class="kw">if </span><a href="#578">o</a>.is_empty() =&gt; {}
+            (<a href="#549">WithWitnesses</a>(s), <a href="#549">WithWitnesses</a>(o)) <span class="kw">if </span><a href="#579">s</a>.is_empty() =&gt; <span class="kw-2">*</span><span class="self"><a href="#576">self</a> </span>= <a href="#549">WithWitnesses</a>(<a href="#579">o</a>),
+            (<a href="#549">WithWitnesses</a>(s), <a href="#549">WithWitnesses</a>(o)) =&gt; <a href="#580">s</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#580">o</a>),
+            (<a href="#546">NoWitnesses</a> { useful: s_useful }, <a href="#546">NoWitnesses</a> { useful: o_useful }) =&gt; {
+                <span class="kw-2">*</span><a href="#581">s_useful</a> = <span class="kw-2">*</span><a href="#581">s_useful</a> || <a href="#581">o_useful</a>
+            }
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        }
+    }
+
+    <span class="doccomment">/// After calculating usefulness after a specialization, call this to reconstruct a usefulness
+    /// that makes sense for the matrix pre-specialization. This new usefulness can then be merged
+    /// with the results of specializing with the other constructors.
+    </span><span class="kw">fn </span>apply_constructor(
+        <span class="self">self</span>,
+        pcx: <span class="kw-2">&amp;</span>PatCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        matrix: <span class="kw-2">&amp;</span>Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;, <span class="comment">// used to compute missing ctors
+        </span>ctor: <span class="kw-2">&amp;</span>Constructor&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span><span class="self"><a href="#592">self</a> </span>{
+            <a href="#546">NoWitnesses</a> { .. } =&gt; <a class="self" href="#592">self</a>,
+            <a href="#549">WithWitnesses</a>(<span class="kw-2">ref </span>witnesses) <span class="kw">if </span><a href="#599">witnesses</a>.is_empty() =&gt; <a class="self" href="#592">self</a>,
+            <a href="#549">WithWitnesses</a>(witnesses) =&gt; {
+                <span class="kw">let </span>new_witnesses = <span class="kw">if let </span><a href="deconstruct_pat.rs.html#669">Constructor::Missing</a> { .. } = <a href="#595">ctor</a> {
+                    <span class="comment">// We got the special `Missing` constructor, so each of the missing constructors
+                    // gives a new pattern that is not caught by the match. We list those patterns.
+                    </span><span class="kw">let </span>new_patterns = <span class="kw">if </span>pcx.is_non_exhaustive {
+                        <span class="comment">// Here we don&#39;t want the user to try to list all variants, we want them to add
+                        // a wildcard, so we only suggest that.
+                        </span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[DeconstructedPat::wildcard(pcx.ty)]
+                    } <span class="kw">else </span>{
+                        <span class="kw">let </span><span class="kw-2">mut </span>split_wildcard = SplitWildcard::new(<a href="#593">pcx</a>);
+                        <a href="#609">split_wildcard</a>.<a href="deconstruct_pat.rs.html#1049-1054">split</a>(<a href="#593">pcx</a>, <a href="#594">matrix</a>.<a href="#478-480">heads</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(DeconstructedPat::ctor));
+
+                        <span class="comment">// This lets us know if we skipped any variants because they are marked
+                        // `doc(hidden)` or they are unstable feature gate (only stdlib types).
+                        </span><span class="kw">let </span><span class="kw-2">mut </span>hide_variant_show_wild = <span class="bool-val">false</span>;
+                        <span class="comment">// Construct for each missing constructor a &quot;wild&quot; version of this
+                        // constructor, that matches everything that can be built with
+                        // it. For example, if `ctor` is a `Constructor::Variant` for
+                        // `Option::Some`, we get the pattern `Some(_)`.
+                        </span><span class="kw">let </span><span class="kw-2">mut </span>new: Vec&lt;DeconstructedPat&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;&gt; = <a href="#609">split_wildcard</a>
+                            .<a href="deconstruct_pat.rs.html#1068-1071">iter_missing</a>(<a href="#593">pcx</a>)
+                            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|missing_ctor| {
+                                <span class="comment">// Check if this variant is marked `doc(hidden)`
+                                </span><span class="kw">if </span>missing_ctor.is_doc_hidden_variant(pcx)
+                                    || missing_ctor.is_unstable_variant(pcx)
+                                {
+                                    <a href="#614">hide_variant_show_wild</a> = <span class="bool-val">true</span>;
+                                    <span class="kw">return </span><span class="prelude-val">None</span>;
+                                }
+                                <span class="prelude-val">Some</span>(DeconstructedPat::wild_from_ctor(<a href="#593">pcx</a>, <a href="#621">missing_ctor</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()))
+                            })
+                            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+                        <span class="kw">if </span>hide_variant_show_wild {
+                            <a href="#619">new</a>.push(DeconstructedPat::wildcard(<a href="#593">pcx</a>.ty));
+                        }
+
+                        <a href="#619">new</a>
+                    };
+
+                    <a href="#600">witnesses</a>
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|witness| {
+                            <a href="#604">new_patterns</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="kw">move </span>|pat| {
+                                <a href="#709">Witness</a>(
+                                    <a href="#642">witness</a>
+                                        .<span class="number">0
+                                        </span>.iter()
+                                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="https://doc.rust-lang.org/nightly/core/iter/sources/once/fn.once.html">once</a>(<a href="#643">pat</a>))
+                                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(DeconstructedPat::clone_and_forget_reachability)
+                                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+                                )
+                            })
+                        })
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+                } <span class="kw">else </span>{
+                    <a href="#600">witnesses</a>
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|witness| <a href="#658">witness</a>.<a href="#731">apply_constructor</a>(<a href="#593">pcx</a>, <span class="kw-2">&amp;</span><a href="#595">ctor</a>))
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+                };
+                <a href="#549">WithWitnesses</a>(<a href="#601">new_witnesses</a>)
+            }
+        }
+    }
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">enum </span>ArmType {
+    FakeExtraWildcard,
+    RealArm,
+}
+
+<span class="doccomment">/// A witness of non-exhaustiveness for error reporting, represented
+/// as a list of patterns (in reverse order of construction) with
+/// wildcards inside to represent elements that can take any inhabitant
+/// of the type as a value.
+///
+/// A witness against a list of patterns should have the same types
+/// and length as the pattern matched against. Because Rust `match`
+/// is always against a single pattern, at the end the witness will
+/// have length 1, but in the middle of the algorithm, it can contain
+/// multiple patterns.
+///
+/// For example, if we are constructing a witness for the match against
+///
+/// ```compile_fail,E0004
+/// # #![feature(type_ascription)]
+/// struct Pair(Option&lt;(u32, u32)&gt;, bool);
+/// # fn foo(p: Pair) {
+/// match (p: Pair) {
+///    Pair(None, _) =&gt; {}
+///    Pair(_, false) =&gt; {}
+/// }
+/// # }
+/// ```
+///
+/// We&#39;ll perform the following steps:
+/// 1. Start with an empty witness
+///     `Witness(vec![])`
+/// 2. Push a witness `true` against the `false`
+///     `Witness(vec![true])`
+/// 3. Push a witness `Some(_)` against the `None`
+///     `Witness(vec![true, Some(_)])`
+/// 4. Apply the `Pair` constructor to the witnesses
+///     `Witness(vec![Pair(Some(_), true)])`
+///
+/// The final `Pair(Some(_), true)` is then the resulting witness.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Witness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;(Vec&lt;DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; Witness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Asserts that the witness contains a single pattern, and returns it.
+    </span><span class="kw">fn </span>single_pattern(<span class="self">self</span>) -&gt; DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(<span class="self">self</span>.<span class="number">0</span>.len(), <span class="number">1</span>);
+        <a class="self" href="#713">self</a>.<span class="number">0</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap()
+    }
+
+    <span class="doccomment">/// Constructs a partial witness for a pattern given a list of
+    /// patterns expanded by the specialization step.
+    ///
+    /// When a pattern P is discovered to be useful, this function is used bottom-up
+    /// to reconstruct a complete witness, e.g., a pattern P&#39; that covers a subset
+    /// of values, V, where each value in that set is not covered by any previously
+    /// used patterns and is covered by the pattern P&#39;. Examples:
+    ///
+    /// left_ty: tuple of 3 elements
+    /// pats: [10, 20, _]           =&gt; (10, 20, _)
+    ///
+    /// left_ty: struct X { a: (bool, &amp;&#39;static str), b: usize}
+    /// pats: [(false, &quot;foo&quot;), 42]  =&gt; X { a: (false, &quot;foo&quot;), b: 42 }
+    </span><span class="kw">fn </span>apply_constructor(<span class="kw-2">mut </span><span class="self">self</span>, pcx: <span class="kw-2">&amp;</span>PatCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;, ctor: <span class="kw-2">&amp;</span>Constructor&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>pat = {
+            <span class="kw">let </span>len = <a class="self" href="#731">self</a>.<span class="number">0</span>.len();
+            <span class="kw">let </span>arity = <a href="#731">ctor</a>.<a href="deconstruct_pat.rs.html#738">arity</a>(<a href="#731">pcx</a>);
+            <span class="kw">let </span>pats = <a class="self" href="#731">self</a>.<span class="number">0</span>.drain((<a href="#733">len</a> - <a href="#734">arity</a>)..).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>();
+            <span class="kw">let </span>fields = Fields::from_iter(<a href="#731">pcx</a>.cx, <a href="#735">pats</a>);
+            DeconstructedPat::new(<a href="#731">ctor</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <a href="#736">fields</a>, <a href="#731">pcx</a>.ty, <a href="../../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>)
+        };
+
+        <a class="self" href="#731">self</a>.<span class="number">0</span>.push(<a href="#732">pat</a>);
+
+        <span class="self"><a href="#731">self</a>
+    </span>}
+}
+
+<span class="doccomment">/// Report that a match of a `non_exhaustive` enum marked with `non_exhaustive_omitted_patterns`
+/// is not exhaustive enough.
+///
+/// NB: The partner lint for structs lives in `compiler/rustc_typeck/src/check/pat.rs`.
+</span><span class="kw">fn </span>lint_non_exhaustive_omitted_patterns&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    cx: <span class="kw-2">&amp;</span>MatchCheckCtxt&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    scrut_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    sp: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    hir_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    witnesses: Vec&lt;DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+) {
+    <a href="#751">cx</a>.tcx.struct_span_lint_hir(<a href="../../../../rustc_lint_defs/builtin/static.NON_EXHAUSTIVE_OMITTED_PATTERNS.html">NON_EXHAUSTIVE_OMITTED_PATTERNS</a>, <a href="#754">hir_id</a>, <a href="#753">sp</a>, |build| {
+        <span class="kw">let </span>joined_patterns = <a href="check_match.rs.html#901-904">joined_uncovered_patterns</a>(<a href="#751">cx</a>, <span class="kw-2">&amp;</span><a href="#755">witnesses</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>lint = <a href="#757">build</a>.build(<span class="string">&quot;some variants are not matched explicitly&quot;</span>);
+        <a href="#759">lint</a>.span_label(<a href="#753">sp</a>, <a href="check_match.rs.html#922-925">pattern_not_covered_label</a>(<span class="kw-2">&amp;</span><a href="#755">witnesses</a>, <span class="kw-2">&amp;</span><a href="#758">joined_patterns</a>));
+        <a href="#759">lint</a>.help(
+            <span class="string">&quot;ensure that all variants are matched explicitly by adding the suggested match arms&quot;</span>,
+        );
+        <a href="#759">lint</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+            <span class="string">&quot;the matched value is of type `{}` and the `non_exhaustive_omitted_patterns` attribute was found&quot;</span>,
+            scrut_ty,
+        ));
+        <a href="#759">lint</a>.emit();
+    });
+}
+
+<span class="doccomment">/// Algorithm from &lt;http://moscova.inria.fr/~maranget/papers/warn/index.html&gt;.
+/// The algorithm from the paper has been modified to correctly handle empty
+/// types. The changes are:
+///   (0) We don&#39;t exit early if the pattern matrix has zero rows. We just
+///       continue to recurse over columns.
+///   (1) all_constructors will only return constructors that are statically
+///       possible. E.g., it will only return `Ok` for `Result&lt;T, !&gt;`.
+///
+/// This finds whether a (row) vector `v` of patterns is &#39;useful&#39; in relation
+/// to a set of such vectors `m` - this is defined as there being a set of
+/// inputs that will match `v` but not any of the sets in `m`.
+///
+/// All the patterns at each column of the `matrix ++ v` matrix must have the same type.
+///
+/// This is used both for reachability checking (if a pattern isn&#39;t useful in
+/// relation to preceding patterns, it is not reachable) and exhaustiveness
+/// checking (if a wildcard pattern is useful in relation to a matrix, the
+/// matrix isn&#39;t exhaustive).
+///
+/// `is_under_guard` is used to inform if the pattern has a guard. If it
+/// has one it must not be inserted into the matrix. This shouldn&#39;t be
+/// relied on for soundness.
+</span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(cx, matrix, hir_id), ret)]
+</span><span class="kw">fn </span>is_useful&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    cx: <span class="kw-2">&amp;</span>MatchCheckCtxt&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    matrix: <span class="kw-2">&amp;</span>Matrix&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    v: <span class="kw-2">&amp;</span>PatStack&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    witness_preference: <a href="#668">ArmType</a>,
+    hir_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    is_under_guard: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    is_top_level: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; Usefulness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="macro">debug!</span>(<span class="question-mark">?</span>matrix, <span class="question-mark">?</span>v);
+    <span class="kw">let </span>Matrix { patterns: rows, .. } = matrix;
+
+    <span class="comment">// The base case. We are pattern-matching on () and the return value is
+    // based on whether our matrix has a row or not.
+    // NOTE: This could potentially be optimized by checking rows.is_empty()
+    // first and then, if v is non-empty, the return value is based on whether
+    // the type of the tuple we&#39;re checking is inhabited or not.
+    </span><span class="kw">if </span>v.is_empty() {
+        <span class="kw">let </span>ret = <span class="kw">if </span>rows.is_empty() {
+            Usefulness::new_useful(witness_preference)
+        } <span class="kw">else </span>{
+            Usefulness::new_not_useful(witness_preference)
+        };
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>ret);
+        <span class="kw">return </span>ret;
+    }
+
+    <span class="macro">debug_assert!</span>(rows.iter().all(|r| r.len() == v.len()));
+
+    <span class="comment">// If the first pattern is an or-pattern, expand it.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>ret = Usefulness::new_not_useful(witness_preference);
+    <span class="kw">if </span>v.head().is_or_pat() {
+        <span class="macro">debug!</span>(<span class="string">&quot;expanding or-pattern&quot;</span>);
+        <span class="comment">// We try each or-pattern branch in turn.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>matrix = matrix.clone();
+        <span class="kw">for </span>v <span class="kw">in </span>v.expand_or_pat() {
+            <span class="macro">debug!</span>(<span class="question-mark">?</span>v);
+            <span class="kw">let </span>usefulness = ensure_sufficient_stack(|| {
+                is_useful(cx, <span class="kw-2">&amp;</span>matrix, <span class="kw-2">&amp;</span>v, witness_preference, hir_id, is_under_guard, <span class="bool-val">false</span>)
+            });
+            <span class="macro">debug!</span>(<span class="question-mark">?</span>usefulness);
+            ret.extend(usefulness);
+            <span class="comment">// If pattern has a guard don&#39;t add it to the matrix.
+            </span><span class="kw">if </span>!is_under_guard {
+                <span class="comment">// We push the already-seen patterns into the matrix in order to detect redundant
+                // branches like `Some(_) | Some(0)`.
+                </span>matrix.push(v);
+            }
+        }
+    } <span class="kw">else </span>{
+        <span class="kw">let </span>ty = v.head().ty();
+        <span class="kw">let </span>is_non_exhaustive = cx.is_foreign_non_exhaustive_enum(ty);
+        <span class="macro">debug!</span>(<span class="string">&quot;v.head: {:?}, v.span: {:?}&quot;</span>, v.head(), v.head().span());
+        <span class="kw">let </span>pcx = <span class="kw-2">&amp;</span>PatCtxt { cx, ty, span: v.head().span(), is_top_level, is_non_exhaustive };
+
+        <span class="kw">let </span>v_ctor = v.head().ctor();
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>v_ctor);
+        <span class="kw">if let </span>Constructor::IntRange(ctor_range) = <span class="kw-2">&amp;</span>v_ctor {
+            <span class="comment">// Lint on likely incorrect range patterns (#63987)
+            </span>ctor_range.lint_overlapping_range_endpoints(
+                pcx,
+                matrix.heads(),
+                matrix.column_count().unwrap_or(<span class="number">0</span>),
+                hir_id,
+            )
+        }
+        <span class="comment">// We split the head constructor of `v`.
+        </span><span class="kw">let </span>split_ctors = v_ctor.split(pcx, matrix.heads().map(DeconstructedPat::ctor));
+        <span class="kw">let </span>is_non_exhaustive_and_wild = is_non_exhaustive &amp;&amp; v_ctor.is_wildcard();
+        <span class="comment">// For each constructor, we compute whether there&#39;s a value that starts with it that would
+        // witness the usefulness of `v`.
+        </span><span class="kw">let </span>start_matrix = <span class="kw-2">&amp;</span>matrix;
+        <span class="kw">for </span>ctor <span class="kw">in </span>split_ctors {
+            <span class="macro">debug!</span>(<span class="string">&quot;specialize({:?})&quot;</span>, ctor);
+            <span class="comment">// We cache the result of `Fields::wildcards` because it is used a lot.
+            </span><span class="kw">let </span>spec_matrix = start_matrix.specialize_constructor(pcx, <span class="kw-2">&amp;</span>ctor);
+            <span class="kw">let </span>v = v.pop_head_constructor(pcx, <span class="kw-2">&amp;</span>ctor);
+            <span class="kw">let </span>usefulness = ensure_sufficient_stack(|| {
+                is_useful(cx, <span class="kw-2">&amp;</span>spec_matrix, <span class="kw-2">&amp;</span>v, witness_preference, hir_id, is_under_guard, <span class="bool-val">false</span>)
+            });
+            <span class="kw">let </span>usefulness = usefulness.apply_constructor(pcx, start_matrix, <span class="kw-2">&amp;</span>ctor);
+
+            <span class="comment">// When all the conditions are met we have a match with a `non_exhaustive` enum
+            // that has the potential to trigger the `non_exhaustive_omitted_patterns` lint.
+            // To understand the workings checkout `Constructor::split` and `SplitWildcard::new/into_ctors`
+            </span><span class="kw">if </span>is_non_exhaustive_and_wild
+                <span class="comment">// We check that the match has a wildcard pattern and that that wildcard is useful,
+                // meaning there are variants that are covered by the wildcard. Without the check
+                // for `witness_preference` the lint would trigger on `if let NonExhaustiveEnum::A = foo {}`
+                </span>&amp;&amp; usefulness.is_useful() &amp;&amp; <span class="macro">matches!</span>(witness_preference, RealArm)
+                &amp;&amp; <span class="macro">matches!</span>(
+                    <span class="kw-2">&amp;</span>ctor,
+                    Constructor::Missing { nonexhaustive_enum_missing_real_variants: <span class="bool-val">true </span>}
+                )
+            {
+                <span class="kw">let </span>patterns = {
+                    <span class="kw">let </span><span class="kw-2">mut </span>split_wildcard = SplitWildcard::new(pcx);
+                    split_wildcard.split(pcx, matrix.heads().map(DeconstructedPat::ctor));
+                    <span class="comment">// Construct for each missing constructor a &quot;wild&quot; version of this
+                    // constructor, that matches everything that can be built with
+                    // it. For example, if `ctor` is a `Constructor::Variant` for
+                    // `Option::Some`, we get the pattern `Some(_)`.
+                    </span>split_wildcard
+                        .iter_missing(pcx)
+                        <span class="comment">// Filter out the `NonExhaustive` because we want to list only real
+                        // variants. Also remove any unstable feature gated variants.
+                        // Because of how we computed `nonexhaustive_enum_missing_real_variants`,
+                        // this will not return an empty `Vec`.
+                        </span>.filter(|c| !(c.is_non_exhaustive() || c.is_unstable_variant(pcx)))
+                        .cloned()
+                        .map(|missing_ctor| DeconstructedPat::wild_from_ctor(pcx, missing_ctor))
+                        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+                };
+
+                lint_non_exhaustive_omitted_patterns(pcx.cx, pcx.ty, pcx.span, hir_id, patterns);
+            }
+
+            ret.extend(usefulness);
+        }
+    }
+
+    <span class="kw">if </span>ret.is_useful() {
+        v.head().set_reachable();
+    }
+
+    ret
+}
+
+<span class="doccomment">/// The arm of a match expression.
+</span><span class="attribute">#[derive(Clone, Copy, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MatchArm&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The pattern must have been lowered through `check_match::MatchVisitor::lower_pattern`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) pat: <span class="kw-2">&amp;</span><span class="lifetime">&#39;p </span>DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) hir_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) has_guard: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="doccomment">/// Indicates whether or not a given arm is reachable.
+</span><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Reachability {
+    <span class="doccomment">/// The arm is reachable. This additionally carries a set of or-pattern branches that have been
+    /// found to be unreachable despite the overall arm being reachable. Used only in the presence
+    /// of or-patterns, otherwise it stays empty.
+    </span>Reachable(Vec&lt;<a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;),
+    <span class="doccomment">/// The arm is unreachable.
+    </span>Unreachable,
+}
+
+<span class="doccomment">/// The output of checking a match for exhaustiveness and arm reachability.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>UsefulnessReport&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// For each arm of the input, whether that arm is reachable after the arms above it.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) arm_usefulness: Vec&lt;(MatchArm&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;, <a href="#934">Reachability</a>)&gt;,
+    <span class="doccomment">/// If the match is exhaustive, this is empty. If not, this contains witnesses for the lack of
+    /// exhaustiveness.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) non_exhaustiveness_witnesses: Vec&lt;DeconstructedPat&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="doccomment">/// The entrypoint for the usefulness algorithm. Computes whether a match is exhaustive and which
+/// of its arms are reachable.
+///
+/// Note: the input patterns must have been lowered through
+/// `check_match::MatchVisitor::lower_pattern`.
+</span><span class="attribute">#[instrument(skip(cx, arms), level = <span class="string">&quot;debug&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>compute_match_usefulness&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    cx: <span class="kw-2">&amp;</span>MatchCheckCtxt&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    arms: <span class="kw-2">&amp;</span>[MatchArm&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt;],
+    scrut_hir_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    scrut_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; UsefulnessReport&lt;<span class="lifetime">&#39;p</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>matrix = Matrix::empty();
+    <span class="kw">let </span>arm_usefulness: Vec&lt;<span class="kw">_</span>&gt; = arms
+        .iter()
+        .copied()
+        .map(|arm| {
+            <span class="macro">debug!</span>(<span class="question-mark">?</span>arm);
+            <span class="kw">let </span>v = PatStack::from_pattern(arm.pat);
+            is_useful(cx, <span class="kw-2">&amp;</span>matrix, <span class="kw-2">&amp;</span>v, RealArm, arm.hir_id, arm.has_guard, <span class="bool-val">true</span>);
+            <span class="kw">if </span>!arm.has_guard {
+                matrix.push(v);
+            }
+            <span class="kw">let </span>reachability = <span class="kw">if </span>arm.pat.is_reachable() {
+                Reachability::Reachable(arm.pat.unreachable_spans())
+            } <span class="kw">else </span>{
+                Reachability::Unreachable
+            };
+            (arm, reachability)
+        })
+        .collect();
+
+    <span class="kw">let </span>wild_pattern = cx.pattern_arena.alloc(DeconstructedPat::wildcard(scrut_ty));
+    <span class="kw">let </span>v = PatStack::from_pattern(wild_pattern);
+    <span class="kw">let </span>usefulness = is_useful(cx, <span class="kw-2">&amp;</span>matrix, <span class="kw-2">&amp;</span>v, FakeExtraWildcard, scrut_hir_id, <span class="bool-val">false</span>, <span class="bool-val">true</span>);
+    <span class="kw">let </span>non_exhaustiveness_witnesses = <span class="kw">match </span>usefulness {
+        WithWitnesses(pats) =&gt; pats.into_iter().map(|w| w.single_pattern()).collect(),
+        NoWitnesses { .. } =&gt; <span class="macro">bug!</span>(),
+    };
+    UsefulnessReport { arm_usefulness, non_exhaustiveness_witnesses }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_mir_build" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["FatalError","Used as a return value to signify a fatal error occurred. (It is also used as the argument to panic at the moment, but that will eventually not be true.)"],["FatalErrorMarker",""]]};

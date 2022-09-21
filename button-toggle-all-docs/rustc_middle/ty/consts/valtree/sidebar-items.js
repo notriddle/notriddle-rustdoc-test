@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ValTree","This datastructure is used to represent the value of constants used in the type system."]]};

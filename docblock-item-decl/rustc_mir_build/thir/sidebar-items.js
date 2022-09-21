@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["constant",""],["cx","This module contains the functionality to convert from the wacky tcx data structures into the THIR. The `builder` is generally ignorant of the tcx, etc., and instead goes through the `Cx` for most of its work."],["pattern","Validation of patterns/matches."],["util",""]]};

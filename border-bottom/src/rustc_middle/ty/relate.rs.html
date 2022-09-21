@@ -1,0 +1,1684 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/ty/relate.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>relate.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Generalized type relating mechanism.
+//!
+//! A type relation `R` relates a pair of values `(A, B)`. `A and B` are usually
+//! types or regions but can be other things. Examples of type relations are
+//! subtyping, type equality, etc.
+
+</span><span class="kw">use </span><span class="kw">crate</span>::ty::error::{<a href="error.rs.html#18">ExpectedFound</a>, <a href="error.rs.html#36">TypeError</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::subst::{<a href="subst.rs.html#34">GenericArg</a>, <a href="subst.rs.html#45">GenericArgKind</a>, <a href="subst.rs.html#502">Subst</a>, <a href="subst.rs.html#241">SubstsRef</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::{<a class="self" href="../lib.rs.html#98">self</a>, <a href="mod.rs.html#226">ImplSubject</a>, <a href="mod.rs.html#920">Term</a>, <a href="mod.rs.html#1023">TermKind</a>, <a href="mod.rs.html#484">Ty</a>, <a href="context.rs.html#1029">TyCtxt</a>, <a href="fold.rs.html#58">TypeFoldable</a>};
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>ast;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">rustc_span::DUMMY_SP</a>;
+<span class="kw">use </span><a href="../../../rustc_target/spec/abi/index.html">rustc_target::spec::abi</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+
+<span class="kw">pub type </span>RelateResult&lt;<span class="lifetime">&#39;tcx</span>, T&gt; = <span class="prelude-ty">Result</span>&lt;T, TypeError&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub enum </span>Cause {
+    ExistentialRegionBound, <span class="comment">// relating an existential region bound
+</span>}
+
+<span class="kw">pub trait </span>TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {
+    <span class="kw">fn </span>tcx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="kw">fn </span>param_env(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="doccomment">/// Returns a static string we can use for printouts.
+    </span><span class="kw">fn </span>tag(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>;
+
+    <span class="doccomment">/// Returns `true` if the value `a` is the &quot;expected&quot; type in the
+    /// relation. Just affects error messages.
+    </span><span class="kw">fn </span>a_is_expected(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+
+    <span class="kw">fn </span>with_cause&lt;F, R&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _cause: <a href="#19">Cause</a>, f: F) -&gt; R
+    <span class="kw">where
+        </span>F: FnOnce(<span class="kw-2">&amp;mut </span><span class="self">Self</span>) -&gt; R,
+    {
+        <a href="#35">f</a>(<a class="self" href="#35">self</a>)
+    }
+
+    <span class="doccomment">/// Generic relation routine suitable for most anything.
+    </span><span class="kw">fn </span>relate&lt;T: Relate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: T, b: T) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a href="#105-109">Relate::relate</a>(<a class="self" href="#43">self</a>, <a href="#43">a</a>, <a href="#43">b</a>)
+    }
+
+    <span class="doccomment">/// Relate the two substitutions for the given item. The default
+    /// is to look up the variance for the item and proceed
+    /// accordingly.
+    </span><span class="kw">fn </span>relate_item_substs(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        item_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        a_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;relate_item_substs(item_def_id={:?}, a_subst={:?}, b_subst={:?})&quot;</span>,
+            item_def_id, a_subst, b_subst
+        );
+
+        <span class="kw">let </span>tcx = <a class="self" href="#51">self</a>.<a href="#24">tcx</a>();
+        <span class="kw">let </span>opt_variances = <a href="#61">tcx</a>.<a href="query.rs.html#337">variances_of</a>(<a href="#52">item_def_id</a>);
+        <a href="#148-154">relate_substs_with_variances</a>(<a class="self" href="#51">self</a>, <a href="#52">item_def_id</a>, <a href="#62">opt_variances</a>, <a href="#53">a_subst</a>, <a href="#54">b_subst</a>)
+    }
+
+    <span class="doccomment">/// Switch variance for the purpose of relating `a` and `b`.
+    </span><span class="kw">fn </span>relate_with_variance&lt;T: Relate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        variance: <a href="../../../rustc_middle/ty/enum.Variance.html">ty::Variance</a>,
+        info: ty::VarianceDiagInfo&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a: T,
+        b: T,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, T&gt;;
+
+    <span class="comment">// Overridable relations. You shouldn&#39;t typically call these
+    // directly, instead call `relate()`, which in turn calls
+    // these. This is both more uniform but also allows us to add
+    // additional hooks for other types in the future if needed
+    // without making older code, which called `relate`, obsolete.
+
+    </span><span class="kw">fn </span>tys(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+    <span class="kw">fn </span>regions(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+    <span class="kw">fn </span>consts(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        a: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+    <span class="kw">fn </span>binders&lt;T&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        a: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+        b: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;&gt;
+    <span class="kw">where
+        </span>T: Relate&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+}
+
+<span class="kw">pub trait </span>Relate&lt;<span class="lifetime">&#39;tcx</span>&gt;: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <span class="self">Self</span>,
+        b: <span class="self">Self</span>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt;;
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Relate impls
+
+</span><span class="kw">pub fn </span>relate_type_and_mut&lt;<span class="lifetime">&#39;tcx</span>, R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    relation: <span class="kw-2">&amp;mut </span>R,
+    a: ty::TypeAndMut&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    b: ty::TypeAndMut&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    base_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::TypeAndMut&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{}.mts({:?}, {:?})&quot;</span>, relation.tag(), a, b);
+    <span class="kw">if </span>a.mutbl != b.mutbl {
+        <span class="prelude-val">Err</span>(<a href="error.rs.html#42">TypeError::Mutability</a>)
+    } <span class="kw">else </span>{
+        <span class="kw">let </span>mutbl = <a href="#117">a</a>.mutbl;
+        <span class="kw">let </span>(variance, info) = <span class="kw">match </span><a href="#125">mutbl</a> {
+            ast::Mutability::Not =&gt; (ty::Covariant, <a href="sty.rs.html#2291">ty::VarianceDiagInfo::None</a>),
+            ast::Mutability::Mut =&gt; {
+                (ty::Invariant, <a href="sty.rs.html#2294">ty::VarianceDiagInfo::Invariant</a> { ty: <a href="#119">base_ty</a>, param_index: <span class="number">0 </span>})
+            }
+        };
+        <span class="kw">let </span>ty = relation.relate_with_variance(variance, info, a.ty, b.ty)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="sty.rs.html#43">ty::TypeAndMut</a> { <a href="#132">ty</a>, <a href="#125">mutbl</a> })
+    }
+}
+
+<span class="attribute">#[inline]
+</span><span class="kw">pub fn </span>relate_substs&lt;<span class="lifetime">&#39;tcx</span>, R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    relation: <span class="kw-2">&amp;mut </span>R,
+    a_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    b_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <a href="#139">relation</a>.<a href="#24">tcx</a>().<a href="context.rs.html#2788-2791">mk_substs</a>(<a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#140">a_subst</a>, <a href="#141">b_subst</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(a, b)| {
+        <a href="#139">relation</a>.<a href="#67-73">relate_with_variance</a>(ty::Invariant, ty::VarianceDiagInfo::default(), <a href="#143">a</a>, <a href="#143">b</a>)
+    }))
+}
+
+<span class="kw">pub fn </span>relate_substs_with_variances&lt;<span class="lifetime">&#39;tcx</span>, R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    relation: <span class="kw-2">&amp;mut </span>R,
+    ty_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    variances: <span class="kw-2">&amp;</span>[<a href="../../../rustc_middle/ty/enum.Variance.html">ty::Variance</a>],
+    a_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    b_subst: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">let </span>tcx = <a href="#149">relation</a>.<a href="#24">tcx</a>();
+
+    <span class="kw">let </span><span class="kw-2">mut </span>cached_ty = <span class="prelude-val">None</span>;
+    <span class="kw">let </span>params = <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#152">a_subst</a>, <a href="#153">b_subst</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(i, (a, b))| {
+        <span class="kw">let </span>variance = <a href="#151">variances</a>[<a href="#158">i</a>];
+        <span class="kw">let </span>variance_info = <span class="kw">if </span>variance == ty::Invariant {
+            <span class="kw">let </span>ty =
+                <span class="kw-2">*</span><a href="#157">cached_ty</a>.get_or_insert_with(|| <a href="#155">tcx</a>.<a href="util.rs.html#650">bound_type_of</a>(<a href="#150">ty_def_id</a>).<a href="subst.rs.html#505">subst</a>(<a href="#155">tcx</a>, <a href="#152">a_subst</a>));
+            <a href="sty.rs.html#2294">ty::VarianceDiagInfo::Invariant</a> { <a href="#161">ty</a>, param_index: <a href="#158">i</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>().unwrap() }
+        } <span class="kw">else </span>{
+            ty::VarianceDiagInfo::default()
+        };
+        <a href="#149">relation</a>.<a href="#67-73">relate_with_variance</a>(<a href="#159">variance</a>, <a href="#160">variance_info</a>, <a href="#158">a</a>, <a href="#158">b</a>)
+    });
+
+    <a href="#155">tcx</a>.<a href="context.rs.html#2788-2791">mk_substs</a>(<a href="#158">params</a>)
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::FnSig&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::FnSig&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::FnSig&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::FnSig&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>tcx = <a href="#175">relation</a>.<a href="#24">tcx</a>();
+
+        <span class="kw">if </span>a.c_variadic != b.c_variadic {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="error.rs.html#59">TypeError::VariadicMismatch</a>(<a href="#836-838">expected_found</a>(
+                <a href="#175">relation</a>,
+                <a href="#176">a</a>.c_variadic,
+                <a href="#177">b</a>.c_variadic,
+            )));
+        }
+        <span class="kw">let </span>unsafety = relation.relate(a.unsafety, b.unsafety)<span class="question-mark">?</span>;
+        <span class="kw">let </span>abi = relation.relate(a.abi, b.abi)<span class="question-mark">?</span>;
+
+        <span class="kw">if </span>a.inputs().len() != b.inputs().len() {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="error.rs.html#46">TypeError::ArgCount</a>);
+        }
+
+        <span class="kw">let </span>inputs_and_output = <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#176">a</a>.<a href="sty.rs.html#1265">inputs</a>(), <a href="#177">b</a>.<a href="sty.rs.html#1265">inputs</a>())
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(<span class="kw-2">&amp;</span>a, <span class="kw-2">&amp;</span>b)| ((<a href="#196">a</a>, <a href="#196">b</a>), <span class="bool-val">false</span>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="https://doc.rust-lang.org/nightly/core/iter/sources/once/fn.once.html">iter::once</a>(((<a href="#176">a</a>.<a href="sty.rs.html#1269">output</a>(), <a href="#177">b</a>.<a href="sty.rs.html#1269">output</a>()), <span class="bool-val">true</span>)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|((a, b), is_output)| {
+                <span class="kw">if </span>is_output {
+                    <a href="#175">relation</a>.<a href="#43">relate</a>(<a href="#198">a</a>, <a href="#198">b</a>)
+                } <span class="kw">else </span>{
+                    <a href="#175">relation</a>.<a href="#67-73">relate_with_variance</a>(
+                        ty::Contravariant,
+                        ty::VarianceDiagInfo::default(),
+                        <a href="#198">a</a>,
+                        <a href="#198">b</a>,
+                    )
+                }
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(i, r)| <span class="kw">match </span><a href="#211">r</a> {
+                <span class="prelude-val">Err</span>(<a href="error.rs.html#54">TypeError::Sorts</a>(exp_found) | <a href="error.rs.html#55">TypeError::ArgumentSorts</a>(exp_found, <span class="kw">_</span>)) =&gt; {
+                    <span class="prelude-val">Err</span>(<a href="error.rs.html#55">TypeError::ArgumentSorts</a>(<a href="#212">exp_found</a>, <a href="#211">i</a>))
+                }
+                <span class="prelude-val">Err</span>(<a href="error.rs.html#42">TypeError::Mutability</a> | <a href="error.rs.html#43">TypeError::ArgumentMutability</a>(<span class="kw">_</span>)) =&gt; {
+                    <span class="prelude-val">Err</span>(<a href="error.rs.html#43">TypeError::ArgumentMutability</a>(<a href="#211">i</a>))
+                }
+                r =&gt; <a href="#218">r</a>,
+            });
+        <span class="prelude-val">Ok</span>(<a href="sty.rs.html#1257">ty::FnSig</a> {
+            inputs_and_output: tcx.mk_type_list(inputs_and_output)<span class="question-mark">?</span>,
+            c_variadic: <a href="#176">a</a>.c_variadic,
+            <a href="#188">unsafety</a>,
+            <a href="#189">abi</a>,
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="mod.rs.html#275">ty::BoundConstness</a> {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <a href="mod.rs.html#275">ty::BoundConstness</a>,
+        b: <a href="mod.rs.html#275">ty::BoundConstness</a>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="mod.rs.html#275">ty::BoundConstness</a>&gt; {
+        <span class="kw">if </span>a != b {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#38">TypeError::ConstnessMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#231">relation</a>, <a href="#232">a</a>, <a href="#233">b</a>)))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#232">a</a>)
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="../../../rustc_hir/hir/enum.Unsafety.html">ast::Unsafety</a> {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <a href="../../../rustc_hir/hir/enum.Unsafety.html">ast::Unsafety</a>,
+        b: <a href="../../../rustc_hir/hir/enum.Unsafety.html">ast::Unsafety</a>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="../../../rustc_hir/hir/enum.Unsafety.html">ast::Unsafety</a>&gt; {
+        <span class="kw">if </span>a != b {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#40">TypeError::UnsafetyMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#245">relation</a>, <a href="#246">a</a>, <a href="#247">b</a>)))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#246">a</a>)
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="../../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a> {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <a href="../../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a>,
+        b: <a href="../../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="../../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a>&gt; {
+        <span class="kw">if </span>a == b { <span class="prelude-val">Ok</span>(<a href="#260">a</a>) } <span class="kw">else </span>{ <span class="prelude-val">Err</span>(<a href="error.rs.html#41">TypeError::AbiMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#259">relation</a>, <a href="#260">a</a>, <a href="#261">b</a>))) }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::ProjectionTy&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::ProjectionTy&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::ProjectionTy&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::ProjectionTy&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">if </span>a.item_def_id != b.item_def_id {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#66">TypeError::ProjectionMismatched</a>(<a href="#836-838">expected_found</a>(
+                <a href="#269">relation</a>,
+                <a href="#270">a</a>.item_def_id,
+                <a href="#271">b</a>.item_def_id,
+            )))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>substs = relation.relate(a.substs, b.substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="sty.rs.html#1189">ty::ProjectionTy</a> { item_def_id: <a href="#270">a</a>.item_def_id, substs: <span class="kw-2">&amp;</span><a href="#280">substs</a> })
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::ExistentialProjection&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::ExistentialProjection&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::ExistentialProjection&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::ExistentialProjection&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">if </span>a.item_def_id != b.item_def_id {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#66">TypeError::ProjectionMismatched</a>(<a href="#836-838">expected_found</a>(
+                <a href="#288">relation</a>,
+                <a href="#289">a</a>.item_def_id,
+                <a href="#290">b</a>.item_def_id,
+            )))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>term = relation.relate_with_variance(
+                ty::Invariant,
+                ty::VarianceDiagInfo::default(),
+                a.term,
+                b.term,
+            )<span class="question-mark">?</span>;
+            <span class="kw">let </span>substs = relation.relate_with_variance(
+                ty::Invariant,
+                ty::VarianceDiagInfo::default(),
+                a.substs,
+                b.substs,
+            )<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="sty.rs.html#1439">ty::ExistentialProjection</a> { item_def_id: <a href="#289">a</a>.item_def_id, <a href="#305">substs</a>, <a href="#299">term</a> })
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="comment">// Different traits cannot be related.
+        </span><span class="kw">if </span>a.def_id != b.def_id {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#58">TypeError::Traits</a>(<a href="#836-838">expected_found</a>(<a href="#318">relation</a>, <a href="#319">a</a>.def_id, <a href="#320">b</a>.def_id)))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>substs = relate_substs(relation, a.substs, b.substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="sty.rs.html#793">ty::TraitRef</a> { def_id: <a href="#319">a</a>.def_id, <a href="#326">substs</a> })
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::ExistentialTraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::ExistentialTraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::ExistentialTraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::ExistentialTraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="comment">// Different traits cannot be related.
+        </span><span class="kw">if </span>a.def_id != b.def_id {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#58">TypeError::Traits</a>(<a href="#836-838">expected_found</a>(<a href="#334">relation</a>, <a href="#335">a</a>.def_id, <a href="#336">b</a>.def_id)))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>substs = relate_substs(relation, a.substs, b.substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="sty.rs.html#871">ty::ExistentialTraitRef</a> { def_id: <a href="#335">a</a>.def_id, <a href="#342">substs</a> })
+        }
+    }
+}
+
+<span class="attribute">#[derive(Copy, Debug, Clone, TypeFoldable, TypeVisitable)]
+</span><span class="kw">struct </span>GeneratorWitness&lt;<span class="lifetime">&#39;tcx</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>GeneratorWitness&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: GeneratorWitness&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: GeneratorWitness&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, GeneratorWitness&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(a.<span class="number">0</span>.len(), b.<span class="number">0</span>.len());
+        <span class="kw">let </span>tcx = <a href="#353">relation</a>.<a href="#24">tcx</a>();
+        <span class="kw">let </span>types = tcx.mk_type_list(iter::zip(a.<span class="number">0</span>, b.<span class="number">0</span>).map(|(a, b)| relation.relate(a, b)))<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="#349">GeneratorWitness</a>(<a href="#359">types</a>))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ImplSubject&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ImplSubject&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ImplSubject&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ImplSubject&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">match </span>(<a href="#368">a</a>, <a href="#369">b</a>) {
+            (<a href="mod.rs.html#227">ImplSubject::Trait</a>(trait_ref_a), <a href="mod.rs.html#227">ImplSubject::Trait</a>(trait_ref_b)) =&gt; {
+                <span class="kw">let </span>trait_ref = ty::TraitRef::relate(relation, trait_ref_a, trait_ref_b)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(<a href="mod.rs.html#227">ImplSubject::Trait</a>(<a href="#373">trait_ref</a>))
+            }
+            (<a href="mod.rs.html#228">ImplSubject::Inherent</a>(ty_a), <a href="mod.rs.html#228">ImplSubject::Inherent</a>(ty_b)) =&gt; {
+                <span class="kw">let </span>ty = Ty::relate(relation, ty_a, ty_b)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(<a href="mod.rs.html#228">ImplSubject::Inherent</a>(<a href="#377">ty</a>))
+            }
+            (<a href="mod.rs.html#227">ImplSubject::Trait</a>(<span class="kw">_</span>), <a href="mod.rs.html#228">ImplSubject::Inherent</a>(<span class="kw">_</span>))
+            | (<a href="mod.rs.html#228">ImplSubject::Inherent</a>(<span class="kw">_</span>), <a href="mod.rs.html#227">ImplSubject::Trait</a>(<span class="kw">_</span>)) =&gt; {
+                <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;can not relate TraitRef and Ty&quot;</span>);
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a href="#391">relation</a>.<a href="#81">tys</a>(<a href="#392">a</a>, <a href="#393">b</a>)
+    }
+}
+
+<span class="doccomment">/// The main &quot;type relation&quot; routine. Note that this does not handle
+/// inference artifacts, so you should filter those out before calling
+/// it.
+</span><span class="kw">pub fn </span>super_relate_tys&lt;<span class="lifetime">&#39;tcx</span>, R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    relation: <span class="kw-2">&amp;mut </span>R,
+    a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">let </span>tcx = <a href="#403">relation</a>.<a href="#24">tcx</a>();
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;super_relate_tys: a={:?} b={:?}&quot;</span>, a, b);
+    <span class="kw">match </span>(<a href="#404">a</a>.<a href="sty.rs.html#1639">kind</a>(), <a href="#405">b</a>.<a href="sty.rs.html#1639">kind</a>()) {
+        (<span class="kw-2">&amp;</span>ty::Infer(<span class="kw">_</span>), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="kw-2">&amp;</span>ty::Infer(<span class="kw">_</span>)) =&gt; {
+            <span class="comment">// The caller should handle these cases!
+            </span><a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;var types encountered in super_relate_tys&quot;</span>)
+        }
+
+        (ty::Bound(..), <span class="kw">_</span>) | (<span class="kw">_</span>, ty::Bound(..)) =&gt; {
+            <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;bound types encountered in super_relate_tys&quot;</span>)
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Error(<span class="kw">_</span>), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="kw-2">&amp;</span>ty::Error(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#1299">ty_error</a>()),
+
+        (<span class="kw-2">&amp;</span>ty::Never, <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Char, <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Bool, <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Int(<span class="kw">_</span>), <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Uint(<span class="kw">_</span>), <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Float(<span class="kw">_</span>), <span class="kw">_</span>)
+        | (<span class="kw-2">&amp;</span>ty::Str, <span class="kw">_</span>)
+            <span class="kw">if </span><a href="#404">a</a> == <a href="#405">b</a> =&gt;
+        {
+            <span class="prelude-val">Ok</span>(<a href="#404">a</a>)
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Param(<span class="kw-2">ref </span>a_p), <span class="kw-2">&amp;</span>ty::Param(<span class="kw-2">ref </span>b_p)) <span class="kw">if </span><a href="#433">a_p</a>.index == <a href="#433">b_p</a>.index =&gt; <span class="prelude-val">Ok</span>(<a href="#404">a</a>),
+
+        (ty::Placeholder(p1), ty::Placeholder(p2)) <span class="kw">if </span><a href="#435">p1</a> == <a href="#435">p2</a> =&gt; <span class="prelude-val">Ok</span>(<a href="#404">a</a>),
+
+        (<span class="kw-2">&amp;</span>ty::Adt(a_def, a_substs), <span class="kw-2">&amp;</span>ty::Adt(b_def, b_substs)) <span class="kw">if </span><a href="#437">a_def</a> == <a href="#437">b_def</a> =&gt; {
+            <span class="kw">let </span>substs = relation.relate_item_substs(a_def.did(), a_substs, b_substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2425">mk_adt</a>(<a href="#437">a_def</a>, <a href="#438">substs</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Foreign(a_id), <span class="kw-2">&amp;</span>ty::Foreign(b_id)) <span class="kw">if </span><a href="#442">a_id</a> == <a href="#442">b_id</a> =&gt; <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2431">mk_foreign</a>(<a href="#442">a_id</a>)),
+
+        (<span class="kw-2">&amp;</span>ty::Dynamic(a_obj, a_region, a_repr), <span class="kw-2">&amp;</span>ty::Dynamic(b_obj, b_region, b_repr))
+            <span class="kw">if </span><a href="#444">a_repr</a> == <a href="#444">b_repr</a> =&gt;
+        {
+            <span class="kw">let </span>region_bound = relation.with_cause(Cause::ExistentialRegionBound, |relation| {
+                relation.relate_with_variance(
+                    ty::Contravariant,
+                    ty::VarianceDiagInfo::default(),
+                    a_region,
+                    b_region,
+                )
+            })<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2546-2551">mk_dynamic</a>(relation.relate(a_obj, b_obj)<span class="question-mark">?</span>, <a href="#447">region_bound</a>, <a href="#444">a_repr</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Generator(a_id, a_substs, movability), <span class="kw-2">&amp;</span>ty::Generator(b_id, b_substs, <span class="kw">_</span>))
+            <span class="kw">if </span><a href="#458">a_id</a> == <a href="#458">b_id</a> =&gt;
+        {
+            <span class="comment">// All Generator types with the same id represent
+            // the (anonymous) type of the same generator expression. So
+            // all of their regions should be equated.
+            </span><span class="kw">let </span>substs = relation.relate(a_substs, b_substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2566-2571">mk_generator</a>(<a href="#458">a_id</a>, <a href="#464">substs</a>, <a href="#458">movability</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::GeneratorWitness(a_types), <span class="kw-2">&amp;</span>ty::GeneratorWitness(b_types)) =&gt; {
+            <span class="comment">// Wrap our types with a temporary GeneratorWitness struct
+            // inside the binder so we can related them
+            </span><span class="kw">let </span>a_types = <a href="#468">a_types</a>.<a href="sty.rs.html#1102-1104">map_bound</a>(<a href="#349">GeneratorWitness</a>);
+            <span class="kw">let </span>b_types = <a href="#468">b_types</a>.<a href="sty.rs.html#1102-1104">map_bound</a>(<a href="#349">GeneratorWitness</a>);
+            <span class="comment">// Then remove the GeneratorWitness for the result
+            </span><span class="kw">let </span>types = relation.relate(a_types, b_types)<span class="question-mark">?</span>.<a href="sty.rs.html#1102-1104">map_bound</a>(|witness| <a href="#474">witness</a>.<span class="number">0</span>);
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2576">mk_generator_witness</a>(<a href="#474">types</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Closure(a_id, a_substs), <span class="kw-2">&amp;</span>ty::Closure(b_id, b_substs)) <span class="kw">if </span><a href="#478">a_id</a> == <a href="#478">b_id</a> =&gt; {
+            <span class="comment">// All Closure types with the same id represent
+            // the (anonymous) type of the same closure expression. So
+            // all of their regions should be equated.
+            </span><span class="kw">let </span>substs = relation.relate(a_substs, b_substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2561">mk_closure</a>(<a href="#478">a_id</a>, <span class="kw-2">&amp;</span><a href="#482">substs</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::RawPtr(a_mt), <span class="kw-2">&amp;</span>ty::RawPtr(b_mt)) =&gt; {
+            <span class="kw">let </span>mt = relate_type_and_mut(relation, a_mt, b_mt, a)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2477">mk_ptr</a>(<a href="#487">mt</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Ref(a_r, a_ty, a_mutbl), <span class="kw-2">&amp;</span>ty::Ref(b_r, b_ty, b_mutbl)) =&gt; {
+            <span class="kw">let </span>r = relation.relate_with_variance(
+                ty::Contravariant,
+                ty::VarianceDiagInfo::default(),
+                a_r,
+                b_r,
+            )<span class="question-mark">?</span>;
+            <span class="kw">let </span>a_mt = <a href="sty.rs.html#43">ty::TypeAndMut</a> { ty: <a href="#491">a_ty</a>, mutbl: <a href="#491">a_mutbl</a> };
+            <span class="kw">let </span>b_mt = <a href="sty.rs.html#43">ty::TypeAndMut</a> { ty: <a href="#491">b_ty</a>, mutbl: <a href="#491">b_mutbl</a> };
+            <span class="kw">let </span>mt = relate_type_and_mut(relation, a_mt, b_mt, a)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2482">mk_ref</a>(<a href="#492">r</a>, <a href="#500">mt</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Array(a_t, sz_a), <span class="kw-2">&amp;</span>ty::Array(b_t, sz_b)) =&gt; {
+            <span class="kw">let </span>t = relation.relate(a_t, b_t)<span class="question-mark">?</span>;
+            <span class="kw">match </span><a href="#403">relation</a>.<a href="#43">relate</a>(<a href="#504">sz_a</a>, <a href="#504">sz_b</a>) {
+                <span class="prelude-val">Ok</span>(sz) =&gt; <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2365">mk_ty</a>(ty::Array(<a href="#505">t</a>, <a href="#507">sz</a>))),
+                <span class="prelude-val">Err</span>(err) =&gt; {
+                    <span class="comment">// Check whether the lengths are both concrete/known values,
+                    // but are unequal, for better diagnostics.
+                    //
+                    // It might seem dubious to eagerly evaluate these constants here,
+                    // we however cannot end up with errors in `Relate` during both
+                    // `type_of` and `predicates_of`. This means that evaluating the
+                    // constants should not cause cycle errors here.
+                    </span><span class="kw">let </span>sz_a = <a href="#504">sz_a</a>.<a href="consts.rs.html#264">try_eval_usize</a>(<a href="#407">tcx</a>, <a href="#403">relation</a>.<a href="#26">param_env</a>());
+                    <span class="kw">let </span>sz_b = <a href="#504">sz_b</a>.<a href="consts.rs.html#264">try_eval_usize</a>(<a href="#407">tcx</a>, <a href="#403">relation</a>.<a href="#26">param_env</a>());
+                    <span class="kw">match </span>(<a href="#516">sz_a</a>, <a href="#517">sz_b</a>) {
+                        (<span class="prelude-val">Some</span>(sz_a_val), <span class="prelude-val">Some</span>(sz_b_val)) <span class="kw">if </span><a href="#519">sz_a_val</a> != <a href="#519">sz_b_val</a> =&gt; <span class="prelude-val">Err</span>(
+                            <a href="error.rs.html#45">TypeError::FixedArraySize</a>(<a href="#836-838">expected_found</a>(<a href="#403">relation</a>, <a href="#519">sz_a_val</a>, <a href="#519">sz_b_val</a>)),
+                        ),
+                        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<a href="#508">err</a>),
+                    }
+                }
+            }
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Slice(a_t), <span class="kw-2">&amp;</span>ty::Slice(b_t)) =&gt; {
+            <span class="kw">let </span>t = relation.relate(a_t, b_t)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2512">mk_slice</a>(<a href="#529">t</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Tuple(as_), <span class="kw-2">&amp;</span>ty::Tuple(bs)) =&gt; {
+            <span class="kw">if </span>as_.len() == bs.len() {
+                <span class="prelude-val">Ok</span>(tcx.mk_tup(iter::zip(as_, bs).map(|(a, b)| relation.relate(a, b)))<span class="question-mark">?</span>)
+            } <span class="kw">else if </span>!(as_.is_empty() || bs.is_empty()) {
+                <span class="prelude-val">Err</span>(<a href="error.rs.html#44">TypeError::TupleSize</a>(<a href="#836-838">expected_found</a>(<a href="#403">relation</a>, <a href="#533">as_</a>.<a href="list.rs.html#65">len</a>(), <a href="#533">bs</a>.<a href="list.rs.html#65">len</a>())))
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Err</span>(<a href="error.rs.html#54">TypeError::Sorts</a>(<a href="#836-838">expected_found</a>(<a href="#403">relation</a>, <a href="#404">a</a>, <a href="#405">b</a>)))
+            }
+        }
+
+        (<span class="kw-2">&amp;</span>ty::FnDef(a_def_id, a_substs), <span class="kw-2">&amp;</span>ty::FnDef(b_def_id, b_substs))
+            <span class="kw">if </span><a href="#543">a_def_id</a> == <a href="#543">b_def_id</a> =&gt;
+        {
+            <span class="kw">let </span>substs = relation.relate_item_substs(a_def_id, a_substs, b_substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2536">mk_fn_def</a>(<a href="#543">a_def_id</a>, <a href="#546">substs</a>))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::FnPtr(a_fty), <span class="kw-2">&amp;</span>ty::FnPtr(b_fty)) =&gt; {
+            <span class="kw">let </span>fty = relation.relate(a_fty, b_fty)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2541">mk_fn_ptr</a>(<a href="#551">fty</a>))
+        }
+
+        <span class="comment">// these two are already handled downstream in case of lazy normalization
+        </span>(<span class="kw-2">&amp;</span>ty::Projection(a_data), <span class="kw-2">&amp;</span>ty::Projection(b_data)) =&gt; {
+            <span class="kw">let </span>projection_ty = relation.relate(a_data, b_data)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2556">mk_projection</a>(<a href="#557">projection_ty</a>.item_def_id, <a href="#557">projection_ty</a>.substs))
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Opaque(a_def_id, a_substs), <span class="kw-2">&amp;</span>ty::Opaque(b_def_id, b_substs))
+            <span class="kw">if </span><a href="#561">a_def_id</a> == <a href="#561">b_def_id</a> =&gt;
+        {
+            <span class="kw">let </span>substs = relate_substs(relation, a_substs, b_substs)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<a href="#407">tcx</a>.<a href="context.rs.html#2633">mk_opaque</a>(<a href="#561">a_def_id</a>, <a href="#564">substs</a>))
+        }
+
+        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<a href="error.rs.html#54">TypeError::Sorts</a>(<a href="#836-838">expected_found</a>(<a href="#403">relation</a>, <a href="#404">a</a>, <a href="#405">b</a>))),
+    }
+}
+
+<span class="doccomment">/// The main &quot;const relation&quot; routine. Note that this does not handle
+/// inference artifacts, so you should filter those out before calling
+/// it.
+</span><span class="kw">pub fn </span>super_relate_consts&lt;<span class="lifetime">&#39;tcx</span>, R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    relation: <span class="kw-2">&amp;mut </span>R,
+    a: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    b: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{}.super_relate_consts(a = {:?}, b = {:?})&quot;</span>, relation.tag(), a, b);
+    <span class="kw">let </span>tcx = <a href="#576">relation</a>.<a href="#24">tcx</a>();
+
+    <span class="kw">let </span>a_ty;
+    <span class="kw">let </span>b_ty;
+    <span class="kw">if </span>relation.tcx().features().adt_const_params {
+        <a href="#583">a_ty</a> = <a href="#581">tcx</a>.<a href="normalize_erasing_regions.rs.html#40-42">normalize_erasing_regions</a>(<a href="#576">relation</a>.<a href="#26">param_env</a>(), <a href="#577">a</a>.<a href="consts.rs.html#48">ty</a>());
+        <a href="#584">b_ty</a> = <a href="#581">tcx</a>.<a href="normalize_erasing_regions.rs.html#40-42">normalize_erasing_regions</a>(<a href="#576">relation</a>.<a href="#26">param_env</a>(), <a href="#578">b</a>.<a href="consts.rs.html#48">ty</a>());
+    } <span class="kw">else </span>{
+        <a href="#583">a_ty</a> = <a href="#581">tcx</a>.<a href="erase_regions.rs.html#20-22">erase_regions</a>(<a href="#577">a</a>.<a href="consts.rs.html#48">ty</a>());
+        <a href="#584">b_ty</a> = <a href="#581">tcx</a>.<a href="erase_regions.rs.html#20-22">erase_regions</a>(<a href="#578">b</a>.<a href="consts.rs.html#48">ty</a>());
+    }
+    <span class="kw">if </span>a_ty != b_ty {
+        <a href="#576">relation</a>.<a href="#24">tcx</a>().sess.delay_span_bug(
+            <a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>,
+            <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;cannot relate constants of different types: {} != {}&quot;</span>, a_ty, b_ty),
+        );
+    }
+
+    <span class="comment">// Currently, the values that can be unified are primitive types,
+    // and those that derive both `PartialEq` and `Eq`, corresponding
+    // to structural-match types.
+    </span><span class="kw">let </span>is_match = <span class="kw">match </span>(<a href="#577">a</a>.<a href="consts.rs.html#53">kind</a>(), <a href="#578">b</a>.<a href="consts.rs.html#53">kind</a>()) {
+        (<a href="consts/kind.rs.html#60">ty::ConstKind::Infer</a>(<span class="kw">_</span>), <span class="kw">_</span>) | (<span class="kw">_</span>, <a href="consts/kind.rs.html#60">ty::ConstKind::Infer</a>(<span class="kw">_</span>)) =&gt; {
+            <span class="comment">// The caller should handle these cases!
+            </span><a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;var types encountered in super_relate_consts: {:?} {:?}&quot;</span>, a, b)
+        }
+
+        (<a href="consts/kind.rs.html#77">ty::ConstKind::Error</a>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#577">a</a>),
+        (<span class="kw">_</span>, <a href="consts/kind.rs.html#77">ty::ConstKind::Error</a>(<span class="kw">_</span>)) =&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#578">b</a>),
+
+        (<a href="consts/kind.rs.html#57">ty::ConstKind::Param</a>(a_p), <a href="consts/kind.rs.html#57">ty::ConstKind::Param</a>(b_p)) =&gt; <a href="#611">a_p</a>.index == <a href="#611">b_p</a>.index,
+        (<a href="consts/kind.rs.html#66">ty::ConstKind::Placeholder</a>(p1), <a href="consts/kind.rs.html#66">ty::ConstKind::Placeholder</a>(p2)) =&gt; <a href="#612">p1</a> == <a href="#612">p2</a>,
+        (<a href="consts/kind.rs.html#73">ty::ConstKind::Value</a>(a_val), <a href="consts/kind.rs.html#73">ty::ConstKind::Value</a>(b_val)) =&gt; <a href="#613">a_val</a> == <a href="#613">b_val</a>,
+
+        (<a href="consts/kind.rs.html#70">ty::ConstKind::Unevaluated</a>(au), <a href="consts/kind.rs.html#70">ty::ConstKind::Unevaluated</a>(bu))
+            <span class="kw">if </span><a href="#581">tcx</a>.<a href="context.rs.html#1366">features</a>().generic_const_exprs =&gt;
+        {
+            <a href="#581">tcx</a>.<a href="query.rs.html#337">try_unify_abstract_consts</a>(<a href="#576">relation</a>.<a href="#26">param_env</a>().<a href="mod.rs.html#1660">and</a>((<a href="#615">au</a>, <a href="#615">bu</a>)))
+        }
+
+        <span class="comment">// While this is slightly incorrect, it shouldn&#39;t matter for `min_const_generics`
+        // and is the better alternative to waiting until `generic_const_exprs` can
+        // be stabilized.
+        </span>(<a href="consts/kind.rs.html#70">ty::ConstKind::Unevaluated</a>(au), <a href="consts/kind.rs.html#70">ty::ConstKind::Unevaluated</a>(bu))
+            <span class="kw">if </span><a href="#624">au</a>.def == <a href="#624">bu</a>.def &amp;&amp; <a href="#624">au</a>.promoted == <a href="#624">bu</a>.promoted =&gt;
+        {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(au.promoted, ());
+
+            <span class="kw">let </span>substs = relation.relate_with_variance(
+                ty::Variance::Invariant,
+                ty::VarianceDiagInfo::default(),
+                au.substs,
+                bu.substs,
+            )<span class="question-mark">?</span>;
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#581">tcx</a>.<a href="context.rs.html#2245-2251">mk_const</a>(<a href="consts.rs.html#38">ty::ConstS</a> {
+                kind: <a href="consts/kind.rs.html#70">ty::ConstKind::Unevaluated</a>(<a href="consts/kind.rs.html#18">ty::Unevaluated</a> {
+                    def: <a href="#624">au</a>.def,
+                    <a href="#629">substs</a>,
+                    promoted: (),
+                }),
+                ty: <a href="#577">a</a>.<a href="consts.rs.html#48">ty</a>(),
+            }));
+        }
+        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+    };
+    <span class="kw">if </span>is_match { <span class="prelude-val">Ok</span>(<a href="#577">a</a>) } <span class="kw">else </span>{ <span class="prelude-val">Err</span>(<a href="error.rs.html#71">TypeError::ConstMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#576">relation</a>, <a href="#577">a</a>, <a href="#578">b</a>))) }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::List&lt;ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, ty::ExistentialPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <span class="self">Self</span>,
+        b: <span class="self">Self</span>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt; {
+        <span class="kw">let </span>tcx = <a href="#651">relation</a>.<a href="#24">tcx</a>();
+
+        <span class="comment">// FIXME: this is wasteful, but want to do a perf run to see how slow it is.
+        // We need to perform this deduplication as we sometimes generate duplicate projections
+        // in `a`.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>a_v: Vec&lt;<span class="kw">_</span>&gt; = <a href="#652">a</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="kw">let </span><span class="kw-2">mut </span>b_v: Vec&lt;<span class="kw">_</span>&gt; = <a href="#653">b</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="comment">// `skip_binder` here is okay because `stable_cmp` doesn&#39;t look at binders
+        </span><a href="#660">a_v</a>.sort_by(|a, b| <a href="#663">a</a>.<a href="sty.rs.html#1068">skip_binder</a>().<a href="sty.rs.html#676">stable_cmp</a>(<a href="#655">tcx</a>, <span class="kw-2">&amp;</span><a href="#663">b</a>.<a href="sty.rs.html#1068">skip_binder</a>()));
+        <a href="#660">a_v</a>.dedup();
+        <a href="#661">b_v</a>.sort_by(|a, b| <a href="#665">a</a>.<a href="sty.rs.html#1068">skip_binder</a>().<a href="sty.rs.html#676">stable_cmp</a>(<a href="#655">tcx</a>, <span class="kw-2">&amp;</span><a href="#665">b</a>.<a href="sty.rs.html#1068">skip_binder</a>()));
+        <a href="#661">b_v</a>.dedup();
+        <span class="kw">if </span>a_v.len() != b_v.len() {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="error.rs.html#67">TypeError::ExistentialMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#651">relation</a>, <a href="#652">a</a>, <a href="#653">b</a>)));
+        }
+
+        <span class="kw">let </span>v = <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#660">a_v</a>, <a href="#661">b_v</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(ep_a, ep_b)| {
+            <span class="kw">use </span><a href="sty.rs.html#664"><span class="kw">crate</span>::ty::ExistentialPredicate</a>::<span class="kw-2">*</span>;
+            <span class="kw">match </span>(<a href="#671">ep_a</a>.<a href="sty.rs.html#1068">skip_binder</a>(), <a href="#671">ep_b</a>.<a href="sty.rs.html#1068">skip_binder</a>()) {
+                (<a href="sty.rs.html#666">Trait</a>(a), <a href="sty.rs.html#666">Trait</a>(b)) =&gt; <span class="prelude-val">Ok</span>(<a href="#671">ep_a</a>
+                    .<a href="sty.rs.html#1135-1137">rebind</a>(<a href="sty.rs.html#666">Trait</a>(relation.relate(ep_a.rebind(a), ep_b.rebind(b))<span class="question-mark">?</span>.<a href="sty.rs.html#1068">skip_binder</a>()))),
+                (<a href="sty.rs.html#668">Projection</a>(a), <a href="sty.rs.html#668">Projection</a>(b)) =&gt; <span class="prelude-val">Ok</span>(<a href="#671">ep_a</a>.<a href="sty.rs.html#1135-1137">rebind</a>(<a href="sty.rs.html#668">Projection</a>(
+                    relation.relate(ep_a.rebind(a), ep_b.rebind(b))<span class="question-mark">?</span>.<a href="sty.rs.html#1068">skip_binder</a>(),
+                ))),
+                (<a href="sty.rs.html#670">AutoTrait</a>(a), <a href="sty.rs.html#670">AutoTrait</a>(b)) <span class="kw">if </span><a href="#679">a</a> == <a href="#679">b</a> =&gt; <span class="prelude-val">Ok</span>(<a href="#671">ep_a</a>.<a href="sty.rs.html#1135-1137">rebind</a>(<a href="sty.rs.html#670">AutoTrait</a>(<a href="#679">a</a>))),
+                <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<a href="error.rs.html#67">TypeError::ExistentialMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#651">relation</a>, <a href="#652">a</a>, <a href="#653">b</a>))),
+            }
+        });
+        <a href="#655">tcx</a>.<a href="context.rs.html#2765-2773">mk_poly_existential_predicates</a>(<a href="#671">v</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::ClosureSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::ClosureSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::ClosureSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::ClosureSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>substs = relate_substs(relation, a.substs, b.substs)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="sty.rs.html#206">ty::ClosureSubsts</a> { <a href="#693">substs</a> })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::GeneratorSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::GeneratorSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::GeneratorSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::GeneratorSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>substs = relate_substs(relation, a.substs, b.substs)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="sty.rs.html#337">ty::GeneratorSubsts</a> { <a href="#704">substs</a> })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a href="#138-142">relate_substs</a>(<a href="#711">relation</a>, <a href="#712">a</a>, <a href="#713">b</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a href="#721">relation</a>.<a href="#83-87">regions</a>(<a href="#722">a</a>, <a href="#723">b</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a href="#731">relation</a>.<a href="#89-93">consts</a>(<a href="#732">a</a>, <a href="#733">b</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, T: Relate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+        b: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;&gt; {
+        <a href="#741">relation</a>.<a href="#95-101">binders</a>(<a href="#742">a</a>, <a href="#743">b</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">match </span>(<a href="#752">a</a>.<a href="subst.rs.html#146">unpack</a>(), <a href="#753">b</a>.<a href="subst.rs.html#146">unpack</a>()) {
+            (<a href="subst.rs.html#46">GenericArgKind::Lifetime</a>(a_lt), <a href="subst.rs.html#46">GenericArgKind::Lifetime</a>(b_lt)) =&gt; {
+                <span class="prelude-val">Ok</span>(relation.relate(a_lt, b_lt)<span class="question-mark">?</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+            }
+            (<a href="subst.rs.html#47">GenericArgKind::Type</a>(a_ty), <a href="subst.rs.html#47">GenericArgKind::Type</a>(b_ty)) =&gt; {
+                <span class="prelude-val">Ok</span>(relation.relate(a_ty, b_ty)<span class="question-mark">?</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+            }
+            (<a href="subst.rs.html#48">GenericArgKind::Const</a>(a_ct), <a href="subst.rs.html#48">GenericArgKind::Const</a>(b_ct)) =&gt; {
+                <span class="prelude-val">Ok</span>(relation.relate(a_ct, b_ct)<span class="question-mark">?</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+            }
+            (<a href="subst.rs.html#46">GenericArgKind::Lifetime</a>(unpacked), x) =&gt; {
+                <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;impossible case reached: can&#39;t relate: {:?} with {:?}&quot;</span>, unpacked, x)
+            }
+            (<a href="subst.rs.html#47">GenericArgKind::Type</a>(unpacked), x) =&gt; {
+                <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;impossible case reached: can&#39;t relate: {:?} with {:?}&quot;</span>, unpacked, x)
+            }
+            (<a href="subst.rs.html#48">GenericArgKind::Const</a>(unpacked), x) =&gt; {
+                <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;impossible case reached: can&#39;t relate: {:?} with {:?}&quot;</span>, unpacked, x)
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="mod.rs.html#233">ty::ImplPolarity</a> {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <a href="mod.rs.html#233">ty::ImplPolarity</a>,
+        b: <a href="mod.rs.html#233">ty::ImplPolarity</a>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="mod.rs.html#233">ty::ImplPolarity</a>&gt; {
+        <span class="kw">if </span>a != b {
+            <span class="prelude-val">Err</span>(<a href="error.rs.html#39">TypeError::PolarityMismatch</a>(<a href="#836-838">expected_found</a>(<a href="#780">relation</a>, <a href="#781">a</a>, <a href="#782">b</a>)))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#781">a</a>)
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::TraitPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::TraitPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::TraitPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::TraitPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="prelude-val">Ok</span>(<a href="mod.rs.html#812">ty::TraitPredicate</a> {
+            trait_ref: relation.relate(a.trait_ref, b.trait_ref)<span class="question-mark">?</span>,
+            constness: relation.relate(a.constness, b.constness)<span class="question-mark">?</span>,
+            polarity: relation.relate(a.polarity, b.polarity)<span class="question-mark">?</span>,
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Term&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: <span class="self">Self</span>,
+        b: <span class="self">Self</span>,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt; {
+        <span class="prelude-val">Ok</span>(<span class="kw">match </span>(<a href="#809">a</a>.<a href="mod.rs.html#983">unpack</a>(), <a href="#810">b</a>.<a href="mod.rs.html#983">unpack</a>()) {
+            (<a href="mod.rs.html#1024">TermKind::Ty</a>(a), <a href="mod.rs.html#1024">TermKind::Ty</a>(b)) =&gt; relation.relate(a, b)<span class="question-mark">?</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+            (<a href="mod.rs.html#1025">TermKind::Const</a>(a), <a href="mod.rs.html#1025">TermKind::Const</a>(b)) =&gt; relation.relate(a, b)<span class="question-mark">?</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="error.rs.html#37">TypeError::Mismatch</a>),
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Relate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::ProjectionPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>relate&lt;R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        relation: <span class="kw-2">&amp;mut </span>R,
+        a: ty::ProjectionPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::ProjectionPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RelateResult&lt;<span class="lifetime">&#39;tcx</span>, ty::ProjectionPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="prelude-val">Ok</span>(<a href="mod.rs.html#1062">ty::ProjectionPredicate</a> {
+            projection_ty: relation.relate(a.projection_ty, b.projection_ty)<span class="question-mark">?</span>,
+            term: relation.relate(a.term, b.term)<span class="question-mark">?</span>,
+        })
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Error handling
+
+</span><span class="kw">pub fn </span>expected_found&lt;<span class="lifetime">&#39;tcx</span>, R, T&gt;(relation: <span class="kw-2">&amp;mut </span>R, a: T, b: T) -&gt; ExpectedFound&lt;T&gt;
+<span class="kw">where
+    </span>R: TypeRelation&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    ExpectedFound::new(<a href="#836">relation</a>.<a href="#33">a_is_expected</a>(), <a href="#836">a</a>, <a href="#836">b</a>)
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

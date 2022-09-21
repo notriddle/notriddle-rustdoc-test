@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["SOURCE_SCRIPT","File script to handle sidebar."]]};

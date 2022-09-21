@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["evaluate_goal",""],["provide",""]],"mod":[["db","Provides the `RustIrDatabase` implementation for `chalk-solve`"],["lowering","Contains the logic to lower rustc types into Chalk types"]]};

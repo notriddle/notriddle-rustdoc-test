@@ -1,0 +1,1158 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_borrowck/src/type_check/liveness/trace.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>trace.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_borrowck/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_data_structures::fx::{FxHashMap, FxHashSet};
+<span class="kw">use </span><a href="../../../../rustc_index/bit_set/enum.HybridBitSet.html">rustc_index::bit_set::HybridBitSet</a>;
+<span class="kw">use </span><a href="../../../../rustc_index/interval/struct.IntervalSet.html">rustc_index::interval::IntervalSet</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/canonical/struct.QueryRegionConstraints.html">rustc_infer::infer::canonical::QueryRegionConstraints</a>;
+<span class="kw">use </span>rustc_middle::mir::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Body.html">Body</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/query/enum.ConstraintCategory.html">ConstraintCategory</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/traits/query/struct.DropckOutlivesResult.html">rustc_trait_selection::traits::query::dropck_outlives::DropckOutlivesResult</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/type_op/outlives/struct.DropckOutlives.html">rustc_trait_selection::traits::query::type_op::outlives::DropckOutlives</a>;
+<span class="kw">use </span>rustc_trait_selection::traits::query::type_op::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/type_op/trait.TypeOp.html">TypeOp</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/type_op/struct.TypeOpOutput.html">TypeOpOutput</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">std::rc::Rc</a>;
+
+<span class="kw">use </span><a href="../../../../rustc_mir_dataflow/impls/struct.MaybeInitializedPlaces.html">rustc_mir_dataflow::impls::MaybeInitializedPlaces</a>;
+<span class="kw">use </span>rustc_mir_dataflow::move_paths::{<a href="../../../../rustc_mir_dataflow/move_paths/trait.HasMoveData.html">HasMoveData</a>, <a href="../../../../rustc_mir_dataflow/move_paths/struct.MoveData.html">MoveData</a>, <a href="../../../../rustc_mir_dataflow/move_paths/struct.MovePathIndex.html">MovePathIndex</a>};
+<span class="kw">use </span><a href="../../../../rustc_mir_dataflow/framework/cursor/struct.ResultsCursor.html">rustc_mir_dataflow::ResultsCursor</a>;
+
+<span class="kw">use crate</span>::{
+    region_infer::values::{<a class="self" href="../../region_infer/mod.rs.html#48">self</a>, <a href="../../region_infer/values.rs.html#88-92">PointIndex</a>, <a href="../../region_infer/values.rs.html#13">RegionValueElements</a>},
+    <a href="local_use_map.rs.html#21">type_check::liveness::local_use_map::LocalUseMap</a>,
+    <a href="mod.rs.html#22">type_check::liveness::polonius</a>,
+    <a href="../mod.rs.html#2687">type_check::NormalizeLocation</a>,
+    <a href="../mod.rs.html#857">type_check::TypeChecker</a>,
+};
+
+<span class="doccomment">/// This is the heart of the liveness computation. For each variable X
+/// that requires a liveness computation, it walks over all the uses
+/// of X and does a reverse depth-first search (&quot;trace&quot;) through the
+/// MIR. This search stops when we find a definition of that variable.
+/// The points visited in this search is the USE-LIVE set for the variable;
+/// of those points is added to all the regions that appear in the variable&#39;s
+/// type.
+///
+/// We then also walks through each *drop* of those variables and does
+/// another search, stopping when we reach a use or definition. This
+/// is the DROP-LIVE set of points. Each of the points in the
+/// DROP-LIVE set are to the liveness sets for regions found in the
+/// `dropck_outlives` result of the variable&#39;s type (in particular,
+/// this respects `#[may_dangle]` annotations).
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>trace&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    typeck: <span class="kw-2">&amp;mut </span>TypeChecker&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    elements: <span class="kw-2">&amp;</span>Rc&lt;<a href="../../region_infer/values.rs.html#13">RegionValueElements</a>&gt;,
+    flow_inits: <span class="kw-2">&amp;mut </span>ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, MaybeInitializedPlaces&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    relevant_live_locals: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+    boring_locals: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+    polonius_drop_used: <span class="prelude-ty">Option</span>&lt;Vec&lt;(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>)&gt;&gt;,
+) {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;trace()&quot;</span>);
+
+    <span class="kw">let </span>local_use_map = <span class="kw-2">&amp;</span>LocalUseMap::build(<span class="kw-2">&amp;</span><a href="#44">relevant_live_locals</a>, <a href="#41">elements</a>, <a href="#40">body</a>);
+
+    <span class="kw">let </span>cx = <a href="#74">LivenessContext</a> {
+        <a href="#39">typeck</a>,
+        <a href="#40">body</a>,
+        <a href="#42">flow_inits</a>,
+        <a href="#41">elements</a>,
+        <a href="#50">local_use_map</a>,
+        <a href="#43">move_data</a>,
+        drop_data: FxHashMap::default(),
+    };
+
+    <span class="kw">let </span><span class="kw-2">mut </span>results = LivenessResults::new(<a href="#52">cx</a>);
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(drop_used) = <a href="#46">polonius_drop_used</a> {
+        <a href="#62">results</a>.<a href="#185-189">add_extra_drop_facts</a>(<a href="#64">drop_used</a>, <a href="#44">relevant_live_locals</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>())
+    }
+
+    <a href="#62">results</a>.<a href="#139">compute_for_all_locals</a>(<a href="#44">relevant_live_locals</a>);
+
+    <a href="#62">results</a>.<a href="#165">dropck_boring_locals</a>(<a href="#45">boring_locals</a>);
+}
+
+<span class="doccomment">/// Contextual state for the type-liveness generator.
+</span><span class="kw">struct </span>LivenessContext&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Current type-checker, giving us our inference context etc.
+    </span>typeck: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span><span class="kw-2">mut </span>TypeChecker&lt;<span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Defines the `PointIndex` mapping
+    </span>elements: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span><a href="../../region_infer/values.rs.html#13">RegionValueElements</a>,
+
+    <span class="doccomment">/// MIR we are analyzing.
+    </span>body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Mapping to/from the various indices used for initialization tracking.
+    </span>move_data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Cache for the results of `dropck_outlives` query.
+    </span>drop_data: FxHashMap&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, DropData&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    <span class="doccomment">/// Results of dataflow tracking which variables (and paths) have been
+    /// initialized.
+    </span>flow_inits: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span><span class="kw-2">mut </span>ResultsCursor&lt;<span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>, MaybeInitializedPlaces&lt;<span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    <span class="doccomment">/// Index indicating where each variable is assigned, used, or
+    /// dropped.
+    </span>local_use_map: <span class="kw-2">&amp;</span><span class="lifetime">&#39;me </span><a href="local_use_map.rs.html#21">LocalUseMap</a>,
+}
+
+<span class="kw">struct </span>DropData&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    dropck_result: DropckOutlivesResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    region_constraint_data: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>QueryRegionConstraints&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">struct </span>LivenessResults&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    cx: LivenessContext&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Set of points that define the current local.
+    </span>defs: HybridBitSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+
+    <span class="doccomment">/// Points where the current variable is &quot;use live&quot; -- meaning
+    /// that there is a future &quot;full use&quot; that may use its value.
+    </span>use_live_at: IntervalSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+
+    <span class="doccomment">/// Points where the current variable is &quot;drop live&quot; -- meaning
+    /// that there is no future &quot;full use&quot; that may use its value, but
+    /// there is a future drop.
+    </span>drop_live_at: IntervalSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+
+    <span class="doccomment">/// Locations where drops may occur.
+    </span>drop_locations: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>&gt;,
+
+    <span class="doccomment">/// Stack used when doing (reverse) DFS.
+    </span>stack: Vec&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt; LivenessResults&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new(cx: LivenessContext&lt;<span class="lifetime">&#39;me</span>, <span class="lifetime">&#39;typeck</span>, <span class="lifetime">&#39;flow</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>num_points = <a href="#127">cx</a>.elements.<a href="../../region_infer/values.rs.html#48">num_points</a>();
+        <a href="#104">LivenessResults</a> {
+            <a href="#127">cx</a>,
+            defs: HybridBitSet::new_empty(<a href="#128">num_points</a>),
+            use_live_at: IntervalSet::new(<a href="#128">num_points</a>),
+            drop_live_at: IntervalSet::new(<a href="#128">num_points</a>),
+            drop_locations: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            stack: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+        }
+    }
+
+    <span class="kw">fn </span>compute_for_all_locals(<span class="kw-2">&amp;mut </span><span class="self">self</span>, relevant_live_locals: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;) {
+        <span class="kw">for </span>local <span class="kw">in </span>relevant_live_locals {
+            <span class="self">self</span>.reset_local_state();
+            <span class="self">self</span>.add_defs_for(local);
+            <span class="self">self</span>.compute_use_live_points_for(local);
+            <span class="self">self</span>.compute_drop_live_points_for(local);
+
+            <span class="kw">let </span>local_ty = <span class="self">self</span>.cx.body.local_decls[local].ty;
+
+            <span class="kw">if </span>!<span class="self">self</span>.use_live_at.is_empty() {
+                <span class="self">self</span>.cx.add_use_live_facts_for(local_ty, <span class="kw-2">&amp;</span><span class="self">self</span>.use_live_at);
+            }
+
+            <span class="kw">if </span>!<span class="self">self</span>.drop_live_at.is_empty() {
+                <span class="self">self</span>.cx.add_drop_live_facts_for(
+                    local,
+                    local_ty,
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.drop_locations,
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.drop_live_at,
+                );
+            }
+        }
+    }
+
+    <span class="comment">// Runs dropck for locals whose liveness isn&#39;t relevant. This is
+    // necessary to eagerly detect unbound recursion during drop glue computation.
+    </span><span class="kw">fn </span>dropck_boring_locals(<span class="kw-2">&amp;mut </span><span class="self">self</span>, boring_locals: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;) {
+        <span class="kw">for </span>local <span class="kw">in </span>boring_locals {
+            <span class="kw">let </span>local_ty = <span class="self">self</span>.cx.body.local_decls[local].ty;
+            <span class="kw">let </span>drop_data = <span class="self">self</span>.cx.drop_data.entry(local_ty).or_insert_with({
+                <span class="kw">let </span>typeck = <span class="kw-2">&amp;mut </span><span class="self">self</span>.cx.typeck;
+                <span class="kw">move </span>|| LivenessContext::compute_drop_data(typeck, local_ty)
+            });
+
+            drop_data.dropck_result.report_overflows(
+                <span class="self">self</span>.cx.typeck.infcx.tcx,
+                <span class="self">self</span>.cx.body.local_decls[local].source_info.span,
+                local_ty,
+            );
+        }
+    }
+
+    <span class="doccomment">/// Add extra drop facts needed for Polonius.
+    ///
+    /// Add facts for all locals with free regions, since regions may outlive
+    /// the function body only at certain nodes in the CFG.
+    </span><span class="kw">fn </span>add_extra_drop_facts(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        drop_used: Vec&lt;(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>)&gt;,
+        relevant_live_locals: FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+    ) {
+        <span class="kw">let </span>locations = IntervalSet::new(<a class="self" href="#186">self</a>.cx.elements.<a href="../../region_infer/values.rs.html#48">num_points</a>());
+
+        <span class="kw">for </span>(local, location) <span class="kw">in </span>drop_used {
+            <span class="kw">if </span>!relevant_live_locals.contains(<span class="kw-2">&amp;</span>local) {
+                <span class="kw">let </span>local_ty = <span class="self">self</span>.cx.body.local_decls[local].ty;
+                <span class="kw">if </span>local_ty.has_free_regions() {
+                    <span class="self">self</span>.cx.add_drop_live_facts_for(local, local_ty, <span class="kw-2">&amp;</span>[location], <span class="kw-2">&amp;</span>locations);
+                }
+            }
+        }
+    }
+
+    <span class="doccomment">/// Clear the value of fields that are &quot;per local variable&quot;.
+    </span><span class="kw">fn </span>reset_local_state(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <a class="self" href="#203">self</a>.defs.clear();
+        <a class="self" href="#203">self</a>.use_live_at.clear();
+        <a class="self" href="#203">self</a>.drop_live_at.clear();
+        <a class="self" href="#203">self</a>.drop_locations.clear();
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.stack.is_empty());
+    }
+
+    <span class="doccomment">/// Adds the definitions of `local` into `self.defs`.
+    </span><span class="kw">fn </span>add_defs_for(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) {
+        <span class="kw">for </span>def <span class="kw">in </span><span class="self">self</span>.cx.local_use_map.defs(local) {
+            <span class="macro">debug!</span>(<span class="string">&quot;- defined at {:?}&quot;</span>, def);
+            <span class="self">self</span>.defs.insert(def);
+        }
+    }
+
+    <span class="doccomment">/// Computes all points where local is &quot;use live&quot; -- meaning its
+    /// current value may be used later (except by a drop). This is
+    /// done by walking backwards from each use of `local` until we
+    /// find a `def` of local.
+    ///
+    /// Requires `add_defs_for(local)` to have been executed.
+    </span><span class="kw">fn </span>compute_use_live_points_for(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute_use_live_points_for(local={:?})&quot;</span>, local);
+
+        <a class="self" href="#225">self</a>.stack.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a class="self" href="#225">self</a>.cx.local_use_map.<a href="local_use_map.rs.html#93">uses</a>(<a href="#225">local</a>));
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(p) = <span class="self">self</span>.stack.pop() {
+            <span class="comment">// We are live in this block from the closest to us of:
+            //
+            //  * Inclusively, the block start
+            //  * Exclusively, the previous definition (if it&#39;s in this block)
+            //  * Exclusively, the previous live_at setting (an optimization)
+            </span><span class="kw">let </span>block_start = <span class="self">self</span>.cx.elements.to_block_start(p);
+            <span class="kw">let </span>previous_defs = <span class="self">self</span>.defs.last_set_in(block_start..=p);
+            <span class="kw">let </span>previous_live_at = <span class="self">self</span>.use_live_at.last_set_in(block_start..=p);
+
+            <span class="kw">let </span>exclusive_start = <span class="kw">match </span>(previous_defs, previous_live_at) {
+                (<span class="prelude-val">Some</span>(a), <span class="prelude-val">Some</span>(b)) =&gt; <span class="prelude-val">Some</span>(std::cmp::max(a, b)),
+                (<span class="prelude-val">Some</span>(a), <span class="prelude-val">None</span>) | (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(a)) =&gt; <span class="prelude-val">Some</span>(a),
+                (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">None</span>,
+            };
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(exclusive) = exclusive_start {
+                <span class="self">self</span>.use_live_at.insert_range(exclusive + <span class="number">1</span>..=p);
+
+                <span class="comment">// If we have a bound after the start of the block, we should
+                // not add the predecessors for this block.
+                </span><span class="kw">continue</span>;
+            } <span class="kw">else </span>{
+                <span class="comment">// Add all the elements of this block.
+                </span><span class="self">self</span>.use_live_at.insert_range(block_start..=p);
+
+                <span class="comment">// Then add the predecessors for this block, which are the
+                // terminators of predecessor basic blocks. Push those onto the
+                // stack so that the next iteration(s) will process them.
+
+                </span><span class="kw">let </span>block = <span class="self">self</span>.cx.elements.to_location(block_start).block;
+                <span class="self">self</span>.stack.extend(
+                    <span class="self">self</span>.cx.body.basic_blocks.predecessors()[block]
+                        .iter()
+                        .map(|<span class="kw-2">&amp;</span>pred_bb| <span class="self">self</span>.cx.body.terminator_loc(pred_bb))
+                        .map(|pred_loc| <span class="self">self</span>.cx.elements.point_from_location(pred_loc)),
+                );
+            }
+        }
+    }
+
+    <span class="doccomment">/// Computes all points where local is &quot;drop live&quot; -- meaning its
+    /// current value may be dropped later (but not used). This is
+    /// done by iterating over the drops of `local` where `local` (or
+    /// some subpart of `local`) is initialized. For each such drop,
+    /// we walk backwards until we find a point where `local` is
+    /// either defined or use-live.
+    ///
+    /// Requires `compute_use_live_points_for` and `add_defs_for` to
+    /// have been executed.
+    </span><span class="kw">fn </span>compute_drop_live_points_for(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute_drop_live_points_for(local={:?})&quot;</span>, local);
+
+        <span class="kw">let </span>mpi = <a class="self" href="#279">self</a>.cx.move_data.rev_lookup.find_local(<a href="#279">local</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute_drop_live_points_for: mpi = {:?}&quot;</span>, mpi);
+
+        <span class="comment">// Find the drops where `local` is initialized.
+        </span><span class="kw">for </span>drop_point <span class="kw">in </span><span class="self">self</span>.cx.local_use_map.drops(local) {
+            <span class="kw">let </span>location = <span class="self">self</span>.cx.elements.to_location(drop_point);
+            <span class="macro">debug_assert_eq!</span>(<span class="self">self</span>.cx.body.terminator_loc(location.block), location,);
+
+            <span class="kw">if </span><span class="self">self</span>.cx.initialized_at_terminator(location.block, mpi) {
+                <span class="kw">if </span><span class="self">self</span>.drop_live_at.insert(drop_point) {
+                    <span class="self">self</span>.drop_locations.push(location);
+                    <span class="self">self</span>.stack.push(drop_point);
+                }
+            }
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute_drop_live_points_for: drop_locations={:?}&quot;</span>, <span class="self">self</span>.drop_locations);
+
+        <span class="comment">// Reverse DFS. But for drops, we do it a bit differently.
+        // The stack only ever stores *terminators of blocks*. Within
+        // a block, we walk back the statements in an inner loop.
+        </span><span class="kw">while let </span><span class="prelude-val">Some</span>(term_point) = <span class="self">self</span>.stack.pop() {
+            <span class="self">self</span>.compute_drop_live_points_for_block(mpi, term_point);
+        }
+    }
+
+    <span class="doccomment">/// Executes one iteration of the drop-live analysis loop.
+    ///
+    /// The parameter `mpi` is the `MovePathIndex` of the local variable
+    /// we are currently analyzing.
+    ///
+    /// The point `term_point` represents some terminator in the MIR,
+    /// where the local `mpi` is drop-live on entry to that terminator.
+    ///
+    /// This method adds all drop-live points within the block and --
+    /// where applicable -- pushes the terminators of preceding blocks
+    /// onto `self.stack`.
+    </span><span class="kw">fn </span>compute_drop_live_points_for_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, mpi: <a href="../../../../rustc_mir_dataflow/move_paths/struct.MovePathIndex.html">MovePathIndex</a>, term_point: <a href="../../region_infer/values.rs.html#88-92">PointIndex</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;compute_drop_live_points_for_block(mpi={:?}, term_point={:?})&quot;</span>,
+            <span class="self">self</span>.cx.move_data.move_paths[mpi].place,
+            <span class="self">self</span>.cx.elements.to_location(term_point),
+        );
+
+        <span class="comment">// We are only invoked with terminators where `mpi` is
+        // drop-live on entry.
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert.html">debug_assert!</a>(<span class="self">self</span>.drop_live_at.contains(term_point));
+
+        <span class="comment">// Otherwise, scan backwards through the statements in the
+        // block.  One of them may be either a definition or use
+        // live point.
+        </span><span class="kw">let </span>term_location = <a class="self" href="#319">self</a>.cx.elements.<a href="../../region_infer/values.rs.html#71">to_location</a>(<a href="#319">term_point</a>);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(<span class="self">self</span>.cx.body.terminator_loc(term_location.block), term_location,);
+        <span class="kw">let </span>block = <a href="#333">term_location</a>.block;
+        <span class="kw">let </span>entry_point = <a class="self" href="#319">self</a>.cx.elements.<a href="../../region_infer/values.rs.html#60">entry_point</a>(<a href="#333">term_location</a>.block);
+        <span class="kw">for </span>p <span class="kw">in </span>(entry_point..term_point).rev() {
+            <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: p = {:?}&quot;</span>, <span class="self">self</span>.cx.elements.to_location(p));
+
+            <span class="kw">if </span><span class="self">self</span>.defs.contains(p) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: def site&quot;</span>);
+                <span class="kw">return</span>;
+            }
+
+            <span class="kw">if </span><span class="self">self</span>.use_live_at.contains(p) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: use-live at {:?}&quot;</span>, p);
+                <span class="kw">return</span>;
+            }
+
+            <span class="kw">if </span>!<span class="self">self</span>.drop_live_at.insert(p) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: already drop-live&quot;</span>);
+                <span class="kw">return</span>;
+            }
+        }
+
+        <span class="kw">let </span>body = <a class="self" href="#319">self</a>.cx.body;
+        <span class="kw">for </span><span class="kw-2">&amp;</span>pred_block <span class="kw">in </span>body.basic_blocks.predecessors()[block].iter() {
+            <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: pred_block = {:?}&quot;</span>, pred_block,);
+
+            <span class="comment">// Check whether the variable is (at least partially)
+            // initialized at the exit of this predecessor. If so, we
+            // want to enqueue it on our list. If not, go check the
+            // next block.
+            //
+            // Note that we only need to check whether `live_local`
+            // became de-initialized at basic block boundaries. If it
+            // were to become de-initialized within the block, that
+            // would have been a &quot;use-live&quot; transition in the earlier
+            // loop, and we&#39;d have returned already.
+            //
+            // NB. It&#39;s possible that the pred-block ends in a call
+            // which stores to the variable; in that case, the
+            // variable may be uninitialized &quot;at exit&quot; because this
+            // call only considers the *unconditional effects* of the
+            // terminator. *But*, in that case, the terminator is also
+            // a *definition* of the variable, in which case we want
+            // to stop the search anyhow. (But see Note 1 below.)
+            </span><span class="kw">if </span>!<span class="self">self</span>.cx.initialized_at_exit(pred_block, mpi) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: not initialized&quot;</span>);
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">let </span>pred_term_loc = <span class="self">self</span>.cx.body.terminator_loc(pred_block);
+            <span class="kw">let </span>pred_term_point = <span class="self">self</span>.cx.elements.point_from_location(pred_term_loc);
+
+            <span class="comment">// If the terminator of this predecessor either *assigns*
+            // our value or is a &quot;normal use&quot;, then stop.
+            </span><span class="kw">if </span><span class="self">self</span>.defs.contains(pred_term_point) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: defined at {:?}&quot;</span>, pred_term_loc);
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">if </span><span class="self">self</span>.use_live_at.contains(pred_term_point) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: use-live at {:?}&quot;</span>, pred_term_loc);
+                <span class="kw">continue</span>;
+            }
+
+            <span class="comment">// Otherwise, we are drop-live on entry to the terminator,
+            // so walk it.
+            </span><span class="kw">if </span><span class="self">self</span>.drop_live_at.insert(pred_term_point) {
+                <span class="macro">debug!</span>(<span class="string">&quot;compute_drop_live_points_for_block: pushed to stack&quot;</span>);
+                <span class="self">self</span>.stack.push(pred_term_point);
+            }
+        }
+
+        <span class="comment">// Note 1. There is a weird scenario that you might imagine
+        // being problematic here, but which actually cannot happen.
+        // The problem would be if we had a variable that *is* initialized
+        // (but dead) on entry to the terminator, and where the current value
+        // will be dropped in the case of unwind. In that case, we ought to
+        // consider `X` to be drop-live in between the last use and call.
+        // Here is the example:
+        //
+        // ```
+        // BB0 {
+        //   X = ...
+        //   use(X); // last use
+        //   ...     // &lt;-- X ought to be drop-live here
+        //   X = call() goto BB1 unwind BB2
+        // }
+        //
+        // BB1 {
+        //   DROP(X)
+        // }
+        //
+        // BB2 {
+        //   DROP(X)
+        // }
+        // ```
+        //
+        // However, the current code would, when walking back from BB2,
+        // simply stop and never explore BB0. This seems bad! But it turns
+        // out this code is flawed anyway -- note that the existing value of
+        // `X` would leak in the case where unwinding did *not* occur.
+        //
+        // What we *actually* generate is a store to a temporary
+        // for the call (`TMP = call()...`) and then a
+        // `DropAndReplace` to swap that with `X`
+        // (`DropAndReplace` has very particular semantics).
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; LivenessContext&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Returns `true` if the local variable (or some part of it) is initialized at the current
+    /// cursor position. Callers should call one of the `seek` methods immediately before to point
+    /// the cursor to the desired location.
+    </span><span class="kw">fn </span>initialized_at_curr_loc(<span class="kw-2">&amp;</span><span class="self">self</span>, mpi: <a href="../../../../rustc_mir_dataflow/move_paths/struct.MovePathIndex.html">MovePathIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>state = <a class="self" href="#447">self</a>.flow_inits.get();
+        <span class="kw">if </span>state.contains(mpi) {
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        }
+
+        <span class="kw">let </span>move_paths = <span class="kw-2">&amp;</span><a class="self" href="#447">self</a>.flow_inits.analysis().<a href="../../../../rustc_mir_dataflow/move_paths/trait.HasMoveData.html">move_data</a>().move_paths;
+        <a href="#453">move_paths</a>[<a href="#447">mpi</a>].find_descendant(<span class="kw-2">&amp;</span><a href="#453">move_paths</a>, |mpi| <a href="#448">state</a>.contains(<a href="#454">mpi</a>)).is_some()
+    }
+
+    <span class="doccomment">/// Returns `true` if the local variable (or some part of it) is initialized in
+    /// the terminator of `block`. We need to check this to determine if a
+    /// DROP of some local variable will have an effect -- note that
+    /// drops, as they may unwind, are always terminators.
+    </span><span class="kw">fn </span>initialized_at_terminator(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, mpi: <a href="../../../../rustc_mir_dataflow/move_paths/struct.MovePathIndex.html">MovePathIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#461">self</a>.flow_inits.seek_before_primary_effect(<a class="self" href="#461">self</a>.body.terminator_loc(<a href="#461">block</a>));
+        <a class="self" href="#461">self</a>.<a href="#447">initialized_at_curr_loc</a>(<a href="#461">mpi</a>)
+    }
+
+    <span class="doccomment">/// Returns `true` if the path `mpi` (or some part of it) is initialized at
+    /// the exit of `block`.
+    ///
+    /// **Warning:** Does not account for the result of `Call`
+    /// instructions.
+    </span><span class="kw">fn </span>initialized_at_exit(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, mpi: <a href="../../../../rustc_mir_dataflow/move_paths/struct.MovePathIndex.html">MovePathIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#471">self</a>.flow_inits.seek_after_primary_effect(<a class="self" href="#471">self</a>.body.terminator_loc(<a href="#471">block</a>));
+        <a class="self" href="#471">self</a>.<a href="#447">initialized_at_curr_loc</a>(<a href="#471">mpi</a>)
+    }
+
+    <span class="doccomment">/// Stores the result that all regions in `value` are live for the
+    /// points `live_at`.
+    </span><span class="kw">fn </span>add_use_live_facts_for(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        value: <span class="kw">impl </span>TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        live_at: <span class="kw-2">&amp;</span>IntervalSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;add_use_live_facts_for(value={:?})&quot;</span>, value);
+
+        <span class="self">Self</span>::make_all_regions_live(<a class="self" href="#479">self</a>.elements, <span class="kw-2">&amp;mut </span><a class="self" href="#479">self</a>.typeck, <a href="#480">value</a>, <a href="#481">live_at</a>)
+    }
+
+    <span class="doccomment">/// Some variable with type `live_ty` is &quot;drop live&quot; at `location`
+    /// -- i.e., it may be dropped later. This means that *some* of
+    /// the regions in its type must be live at `location`. The
+    /// precise set will depend on the dropck constraints, and in
+    /// particular this takes `#[may_dangle]` into account.
+    </span><span class="kw">fn </span>add_drop_live_facts_for(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        dropped_local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>,
+        dropped_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        drop_locations: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>],
+        live_at: <span class="kw-2">&amp;</span>IntervalSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;add_drop_live_constraint(\
+             dropped_local={:?}, \
+             dropped_ty={:?}, \
+             drop_locations={:?}, \
+             live_at={:?})&quot;</span>,
+            dropped_local,
+            dropped_ty,
+            drop_locations,
+            values::location_set_str(<span class="self">self</span>.elements, live_at.iter()),
+        );
+
+        <span class="kw">let </span>drop_data = <a class="self" href="#494">self</a>.drop_data.entry(<a href="#496">dropped_ty</a>).or_insert_with({
+            <span class="kw">let </span>typeck = <span class="kw-2">&amp;mut </span><a class="self" href="#494">self</a>.typeck;
+            <span class="kw">move </span>|| <span class="self">Self</span>::compute_drop_data(<a href="#513">typeck</a>, <a href="#496">dropped_ty</a>)
+        });
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(data) = <span class="kw-2">&amp;</span><a href="#512">drop_data</a>.region_constraint_data {
+            <span class="kw">for </span><span class="kw-2">&amp;</span>drop_location <span class="kw">in </span>drop_locations {
+                <span class="self">self</span>.typeck.push_region_constraints(
+                    drop_location.to_locations(),
+                    ConstraintCategory::Boring,
+                    data,
+                );
+            }
+        }
+
+        <a href="#512">drop_data</a>.dropck_result.report_overflows(
+            <a class="self" href="#494">self</a>.typeck.infcx.tcx,
+            <a class="self" href="#494">self</a>.body.source_info(<span class="kw-2">*</span><a href="#497">drop_locations</a>.first().unwrap()).span,
+            <a href="#496">dropped_ty</a>,
+        );
+
+        <span class="comment">// All things in the `outlives` array may be touched by
+        // the destructor and must be live at this point.
+        </span><span class="kw">for </span><span class="kw-2">&amp;</span>kind <span class="kw">in </span><span class="kw-2">&amp;</span>drop_data.dropck_result.kinds {
+            <span class="self">Self</span>::make_all_regions_live(<span class="self">self</span>.elements, <span class="kw-2">&amp;mut </span><span class="self">self</span>.typeck, kind, live_at);
+
+            polonius::add_drop_of_var_derefs_origin(<span class="kw-2">&amp;mut </span><span class="self">self</span>.typeck, dropped_local, <span class="kw-2">&amp;</span>kind);
+        }
+    }
+
+    <span class="kw">fn </span>make_all_regions_live(
+        elements: <span class="kw-2">&amp;</span><a href="../../region_infer/values.rs.html#13">RegionValueElements</a>,
+        typeck: <span class="kw-2">&amp;mut </span>TypeChecker&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        value: <span class="kw">impl </span>TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        live_at: <span class="kw-2">&amp;</span>IntervalSet&lt;<a href="../../region_infer/values.rs.html#88-92">PointIndex</a>&gt;,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;make_all_regions_live(value={:?})&quot;</span>, value);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;make_all_regions_live: live_at={}&quot;</span>,
+            values::location_set_str(elements, live_at.iter()),
+        );
+
+        <span class="kw">let </span>tcx = <a href="#544">typeck</a>.<a href="../mod.rs.html#1189">tcx</a>();
+        <a href="#554">tcx</a>.for_each_free_region(<span class="kw-2">&amp;</span><a href="#545">value</a>, |live_region| {
+            <span class="kw">let </span>live_region_vid =
+                <a href="#544">typeck</a>.borrowck_context.universal_regions.<a href="../../universal_regions.rs.html#318">to_region_vid</a>(<a href="#555">live_region</a>);
+            <a href="#544">typeck</a>
+                .borrowck_context
+                .constraints
+                .liveness_constraints
+                .<a href="../../region_infer/values.rs.html#145">add_elements</a>(<a href="#556">live_region_vid</a>, <a href="#546">live_at</a>);
+        });
+    }
+
+    <span class="kw">fn </span>compute_drop_data(
+        typeck: <span class="kw-2">&amp;mut </span>TypeChecker&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        dropped_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; DropData&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;compute_drop_data(dropped_ty={:?})&quot;</span>, dropped_ty,);
+
+        <span class="kw">let </span>param_env = <a href="#567">typeck</a>.param_env;
+        <span class="kw">let </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/type_op/struct.TypeOpOutput.html">TypeOpOutput</a> { output, constraints, .. } =
+            <a href="#572">param_env</a>.and(DropckOutlives::new(<a href="#568">dropped_ty</a>)).<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/type_op/trait.TypeOp.html">fully_perform</a>(<a href="#567">typeck</a>.infcx).unwrap();
+
+        <a href="#99">DropData</a> { dropck_result: <a href="#573">output</a>, region_constraint_data: <a href="#573">constraints</a> }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_borrowck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

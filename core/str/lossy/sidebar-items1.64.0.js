@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Utf8Lossy","Lossy UTF-8 string."],["Utf8LossyChunk",""],["Utf8LossyChunksIter","Iterator over lossy UTF-8 string"]]};

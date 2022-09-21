@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["extract_leading_metadata","Separate any lines at the start of the file that begin with `# ` or `%`."],["render","Render `input` (e.g., “foo.md”) into an HTML file in `output` (e.g., output = “bar” => “bar/foo.html”)."],["test","Runs any tests/code examples in the markdown file `input`."]]};

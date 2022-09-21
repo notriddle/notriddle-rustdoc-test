@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/const_eval/fn_queries.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>fn_queries.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../rustc_hir/def/enum.DefKind.html">rustc_hir::def::DefKind</a>;
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">rustc_middle::ty::query::Providers</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">DefIdTree</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../rustc_span/symbol/struct.Symbol.html">rustc_span::symbol::Symbol</a>;
+
+<span class="doccomment">/// Whether the `def_id` is an unstable const fn and what feature gate is necessary to enable it
+</span><span class="kw">pub fn </span>is_unstable_const_fn(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; {
+    <span class="kw">if </span>tcx.is_const_fn_raw(def_id) {
+        <span class="kw">let </span>const_stab = tcx.lookup_const_stability(def_id)<span class="question-mark">?</span>;
+        <span class="kw">if </span>const_stab.is_const_unstable() { <span class="prelude-val">Some</span>(<a href="#11">const_stab</a>.feature) } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+    } <span class="kw">else </span>{
+        <span class="prelude-val">None
+    </span>}
+}
+
+<span class="kw">pub fn </span>is_parent_const_impl_raw(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>parent_id = <a href="#18">tcx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">local_parent</a>(<a href="#18">def_id</a>);
+    <a href="#18">tcx</a>.def_kind(<a href="#19">parent_id</a>) == DefKind::Impl &amp;&amp; <a href="#18">tcx</a>.constness(<a href="#19">parent_id</a>) == hir::Constness::Const
+}
+
+<span class="doccomment">/// Checks whether an item is considered to be `const`. If it is a constructor, it is const. If
+/// it is a trait impl/function, return if it has a `const` modifier. If it is an intrinsic,
+/// report whether said intrinsic has a `rustc_const_{un,}stable` attribute. Otherwise, return
+/// `Constness::NotConst`.
+</span><span class="kw">fn </span>constness(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../../rustc_hir/hir/enum.Constness.html">hir::Constness</a> {
+    <span class="kw">let </span>def_id = <a href="#27">def_id</a>.expect_local();
+    <span class="kw">let </span>node = <a href="#27">tcx</a>.hir().get_by_def_id(<a href="#28">def_id</a>);
+
+    <span class="kw">match </span><a href="#29">node</a> {
+        hir::Node::Ctor(<span class="kw">_</span>) =&gt; hir::Constness::Const,
+        hir::Node::Item(<a href="../../../rustc_hir/hir/struct.Item.html">hir::Item</a> { kind: hir::ItemKind::Impl(impl_), .. }) =&gt; <a href="#33">impl_</a>.constness,
+        hir::Node::ForeignItem(<a href="../../../rustc_hir/hir/struct.ForeignItem.html">hir::ForeignItem</a> { kind: hir::ForeignItemKind::Fn(..), .. }) =&gt; {
+            <span class="comment">// Intrinsics use `rustc_const_{un,}stable` attributes to indicate constness. All other
+            // foreign items cannot be evaluated at compile-time.
+            </span><span class="kw">let </span>is_const = <span class="kw">if </span>tcx.is_intrinsic(def_id) {
+                <a href="#27">tcx</a>.lookup_const_stability(<a href="#28">def_id</a>).is_some()
+            } <span class="kw">else </span>{
+                <span class="bool-val">false
+            </span>};
+            <span class="kw">if </span>is_const { hir::Constness::Const } <span class="kw">else </span>{ hir::Constness::NotConst }
+        }
+        <span class="kw">_ </span>=&gt; {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(fn_kind) = <a href="#29">node</a>.fn_kind() {
+                <span class="kw">if </span>fn_kind.constness() == hir::Constness::Const {
+                    <span class="kw">return </span>hir::Constness::Const;
+                }
+
+                <span class="comment">// If the function itself is not annotated with `const`, it may still be a `const fn`
+                // if it resides in a const trait impl.
+                </span><span class="kw">let </span>is_const = <a href="#18">is_parent_const_impl_raw</a>(<a href="#27">tcx</a>, <a href="#28">def_id</a>);
+                <span class="kw">if </span>is_const { hir::Constness::Const } <span class="kw">else </span>{ hir::Constness::NotConst }
+            } <span class="kw">else </span>{
+                hir::Constness::NotConst
+            }
+        }
+    }
+}
+
+<span class="kw">fn </span>is_promotable_const_fn(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#61">tcx</a>.is_const_fn(<a href="#61">def_id</a>)
+        &amp;&amp; <span class="kw">match </span><a href="#61">tcx</a>.lookup_const_stability(<a href="#61">def_id</a>) {
+            <span class="prelude-val">Some</span>(stab) =&gt; {
+                <span class="kw">if </span><span class="macro">cfg!</span>(debug_assertions) &amp;&amp; stab.promotable {
+                    <span class="kw">let </span>sig = <a href="#61">tcx</a>.fn_sig(<a href="#61">def_id</a>);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        sig.unsafety(),
+                        hir::Unsafety::Normal,
+                        <span class="string">&quot;don&#39;t mark const unsafe fns as promotable&quot;</span>,
+                        <span class="comment">// https://github.com/rust-lang/rust/pull/53851#issuecomment-418760682
+                    </span>);
+                }
+                <a href="#64">stab</a>.promotable
+            }
+            <span class="prelude-val">None </span>=&gt; <span class="bool-val">false</span>,
+        }
+}
+
+<span class="kw">pub fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <span class="kw-2">*</span><a href="#80">providers</a> = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a> { <a href="#27">constness</a>, <a href="#61">is_promotable_const_fn</a>, ..<span class="kw-2">*</span><a href="#80">providers</a> };
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

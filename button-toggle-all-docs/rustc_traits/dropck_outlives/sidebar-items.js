@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["adt_dtorck_constraint","Calculates the dtorck constraint for a type."],["dedup_dtorck_constraint",""],["dropck_outlives",""],["dtorck_constraint_for_ty","Returns a set of constraints that needs to be satisfied in order for `ty` to be valid for destruction."],["provide",""]]};

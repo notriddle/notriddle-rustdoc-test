@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["get_fn","Codegens a reference to a fn/method item, monomorphizing and inlining as it goes."]]};

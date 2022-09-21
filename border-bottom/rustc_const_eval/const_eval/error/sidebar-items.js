@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ConstEvalErrKind","The CTFE machine has some custom error kinds."]],"struct":[["ConstEvalErr","When const-evaluation errors, this type is constructed with the resulting information, and then used to emit the error as a lint or hard error."]]};

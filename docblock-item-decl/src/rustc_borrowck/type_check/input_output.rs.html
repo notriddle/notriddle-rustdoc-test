@@ -1,0 +1,492 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_borrowck/src/type_check/input_output.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>input_output.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_borrowck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+</pre><pre class="rust"><code><span class="doccomment">//! This module contains code to equate the input/output types appearing
+//! in the MIR with the expected input/output types from the function
+//! signature. This requires a bit of processing, as the expected types
+//! are supplied to us before normalization and may contain opaque
+//! `impl Trait` instances. In contrast, the input/output types found in
+//! the MIR (specifically, in the special local variables for the
+//! `RETURN_PLACE` the MIR arguments) are always fully normalized (and
+//! contain revealed `impl Trait` values).
+
+</span><span class="kw">use </span><a href="constraint_conversion.rs.html#21"><span class="kw">crate</span>::type_check::constraint_conversion::ConstraintConversion</a>;
+<span class="kw">use </span><a href="../../../rustc_index/vec/trait.Idx.html">rustc_index::vec::Idx</a>;
+<span class="kw">use </span><a href="../../../rustc_infer/infer/enum.LateBoundRegionConversionTime.html">rustc_infer::infer::LateBoundRegionConversionTime</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/mir/index.html">rustc_middle::mir</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../../../rustc_middle/ty/struct.Ty.html">rustc_middle::ty::Ty</a>;
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">rustc_span::DUMMY_SP</a>;
+<span class="kw">use </span>rustc_trait_selection::traits::query::type_op::{<a class="self" href="../../../rustc_trait_selection/traits/query/type_op/index.html">self</a>, <a href="../../../rustc_trait_selection/traits/query/type_op/trait.TypeOp.html">TypeOp</a>};
+<span class="kw">use </span><a href="../../../rustc_middle/traits/query/type.Fallible.html">rustc_trait_selection::traits::query::Fallible</a>;
+<span class="kw">use </span><a href="../../../rustc_trait_selection/traits/query/type_op/struct.TypeOpOutput.html">type_op::TypeOpOutput</a>;
+
+<span class="kw">use </span><a href="../universal_regions.rs.html#32"><span class="kw">crate</span>::universal_regions::UniversalRegions</a>;
+
+<span class="kw">use super</span>::{<a href="mod.rs.html#949">Locations</a>, <a href="mod.rs.html#857">TypeChecker</a>};
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeChecker&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>, body, universal_regions), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>equate_inputs_and_outputs(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        universal_regions: <span class="kw-2">&amp;</span>UniversalRegions&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        normalized_inputs_and_output: <span class="kw-2">&amp;</span>[Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+    ) {
+        <span class="kw">let </span>(<span class="kw-2">&amp;</span>normalized_output_ty, normalized_input_tys) =
+            normalized_inputs_and_output.split_last().unwrap();
+
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>normalized_output_ty);
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>normalized_input_tys);
+
+        <span class="kw">let </span>mir_def_id = body.source.def_id().expect_local();
+
+        <span class="comment">// If the user explicitly annotated the input types, extract
+        // those.
+        //
+        // e.g., `|x: FxHashMap&lt;_, &amp;&#39;static u32&gt;| ...`
+        </span><span class="kw">let </span>user_provided_sig;
+        <span class="kw">if </span>!<span class="self">self</span>.tcx().is_closure(mir_def_id.to_def_id()) {
+            user_provided_sig = <span class="prelude-val">None</span>;
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>typeck_results = <span class="self">self</span>.tcx().typeck(mir_def_id);
+            user_provided_sig = typeck_results.user_provided_sigs.get(<span class="kw-2">&amp;</span>mir_def_id.to_def_id()).map(
+                |user_provided_poly_sig| {
+                    <span class="comment">// Instantiate the canonicalized variables from
+                    // user-provided signature (e.g., the `_` in the code
+                    // above) with fresh variables.
+                    </span><span class="kw">let </span>poly_sig = <span class="self">self</span>.instantiate_canonical_with_fresh_inference_vars(
+                        body.span,
+                        <span class="kw-2">&amp;</span>user_provided_poly_sig,
+                    );
+
+                    <span class="comment">// Replace the bound items in the fn sig with fresh
+                    // variables, so that they represent the view from
+                    // &quot;inside&quot; the closure.
+                    </span><span class="self">self</span>.infcx.replace_bound_vars_with_fresh_vars(
+                        body.span,
+                        LateBoundRegionConversionTime::FnCall,
+                        poly_sig,
+                    )
+                },
+            );
+        }
+
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>normalized_input_tys, <span class="question-mark">?</span>body.local_decls);
+
+        <span class="comment">// Equate expected input tys with those in the MIR.
+        </span><span class="kw">for </span>(argument_index, <span class="kw-2">&amp;</span>normalized_input_ty) <span class="kw">in </span>normalized_input_tys.iter().enumerate() {
+            <span class="kw">if </span>argument_index + <span class="number">1 </span>&gt;= body.local_decls.len() {
+                <span class="self">self</span>.tcx()
+                    .sess
+                    .delay_span_bug(body.span, <span class="string">&quot;found more normalized_input_ty than local_decls&quot;</span>);
+                <span class="kw">break</span>;
+            }
+
+            <span class="comment">// In MIR, argument N is stored in local N+1.
+            </span><span class="kw">let </span>local = Local::new(argument_index + <span class="number">1</span>);
+
+            <span class="kw">let </span>mir_input_ty = body.local_decls[local].ty;
+
+            <span class="kw">let </span>mir_input_span = body.local_decls[local].source_info.span;
+            <span class="self">self</span>.equate_normalized_input_or_output(
+                normalized_input_ty,
+                mir_input_ty,
+                mir_input_span,
+            );
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(user_provided_sig) = user_provided_sig {
+            <span class="kw">for </span>(argument_index, <span class="kw-2">&amp;</span>user_provided_input_ty) <span class="kw">in
+                </span>user_provided_sig.inputs().iter().enumerate()
+            {
+                <span class="comment">// In MIR, closures begin an implicit `self`, so
+                // argument N is stored in local N+2.
+                </span><span class="kw">let </span>local = Local::new(argument_index + <span class="number">2</span>);
+                <span class="kw">let </span>mir_input_ty = body.local_decls[local].ty;
+                <span class="kw">let </span>mir_input_span = body.local_decls[local].source_info.span;
+
+                <span class="comment">// If the user explicitly annotated the input types, enforce those.
+                </span><span class="kw">let </span>user_provided_input_ty =
+                    <span class="self">self</span>.normalize(user_provided_input_ty, Locations::All(mir_input_span));
+
+                <span class="self">self</span>.equate_normalized_input_or_output(
+                    user_provided_input_ty,
+                    mir_input_ty,
+                    mir_input_span,
+                );
+            }
+        }
+
+        <span class="macro">debug!</span>(
+            <span class="string">&quot;equate_inputs_and_outputs: body.yield_ty {:?}, universal_regions.yield_ty {:?}&quot;</span>,
+            body.yield_ty(),
+            universal_regions.yield_ty
+        );
+
+        <span class="comment">// We will not have a universal_regions.yield_ty if we yield (by accident)
+        // outside of a generator and return an `impl Trait`, so emit a delay_span_bug
+        // because we don&#39;t want to panic in an assert here if we&#39;ve already got errors.
+        </span><span class="kw">if </span>body.yield_ty().is_some() != universal_regions.yield_ty.is_some() {
+            <span class="self">self</span>.tcx().sess.delay_span_bug(
+                body.span,
+                <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                    <span class="string">&quot;Expected body to have yield_ty ({:?}) iff we have a UR yield_ty ({:?})&quot;</span>,
+                    body.yield_ty(),
+                    universal_regions.yield_ty,
+                ),
+            );
+        }
+
+        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(mir_yield_ty), <span class="prelude-val">Some</span>(ur_yield_ty)) =
+            (body.yield_ty(), universal_regions.yield_ty)
+        {
+            <span class="kw">let </span>yield_span = body.local_decls[RETURN_PLACE].source_info.span;
+            <span class="self">self</span>.equate_normalized_input_or_output(ur_yield_ty, mir_yield_ty, yield_span);
+        }
+
+        <span class="comment">// Return types are a bit more complex. They may contain opaque `impl Trait` types.
+        </span><span class="kw">let </span>mir_output_ty = body.local_decls[RETURN_PLACE].ty;
+        <span class="kw">let </span>output_span = body.local_decls[RETURN_PLACE].source_info.span;
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(terr) = <span class="self">self</span>.eq_types(
+            normalized_output_ty,
+            mir_output_ty,
+            Locations::All(output_span),
+            ConstraintCategory::BoringNoLocation,
+        ) {
+            <span class="macro">span_mirbug!</span>(
+                <span class="self">self</span>,
+                Location::START,
+                <span class="string">&quot;equate_inputs_and_outputs: `{:?}=={:?}` failed with `{:?}`&quot;</span>,
+                normalized_output_ty,
+                mir_output_ty,
+                terr
+            );
+        };
+
+        <span class="comment">// If the user explicitly annotated the output types, enforce those.
+        // Note that this only happens for closures.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(user_provided_sig) = user_provided_sig {
+            <span class="kw">let </span>user_provided_output_ty = user_provided_sig.output();
+            <span class="kw">let </span>user_provided_output_ty =
+                <span class="self">self</span>.normalize(user_provided_output_ty, Locations::All(output_span));
+            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = <span class="self">self</span>.eq_types(
+                user_provided_output_ty,
+                mir_output_ty,
+                Locations::All(output_span),
+                ConstraintCategory::BoringNoLocation,
+            ) {
+                <span class="macro">span_mirbug!</span>(
+                    <span class="self">self</span>,
+                    Location::START,
+                    <span class="string">&quot;equate_inputs_and_outputs: `{:?}=={:?}` failed with `{:?}`&quot;</span>,
+                    mir_output_ty,
+                    user_provided_output_ty,
+                    err
+                );
+            }
+        }
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>, span), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">fn </span>equate_normalized_input_or_output(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =
+            <span class="self">self</span>.eq_types(a, b, Locations::All(span), ConstraintCategory::BoringNoLocation)
+        {
+            <span class="comment">// FIXME(jackh726): This is a hack. It&#39;s somewhat like
+            // `rustc_traits::normalize_after_erasing_regions`. Ideally, we&#39;d
+            // like to normalize *before* inserting into `local_decls`, but
+            // doing so ends up causing some other trouble.
+            </span><span class="kw">let </span>b = <span class="kw">match </span><span class="self">self</span>.normalize_and_add_constraints(b) {
+                <span class="prelude-val">Ok</span>(n) =&gt; n,
+                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
+                    <span class="macro">debug!</span>(<span class="string">&quot;equate_inputs_and_outputs: NoSolution&quot;</span>);
+                    b
+                }
+            };
+
+            <span class="comment">// Note: if we have to introduce new placeholders during normalization above, then we won&#39;t have
+            // added those universes to the universe info, which we would want in `relate_tys`.
+            </span><span class="kw">if let </span><span class="prelude-val">Err</span>(terr) =
+                <span class="self">self</span>.eq_types(a, b, Locations::All(span), ConstraintCategory::BoringNoLocation)
+            {
+                <span class="macro">span_mirbug!</span>(
+                    <span class="self">self</span>,
+                    Location::START,
+                    <span class="string">&quot;equate_normalized_input_or_output: `{:?}=={:?}` failed with `{:?}`&quot;</span>,
+                    a,
+                    b,
+                    terr
+                );
+            }
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_and_add_constraints(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Fallible&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span><a href="../../../rustc_trait_selection/traits/query/type_op/struct.TypeOpOutput.html">TypeOpOutput</a> { output: norm_ty, constraints, .. } =
+            <span class="self">self</span>.param_env.and(type_op::normalize::Normalize::new(t)).fully_perform(<span class="self">self</span>.infcx)<span class="question-mark">?</span>;
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} normalized to {:?}&quot;</span>, t, norm_ty);
+
+        <span class="kw">for </span>data <span class="kw">in </span>constraints {
+            ConstraintConversion::new(
+                <span class="self">self</span>.infcx,
+                <span class="kw-2">&amp;</span><span class="self">self</span>.borrowck_context.universal_regions,
+                <span class="kw-2">&amp;</span><span class="self">self</span>.region_bound_pairs,
+                <span class="self">self</span>.implicit_region_bound,
+                <span class="self">self</span>.param_env,
+                Locations::All(DUMMY_SP),
+                DUMMY_SP,
+                ConstraintCategory::Internal,
+                <span class="kw-2">&amp;mut </span><span class="self">self</span>.borrowck_context.constraints,
+            )
+            .convert_all(<span class="kw-2">&amp;*</span>data);
+        }
+
+        <span class="prelude-val">Ok</span>(<a href="#223">norm_ty</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_borrowck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

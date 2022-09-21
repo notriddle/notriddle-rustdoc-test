@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["CursorPosition",""],["ResultsCursor","Allows random access inspection of the results of a dataflow analysis."]],"type":[["ResultsRefCursor","A `ResultsCursor` that borrows the underlying `Results`."]]};

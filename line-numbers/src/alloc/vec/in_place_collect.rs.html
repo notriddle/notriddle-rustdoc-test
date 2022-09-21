@@ -1,0 +1,606 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `library/alloc/src/vec/in_place_collect.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>in_place_collect.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize1.66.0.css"><link rel="stylesheet" href="../../../rustdoc1.66.0.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu1.66.0.css" disabled><link rel="stylesheet" href="../../../dark1.66.0.css" disabled><link rel="stylesheet" href="../../../light1.66.0.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage1.66.0.js"></script><script defer src="../../../source-script1.66.0.js"></script><script defer src="../../../source-files1.66.0.js"></script><script defer src="../../../main1.66.0.js"></script><noscript><link rel="stylesheet" href="../../../noscript1.66.0.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x161.66.0.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x321.66.0.png"><link rel="icon" type="image/svg+xml" href="../../../favicon1.66.0.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../alloc/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo1.66.0.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../alloc/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo1.66.0.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../alloc/index.html"><img class="rust-logo" src="../../../rust-logo1.66.0.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel1.66.0.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Inplace iterate-and-collect specialization for `Vec`
+//!
+//! Note: This documents Vec internals, some of the following sections explain implementation
+//! details and are best read together with the source of this module.
+//!
+//! The specialization in this module applies to iterators in the shape of
+//! `source.adapter().adapter().adapter().collect::&lt;Vec&lt;U&gt;&gt;()`
+//! where `source` is an owning iterator obtained from [`Vec&lt;T&gt;`], [`Box&lt;[T]&gt;`][box] (by conversion to `Vec`)
+//! or [`BinaryHeap&lt;T&gt;`], the adapters each consume one or more items per step
+//! (represented by [`InPlaceIterable`]), provide transitive access to `source` (via [`SourceIter`])
+//! and thus the underlying allocation. And finally the layouts of `T` and `U` must
+//! have the same size and alignment, this is currently ensured via const eval instead of trait bounds
+//! in the specialized [`SpecFromIter`] implementation.
+//!
+//! [`BinaryHeap&lt;T&gt;`]: crate::collections::BinaryHeap
+//! [box]: crate::boxed::Box
+//!
+//! By extension some other collections which use `collect::&lt;Vec&lt;_&gt;&gt;()` internally in their
+//! `FromIterator` implementation benefit from this too.
+//!
+//! Access to the underlying source goes through a further layer of indirection via the private
+//! trait [`AsVecIntoIter`] to hide the implementation detail that other collections may use
+//! `vec::IntoIter` internally.
+//!
+//! In-place iteration depends on the interaction of several unsafe traits, implementation
+//! details of multiple parts in the iterator pipeline and often requires holistic reasoning
+//! across multiple structs since iterators are executed cooperatively rather than having
+//! a central evaluator/visitor struct executing all iterator components.
+//!
+//! # Reading from and writing to the same allocation
+//!
+//! By its nature collecting in place means that the reader and writer side of the iterator
+//! use the same allocation. Since `try_fold()` (used in [`SpecInPlaceCollect`]) takes a
+//! reference to the iterator for the duration of the iteration that means we can&#39;t interleave
+//! the step of reading a value and getting a reference to write to. Instead raw pointers must be
+//! used on the reader and writer side.
+//!
+//! That writes never clobber a yet-to-be-read item is ensured by the [`InPlaceIterable`] requirements.
+//!
+//! # Layout constraints
+//!
+//! [`Allocator`] requires that `allocate()` and `deallocate()` have matching alignment and size.
+//! Additionally this specialization doesn&#39;t make sense for ZSTs as there is no reallocation to
+//! avoid and it would make pointer arithmetic more difficult.
+//!
+//! [`Allocator`]: core::alloc::Allocator
+//!
+//! # Drop- and panic-safety
+//!
+//! Iteration can panic, requiring dropping the already written parts but also the remainder of
+//! the source. Iteration can also leave some source items unconsumed which must be dropped.
+//! All those drops in turn can panic which then must either leak the allocation or abort to avoid
+//! double-drops.
+//!
+//! This is handled by the [`InPlaceDrop`] guard for sink items (`U`) and by
+//! [`vec::IntoIter::forget_allocation_drop_remaining()`] for remaining source items (`T`).
+//!
+//! [`vec::IntoIter::forget_allocation_drop_remaining()`]: super::IntoIter::forget_allocation_drop_remaining()
+//!
+//! # O(1) collect
+//!
+//! The main iteration itself is further specialized when the iterator implements
+//! [`TrustedRandomAccessNoCoerce`] to let the optimizer see that it is a counted loop with a single
+//! [induction variable]. This can turn some iterators into a noop, i.e. it reduces them from O(n) to
+//! O(1). This particular optimization is quite fickle and doesn&#39;t always work, see [#79308]
+//!
+//! [#79308]: https://github.com/rust-lang/rust/issues/79308
+//! [induction variable]: https://en.wikipedia.org/wiki/Induction_variable
+//!
+//! Since unchecked accesses through that trait do not advance the read pointer of `IntoIter`
+//! this would interact unsoundly with the requirements about dropping the tail described above.
+//! But since the normal `Drop` implementation of `IntoIter` would suffer from the same problem it
+//! is only correct for `TrustedRandomAccessNoCoerce` to be implemented when the items don&#39;t
+//! have a destructor. Thus that implicit requirement also makes the specialization safe to use for
+//! in-place collection.
+//! Note that this safety concern is about the correctness of `impl Drop for IntoIter`,
+//! not the guarantees of `InPlaceIterable`.
+//!
+//! # Adapter implementations
+//!
+//! The invariants for adapters are documented in [`SourceIter`] and [`InPlaceIterable`], but
+//! getting them right can be rather subtle for multiple, sometimes non-local reasons.
+//! For example `InPlaceIterable` would be valid to implement for [`Peekable`], except
+//! that it is stateful, cloneable and `IntoIter`&#39;s clone implementation shortens the underlying
+//! allocation which means if the iterator has been peeked and then gets cloned there no longer is
+//! enough room, thus breaking an invariant ([#85322]).
+//!
+//! [#85322]: https://github.com/rust-lang/rust/issues/85322
+//! [`Peekable`]: core::iter::Peekable
+//!
+//!
+//! # Examples
+//!
+//! Some cases that are optimized by this specialization, more can be found in the `Vec`
+//! benchmarks:
+//!
+//! ```rust
+//! # #[allow(dead_code)]
+//! /// Converts a usize vec into an isize one.
+//! pub fn cast(vec: Vec&lt;usize&gt;) -&gt; Vec&lt;isize&gt; {
+//!   // Does not allocate, free or panic. On optlevel&gt;=2 it does not loop.
+//!   // Of course this particular case could and should be written with `into_raw_parts` and
+//!   // `from_raw_parts` instead.
+//!   vec.into_iter().map(|u| u as isize).collect()
+//! }
+//! ```
+//!
+//! ```rust
+//! # #[allow(dead_code)]
+//! /// Drops remaining items in `src` and if the layouts of `T` and `U` match it
+//! /// returns an empty Vec backed by the original allocation. Otherwise it returns a new
+//! /// empty vec.
+//! pub fn recycle_allocation&lt;T, U&gt;(src: Vec&lt;T&gt;) -&gt; Vec&lt;U&gt; {
+//!   src.into_iter().filter_map(|_| None).collect()
+//! }
+//! ```
+//!
+//! ```rust
+//! let vec = vec![13usize; 1024];
+//! let _ = vec.into_iter()
+//!   .enumerate()
+//!   .filter_map(|(idx, val)| if idx % 2 == 0 { Some(val+idx) } else {None})
+//!   .collect::&lt;Vec&lt;_&gt;&gt;();
+//!
+//! // is equivalent to the following, but doesn&#39;t require bounds checks
+//!
+//! let mut vec = vec![13usize; 1024];
+//! let mut write_idx = 0;
+//! for idx in 0..vec.len() {
+//!    if idx % 2 == 0 {
+//!       vec[write_idx] = vec[idx] + idx;
+//!       write_idx += 1;
+//!    }
+//! }
+//! vec.truncate(write_idx);
+//! ```
+</span><span class="kw">use </span>core::iter::{InPlaceIterable, SourceIter, TrustedRandomAccessNoCoerce};
+<span class="kw">use </span>core::mem::{<span class="self">self</span>, ManuallyDrop};
+<span class="kw">use </span>core::ptr::{<span class="self">self</span>};
+
+<span class="kw">use super</span>::{InPlaceDrop, SpecFromIter, SpecFromIterNested, Vec};
+
+<span class="doccomment">/// Specialization marker for collecting an iterator pipeline into a Vec while reusing the
+/// source allocation, i.e. executing the pipeline in place.
+</span><span class="attribute">#[rustc_unsafe_specialization_marker]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">trait </span>InPlaceIterableMarker {}
+
+<span class="kw">impl</span>&lt;T&gt; InPlaceIterableMarker <span class="kw">for </span>T <span class="kw">where </span>T: InPlaceIterable {}
+
+<span class="kw">impl</span>&lt;T, I&gt; SpecFromIter&lt;T, I&gt; <span class="kw">for </span>Vec&lt;T&gt;
+<span class="kw">where
+    </span>I: Iterator&lt;Item = T&gt; + SourceIter&lt;Source: AsVecIntoIter&gt; + InPlaceIterableMarker,
+{
+    default <span class="kw">fn </span>from_iter(<span class="kw-2">mut </span>iterator: I) -&gt; <span class="self">Self </span>{
+        <span class="comment">// See &quot;Layout constraints&quot; section in the module documentation. We rely on const
+        // optimization here since these conditions currently cannot be expressed as trait bounds
+        </span><span class="kw">if </span>mem::size_of::&lt;T&gt;() == <span class="number">0
+            </span>|| mem::size_of::&lt;T&gt;()
+                != mem::size_of::&lt;&lt;&lt;I <span class="kw">as </span>SourceIter&gt;::Source <span class="kw">as </span>AsVecIntoIter&gt;::Item&gt;()
+            || mem::align_of::&lt;T&gt;()
+                != mem::align_of::&lt;&lt;&lt;I <span class="kw">as </span>SourceIter&gt;::Source <span class="kw">as </span>AsVecIntoIter&gt;::Item&gt;()
+        {
+            <span class="comment">// fallback to more generic implementations
+            </span><span class="kw">return </span>SpecFromIterNested::from_iter(iterator);
+        }
+
+        <span class="kw">let </span>(src_buf, src_ptr, dst_buf, dst_end, cap) = <span class="kw">unsafe </span>{
+            <span class="kw">let </span>inner = iterator.as_inner().as_into_iter();
+            (
+                inner.buf.as_ptr(),
+                inner.ptr,
+                inner.buf.as_ptr() <span class="kw">as </span><span class="kw-2">*mut </span>T,
+                inner.end <span class="kw">as </span><span class="kw-2">*const </span>T,
+                inner.cap,
+            )
+        };
+
+        <span class="kw">let </span>len = SpecInPlaceCollect::collect_in_place(<span class="kw-2">&amp;mut </span>iterator, dst_buf, dst_end);
+
+        <span class="kw">let </span>src = <span class="kw">unsafe </span>{ iterator.as_inner().as_into_iter() };
+        <span class="comment">// check if SourceIter contract was upheld
+        // caveat: if they weren&#39;t we might not even make it to this point
+        </span><span class="macro">debug_assert_eq!</span>(src_buf, src.buf.as_ptr());
+        <span class="comment">// check InPlaceIterable contract. This is only possible if the iterator advanced the
+        // source pointer at all. If it uses unchecked access via TrustedRandomAccess
+        // then the source pointer will stay in its initial position and we can&#39;t use it as reference
+        </span><span class="kw">if </span>src.ptr != src_ptr {
+            <span class="macro">debug_assert!</span>(
+                <span class="kw">unsafe </span>{ dst_buf.add(len) <span class="kw">as </span><span class="kw-2">*const </span><span class="kw">_ </span>} &lt;= src.ptr,
+                <span class="string">&quot;InPlaceIterable contract violation, write pointer advanced beyond read pointer&quot;
+            </span>);
+        }
+
+        <span class="comment">// Drop any remaining values at the tail of the source but prevent drop of the allocation
+        // itself once IntoIter goes out of scope.
+        // If the drop panics then we also leak any elements collected into dst_buf.
+        //
+        // Note: This access to the source wouldn&#39;t be allowed by the TrustedRandomIteratorNoCoerce
+        // contract (used by SpecInPlaceCollect below). But see the &quot;O(1) collect&quot; section in the
+        // module documenttation why this is ok anyway.
+        </span>src.forget_allocation_drop_remaining();
+
+        <span class="kw">let </span>vec = <span class="kw">unsafe </span>{ Vec::from_raw_parts(dst_buf, len, cap) };
+
+        vec
+    }
+}
+
+<span class="kw">fn </span>write_in_place_with_drop&lt;T&gt;(
+    src_end: <span class="kw-2">*const </span>T,
+) -&gt; <span class="kw">impl </span>FnMut(InPlaceDrop&lt;T&gt;, T) -&gt; <span class="prelude-ty">Result</span>&lt;InPlaceDrop&lt;T&gt;, !&gt; {
+    <span class="kw">move </span>|<span class="kw-2">mut </span>sink, item| {
+        <span class="kw">unsafe </span>{
+            <span class="comment">// the InPlaceIterable contract cannot be verified precisely here since
+            // try_fold has an exclusive reference to the source pointer
+            // all we can do is check if it&#39;s still in range
+            </span><span class="macro">debug_assert!</span>(sink.dst <span class="kw">as </span><span class="kw-2">*const </span><span class="kw">_ </span>&lt;= src_end, <span class="string">&quot;InPlaceIterable contract violation&quot;</span>);
+            ptr::write(sink.dst, item);
+            <span class="comment">// Since this executes user code which can panic we have to bump the pointer
+            // after each step.
+            </span>sink.dst = sink.dst.add(<span class="number">1</span>);
+        }
+        <span class="prelude-val">Ok</span>(sink)
+    }
+}
+
+<span class="doccomment">/// Helper trait to hold specialized implementations of the in-place iterate-collect loop
+</span><span class="kw">trait </span>SpecInPlaceCollect&lt;T, I&gt;: Iterator&lt;Item = T&gt; {
+    <span class="doccomment">/// Collects an iterator (`self`) into the destination buffer (`dst`) and returns the number of items
+    /// collected. `end` is the last writable element of the allocation and used for bounds checks.
+    ///
+    /// This method is specialized and one of its implementations makes use of
+    /// `Iterator::__iterator_get_unchecked` calls with a `TrustedRandomAccessNoCoerce` bound
+    /// on `I` which means the caller of this method must take the safety conditions
+    /// of that trait into consideration.
+    </span><span class="kw">fn </span>collect_in_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dst: <span class="kw-2">*mut </span>T, end: <span class="kw-2">*const </span>T) -&gt; usize;
+}
+
+<span class="kw">impl</span>&lt;T, I&gt; SpecInPlaceCollect&lt;T, I&gt; <span class="kw">for </span>I
+<span class="kw">where
+    </span>I: Iterator&lt;Item = T&gt;,
+{
+    <span class="attribute">#[inline]
+    </span>default <span class="kw">fn </span>collect_in_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dst_buf: <span class="kw-2">*mut </span>T, end: <span class="kw-2">*const </span>T) -&gt; usize {
+        <span class="comment">// use try-fold since
+        // - it vectorizes better for some iterator adapters
+        // - unlike most internal iteration methods, it only takes a &amp;mut self
+        // - it lets us thread the write pointer through its innards and get it back in the end
+        </span><span class="kw">let </span>sink = InPlaceDrop { inner: dst_buf, dst: dst_buf };
+        <span class="kw">let </span>sink =
+            <span class="self">self</span>.try_fold::&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, !&gt;&gt;(sink, write_in_place_with_drop(end)).unwrap();
+        <span class="comment">// iteration succeeded, don&#39;t drop head
+        </span><span class="kw">unsafe </span>{ ManuallyDrop::new(sink).dst.sub_ptr(dst_buf) }
+    }
+}
+
+<span class="kw">impl</span>&lt;T, I&gt; SpecInPlaceCollect&lt;T, I&gt; <span class="kw">for </span>I
+<span class="kw">where
+    </span>I: Iterator&lt;Item = T&gt; + TrustedRandomAccessNoCoerce,
+{
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>collect_in_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dst_buf: <span class="kw-2">*mut </span>T, end: <span class="kw-2">*const </span>T) -&gt; usize {
+        <span class="kw">let </span>len = <span class="self">self</span>.size();
+        <span class="kw">let </span><span class="kw-2">mut </span>drop_guard = InPlaceDrop { inner: dst_buf, dst: dst_buf };
+        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..len {
+            <span class="comment">// Safety: InplaceIterable contract guarantees that for every element we read
+            // one slot in the underlying storage will have been freed up and we can immediately
+            // write back the result.
+            </span><span class="kw">unsafe </span>{
+                <span class="kw">let </span>dst = dst_buf.add(i);
+                <span class="macro">debug_assert!</span>(dst <span class="kw">as </span><span class="kw-2">*const </span><span class="kw">_ </span>&lt;= end, <span class="string">&quot;InPlaceIterable contract violation&quot;</span>);
+                ptr::write(dst, <span class="self">self</span>.__iterator_get_unchecked(i));
+                <span class="comment">// Since this executes user code which can panic we have to bump the pointer
+                // after each step.
+                </span>drop_guard.dst = dst.add(<span class="number">1</span>);
+            }
+        }
+        mem::forget(drop_guard);
+        len
+    }
+}
+
+<span class="doccomment">/// Internal helper trait for in-place iteration specialization.
+///
+/// Currently this is only implemented by [`vec::IntoIter`] - returning a reference to itself - and
+/// [`binary_heap::IntoIter`] which returns a reference to its inner representation.
+///
+/// Since this is an internal trait it hides the implementation detail `binary_heap::IntoIter`
+/// uses `vec::IntoIter` internally.
+///
+/// [`vec::IntoIter`]: super::IntoIter
+/// [`binary_heap::IntoIter`]: crate::collections::binary_heap::IntoIter
+///
+/// # Safety
+///
+/// In-place iteration relies on implementation details of `vec::IntoIter`, most importantly that
+/// it does not create references to the whole allocation during iteration, only raw pointers
+</span><span class="attribute">#[rustc_specialization_trait]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">unsafe trait </span>AsVecIntoIter {
+    <span class="kw">type </span>Item;
+    <span class="kw">fn </span>as_into_iter(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span><span class="kw">super</span>::IntoIter&lt;<span class="self">Self</span>::Item&gt;;
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="alloc" data-themes="ayu,dark,light" data-resource-suffix="1.66.0" data-rustdoc-version="1.66.0-dev" ></div></body></html>

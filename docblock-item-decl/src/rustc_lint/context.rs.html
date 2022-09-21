@@ -1,0 +1,2502 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_lint/src/context.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>context.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_lint/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_lint/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_lint/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+<span id="1041">1041</span>
+<span id="1042">1042</span>
+<span id="1043">1043</span>
+<span id="1044">1044</span>
+<span id="1045">1045</span>
+<span id="1046">1046</span>
+<span id="1047">1047</span>
+<span id="1048">1048</span>
+<span id="1049">1049</span>
+<span id="1050">1050</span>
+<span id="1051">1051</span>
+<span id="1052">1052</span>
+<span id="1053">1053</span>
+<span id="1054">1054</span>
+<span id="1055">1055</span>
+<span id="1056">1056</span>
+<span id="1057">1057</span>
+<span id="1058">1058</span>
+<span id="1059">1059</span>
+<span id="1060">1060</span>
+<span id="1061">1061</span>
+<span id="1062">1062</span>
+<span id="1063">1063</span>
+<span id="1064">1064</span>
+<span id="1065">1065</span>
+<span id="1066">1066</span>
+<span id="1067">1067</span>
+<span id="1068">1068</span>
+<span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
+<span id="1086">1086</span>
+<span id="1087">1087</span>
+<span id="1088">1088</span>
+<span id="1089">1089</span>
+<span id="1090">1090</span>
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+<span id="1193">1193</span>
+<span id="1194">1194</span>
+<span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Implementation of lint checking.
+//!
+//! The lint checking is mostly consolidated into one pass which runs
+//! after all other analyses. Throughout compilation, lint warnings
+//! can be added via the `add_lint` method on the Session structure. This
+//! requires a span and an ID of the node that the lint is being added to. The
+//! lint isn&#39;t actually emitted at that time because it is unknown what the
+//! actual lint level at that location is.
+//!
+//! To actually emit lint warnings/errors, a separate pass is used.
+//! A context keeps track of the current state of all lint levels.
+//! Upon entering a node of the ast which can modify the lint settings, the
+//! previous lint state is pushed onto a stack and the ast is then recursed
+//! upon. As the ast is traversed, this keeps track of the current lint level
+//! for all lint attributes.
+
+</span><span class="kw">use </span><a href="#86"><span class="self">self</span>::TargetLint</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><span class="kw">crate</span>::errors::{
+    <a href="errors.rs.html#157">CheckNameDeprecated</a>, <a href="errors.rs.html#116">CheckNameUnknown</a>, <a href="errors.rs.html#141">CheckNameUnknownTool</a>, <a href="errors.rs.html#149">CheckNameWarning</a>, <a href="errors.rs.html#85">RequestedLevel</a>,
+    <a href="errors.rs.html#112">UnsupportedGroup</a>,
+};
+<span class="kw">use </span><a href="levels.rs.html#303"><span class="kw">crate</span>::levels::LintLevelsBuilder</a>;
+<span class="kw">use </span><span class="kw">crate</span>::passes::{<a href="passes.rs.html#246">EarlyLintPassObject</a>, <a href="passes.rs.html#247">LateLintPassObject</a>};
+<span class="kw">use </span><a href="../../rustc_ast/util/unicode/constant.TEXT_FLOW_CONTROL_CHARS.html">rustc_ast::util::unicode::TEXT_FLOW_CONTROL_CHARS</a>;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span><a href="../../rustc_data_structures/sync/index.html">rustc_data_structures::sync</a>;
+<span class="kw">use </span><a href="../../rustc_errors/fn.add_elided_lifetime_in_path_suggestion.html">rustc_errors::add_elided_lifetime_in_path_suggestion</a>;
+<span class="kw">use </span>rustc_errors::{
+    <a href="../../rustc_lint_defs/enum.Applicability.html">Applicability</a>, <a href="../../rustc_errors/diagnostic/trait.DecorateLint.html">DecorateLint</a>, <a href="../../rustc_errors/diagnostic_builder/struct.LintDiagnosticBuilder.html">LintDiagnosticBuilder</a>, <a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>, <a href="../../rustc_errors/enum.SuggestionStyle.html">SuggestionStyle</a>,
+};
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../rustc_hir/def/enum.Res.html">rustc_hir::def::Res</a>;
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>};
+<span class="kw">use </span>rustc_hir::definitions::{<a href="../../rustc_hir/definitions/enum.DefPathData.html">DefPathData</a>, <a href="../../rustc_hir/definitions/struct.DisambiguatedDefPathData.html">DisambiguatedDefPathData</a>};
+<span class="kw">use </span><a href="../../rustc_middle/middle/privacy/struct.AccessLevels.html">rustc_middle::middle::privacy::AccessLevels</a>;
+<span class="kw">use </span><a href="../../rustc_middle/middle/stability/index.html">rustc_middle::middle::stability</a>;
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../rustc_middle/ty/layout/enum.LayoutError.html">LayoutError</a>, <a href="../../rustc_middle/ty/layout/trait.LayoutOfHelpers.html">LayoutOfHelpers</a>, <a href="../../rustc_middle/ty/layout/type.TyAndLayout.html">TyAndLayout</a>};
+<span class="kw">use </span><a href="../../rustc_middle/ty/print/pretty/macro.with_no_trimmed_paths.html">rustc_middle::ty::print::with_no_trimmed_paths</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../rustc_middle/ty/index.html">self</a>, <a href="../../rustc_middle/ty/print/trait.Printer.html">print::Printer</a>, <a href="../../rustc_middle/ty/subst/struct.GenericArg.html">subst::GenericArg</a>, <a href="../../rustc_middle/ty/type.RegisteredTools.html">RegisteredTools</a>, <a href="../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_session::lint::{<a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics</a>, <a href="../../rustc_lint_defs/enum.LintExpectationId.html">LintExpectationId</a>};
+<span class="kw">use </span>rustc_session::lint::{<a href="../../rustc_lint/struct.FutureIncompatibleInfo.html">FutureIncompatibleInfo</a>, <a href="../../rustc_lint/enum.Level.html">Level</a>, <a href="../../rustc_lint/struct.Lint.html">Lint</a>, <a href="../../rustc_lint_defs/struct.LintBuffer.html">LintBuffer</a>, <a href="../../rustc_lint/struct.LintId.html">LintId</a>};
+<span class="kw">use </span><a href="../../rustc_session/session/struct.Session.html">rustc_session::Session</a>;
+<span class="kw">use </span><a href="../../rustc_span/lev_distance/fn.find_best_match_for_name.html">rustc_span::lev_distance::find_best_match_for_name</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_span::{BytePos, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>};
+<span class="kw">use </span><a href="../../rustc_target/abi/index.html">rustc_target::abi</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cell/struct.Cell.html">std::cell::Cell</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/slice/index.html">std::slice</a>;
+
+<span class="kw">type </span>EarlyLintPassFactory = <span class="kw">dyn </span>Fn() -&gt; <a href="passes.rs.html#246">EarlyLintPassObject</a> + <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a> + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>;
+<span class="kw">type </span>LateLintPassFactory =
+    <span class="kw">dyn for</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Fn(TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; LateLintPassObject&lt;<span class="lifetime">&#39;tcx</span>&gt; + <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a> + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>;
+
+<span class="doccomment">/// Information about the registered lints.
+///
+/// This is basically the subset of `Context` that we can
+/// build early in the compile pipeline.
+</span><span class="kw">pub struct </span>LintStore {
+    <span class="doccomment">/// Registered lints.
+    </span>lints: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>&gt;,
+
+    <span class="doccomment">/// Constructor functions for each variety of lint pass.
+    ///
+    /// These should only be called once, but since we want to avoid locks or
+    /// interior mutability, we don&#39;t enforce this (and lints should, in theory,
+    /// be compatible with being constructed more than once, though not
+    /// necessarily in a sane manner. This is safe though.)
+    </span><span class="kw">pub </span>pre_expansion_passes: Vec&lt;Box&lt;<a href="#53">EarlyLintPassFactory</a>&gt;&gt;,
+    <span class="kw">pub </span>early_passes: Vec&lt;Box&lt;<a href="#53">EarlyLintPassFactory</a>&gt;&gt;,
+    <span class="kw">pub </span>late_passes: Vec&lt;Box&lt;<a href="#54">LateLintPassFactory</a>&gt;&gt;,
+    <span class="doccomment">/// This is unique in that we construct them per-module, so not once.
+    </span><span class="kw">pub </span>late_module_passes: Vec&lt;Box&lt;<a href="#54">LateLintPassFactory</a>&gt;&gt;,
+
+    <span class="doccomment">/// Lints indexed by name.
+    </span>by_name: FxHashMap&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="#86">TargetLint</a>&gt;,
+
+    <span class="doccomment">/// Map of registered lint groups to what lints they expand to.
+    </span>lint_groups: FxHashMap&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, <a href="#114">LintGroup</a>&gt;,
+}
+
+<span class="doccomment">/// The target of the `by_name` map, which accounts for renaming/deprecation.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">enum </span>TargetLint {
+    <span class="doccomment">/// A direct lint target
+    </span>Id(<a href="../../rustc_lint/struct.LintId.html">LintId</a>),
+
+    <span class="doccomment">/// Temporary renaming, used for easing migration pain; see #16545
+    </span>Renamed(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../rustc_lint/struct.LintId.html">LintId</a>),
+
+    <span class="doccomment">/// Lint with this name existed previously, but has been removed/deprecated.
+    /// The string argument is the reason for removal.
+    </span>Removed(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+
+    <span class="doccomment">/// A lint name that should give no warnings and have no effect.
+    ///
+    /// This is used by rustc to avoid warning about old rustdoc lints before rustdoc registers them as tool lints.
+    </span>Ignored,
+}
+
+<span class="kw">pub enum </span>FindLintError {
+    NotFound,
+    Removed,
+}
+
+<span class="kw">struct </span>LintAlias {
+    name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    <span class="doccomment">/// Whether deprecation warnings should be suppressed for this alias.
+    </span>silent: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">struct </span>LintGroup {
+    lint_ids: Vec&lt;<a href="../../rustc_lint/struct.LintId.html">LintId</a>&gt;,
+    from_plugin: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    depr: <span class="prelude-ty">Option</span>&lt;<a href="#108">LintAlias</a>&gt;,
+}
+
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub enum </span>CheckLintNameResult&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="prelude-val">Ok</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<a href="../../rustc_lint/struct.LintId.html">LintId</a>]),
+    <span class="doccomment">/// Lint doesn&#39;t exist. Potentially contains a suggestion for a correct lint name.
+    </span>NoLint(<span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;),
+    <span class="doccomment">/// The lint refers to a tool that has not been registered.
+    </span>NoTool,
+    <span class="doccomment">/// The lint is either renamed or removed. This is the warning
+    /// message, and an optional new name (`None` if removed).
+    </span>Warning(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;),
+    <span class="doccomment">/// The lint is from a tool. If the Option is None, then either
+    /// the lint does not exist in the tool or the code was not
+    /// compiled with the tool and therefore the lint was never
+    /// added to the `LintStore`. Otherwise the `LintId` will be
+    /// returned as if it where a rustc lint.
+    </span>Tool(<span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<a href="../../rustc_lint/struct.LintId.html">LintId</a>], (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<a href="../../rustc_lint/struct.LintId.html">LintId</a>]&gt;, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>)&gt;),
+}
+
+<span class="kw">impl </span><a href="#61">LintStore</a> {
+    <span class="kw">pub fn </span>new() -&gt; <a href="#61">LintStore</a> {
+        <a href="#61">LintStore</a> {
+            lints: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            pre_expansion_passes: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            early_passes: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            late_passes: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            late_module_passes: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            by_name: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            lint_groups: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        }
+    }
+
+    <span class="kw">pub fn </span>get_lints&lt;<span class="lifetime">&#39;t</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span>[<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>] {
+        <span class="kw-2">&amp;</span><a class="self" href="#151">self</a>.lints
+    }
+
+    <span class="kw">pub fn </span>get_lint_groups&lt;<span class="lifetime">&#39;t</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, Vec&lt;<a href="../../rustc_lint/struct.LintId.html">LintId</a>&gt;, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>)&gt; + <span class="lifetime">&#39;t </span>{
+        <span class="comment">// This function is not used in a way which observes the order of lints.
+        </span><span class="attribute">#[allow(rustc::potential_query_instability)]
+        </span><a class="self" href="#156">self</a>.lint_groups
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|(<span class="kw">_</span>, <a href="#114">LintGroup</a> { depr, .. })| {
+                <span class="comment">// Don&#39;t display deprecated lint groups.
+                </span><a href="#162">depr</a>.is_none()
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(k, <a href="#114">LintGroup</a> { lint_ids, from_plugin, .. })| {
+                (<span class="kw-2">*</span><a href="#166">k</a>, <a href="#166">lint_ids</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <span class="kw-2">*</span><a href="#166">from_plugin</a>)
+            })
+    }
+
+    <span class="kw">pub fn </span>register_early_pass(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        pass: <span class="kw">impl </span>Fn() -&gt; <a href="passes.rs.html#246">EarlyLintPassObject</a> + <span class="lifetime">&#39;static </span>+ <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a> + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>,
+    ) {
+        <a class="self" href="#172">self</a>.early_passes.push(Box::new(<a href="#173">pass</a>));
+    }
+
+    <span class="doccomment">/// This lint pass is softly deprecated. It misses expanded code and has caused a few
+    /// errors in the past. Currently, it is only used in Clippy. New implementations
+    /// should avoid using this interface, as it might be removed in the future.
+    ///
+    /// * See [rust#69838](https://github.com/rust-lang/rust/pull/69838)
+    /// * See [rust-clippy#5518](https://github.com/rust-lang/rust-clippy/pull/5518)
+    </span><span class="kw">pub fn </span>register_pre_expansion_pass(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        pass: <span class="kw">impl </span>Fn() -&gt; <a href="passes.rs.html#246">EarlyLintPassObject</a> + <span class="lifetime">&#39;static </span>+ <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a> + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>,
+    ) {
+        <a class="self" href="#185">self</a>.pre_expansion_passes.push(Box::new(<a href="#186">pass</a>));
+    }
+
+    <span class="kw">pub fn </span>register_late_pass(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        pass: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Fn(TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; LateLintPassObject&lt;<span class="lifetime">&#39;tcx</span>&gt;
+        + <span class="lifetime">&#39;static
+        </span>+ <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a>
+        + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>,
+    ) {
+        <a class="self" href="#192">self</a>.late_passes.push(Box::new(<a href="#193">pass</a>));
+    }
+
+    <span class="kw">pub fn </span>register_late_mod_pass(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        pass: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Fn(TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; LateLintPassObject&lt;<span class="lifetime">&#39;tcx</span>&gt;
+        + <span class="lifetime">&#39;static
+        </span>+ <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a>
+        + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a>,
+    ) {
+        <a class="self" href="#202">self</a>.late_module_passes.push(Box::new(<a href="#203">pass</a>));
+    }
+
+    <span class="comment">// Helper method for register_early/late_pass
+    </span><span class="kw">pub fn </span>register_lints(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lints: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>]) {
+        <span class="kw">for </span>lint <span class="kw">in </span>lints {
+            <span class="self">self</span>.lints.push(lint);
+
+            <span class="kw">let </span>id = LintId::of(lint);
+            <span class="kw">if </span><span class="self">self</span>.by_name.insert(lint.name_lower(), Id(id)).is_some() {
+                <span class="macro">bug!</span>(<span class="string">&quot;duplicate specification of lint {}&quot;</span>, lint.name_lower())
+            }
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(FutureIncompatibleInfo { reason, .. }) = lint.future_incompatible {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(edition) = reason.edition() {
+                    <span class="self">self</span>.lint_groups
+                        .entry(edition.lint_name())
+                        .or_insert(LintGroup {
+                            lint_ids: <span class="macro">vec!</span>[],
+                            from_plugin: lint.is_plugin,
+                            depr: <span class="prelude-val">None</span>,
+                        })
+                        .lint_ids
+                        .push(id);
+                } <span class="kw">else </span>{
+                    <span class="comment">// Lints belonging to the `future_incompatible` lint group are lints where a
+                    // future version of rustc will cause existing code to stop compiling.
+                    // Lints tied to an edition don&#39;t count because they are opt-in.
+                    </span><span class="self">self</span>.lint_groups
+                        .entry(<span class="string">&quot;future_incompatible&quot;</span>)
+                        .or_insert(LintGroup {
+                            lint_ids: <span class="macro">vec!</span>[],
+                            from_plugin: lint.is_plugin,
+                            depr: <span class="prelude-val">None</span>,
+                        })
+                        .lint_ids
+                        .push(id);
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>register_group_alias(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lint_name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, alias: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <a class="self" href="#250">self</a>.lint_groups.insert(
+            <a href="#250">alias</a>,
+            <a href="#114">LintGroup</a> {
+                lint_ids: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+                from_plugin: <span class="bool-val">false</span>,
+                depr: <span class="prelude-val">Some</span>(<a href="#108">LintAlias</a> { name: <a href="#250">lint_name</a>, silent: <span class="bool-val">true </span>}),
+            },
+        );
+    }
+
+    <span class="kw">pub fn </span>register_group(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        from_plugin: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        deprecated_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;,
+        to: Vec&lt;<a href="../../rustc_lint/struct.LintId.html">LintId</a>&gt;,
+    ) {
+        <span class="kw">let </span>new = <span class="self"><a href="#262">self</a>
+            </span>.lint_groups
+            .insert(<a href="#264">name</a>, <a href="#114">LintGroup</a> { lint_ids: <a href="#266">to</a>, <a href="#263">from_plugin</a>, depr: <span class="prelude-val">None </span>})
+            .is_none();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(deprecated) = <a href="#265">deprecated_name</a> {
+            <a class="self" href="#262">self</a>.lint_groups.insert(
+                <a href="#272">deprecated</a>,
+                <a href="#114">LintGroup</a> {
+                    lint_ids: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+                    <a href="#263">from_plugin</a>,
+                    depr: <span class="prelude-val">Some</span>(<a href="#108">LintAlias</a> { <a href="#264">name</a>, silent: <span class="bool-val">false </span>}),
+                },
+            );
+        }
+
+        <span class="kw">if </span>!new {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;duplicate specification of lint group {}&quot;</span>, name);
+        }
+    }
+
+    <span class="doccomment">/// This lint should give no warning and have no effect.
+    ///
+    /// This is used by rustc to avoid warning about old rustdoc lints before rustdoc registers them as tool lints.
+    </span><span class="attribute">#[track_caller]
+    </span><span class="kw">pub fn </span>register_ignored(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <span class="kw">if </span><span class="self">self</span>.by_name.insert(name.to_string(), Ignored).is_some() {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;duplicate specification of lint {}&quot;</span>, name);
+        }
+    }
+
+    <span class="doccomment">/// This lint has been renamed; warn about using the new name and apply the lint.
+    </span><span class="attribute">#[track_caller]
+    </span><span class="kw">pub fn </span>register_renamed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, old_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, new_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#88">Id</a>(target)) = <a class="self" href="#300">self</a>.by_name.get(<a href="#300">new_name</a>) <span class="kw">else </span>{
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;invalid lint renaming of {} to {}&quot;</span>, old_name, new_name);
+        };
+        <a class="self" href="#300">self</a>.by_name.insert(<a href="#300">old_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(), <a href="#91">Renamed</a>(<a href="#300">new_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(), <a href="#301">target</a>));
+    }
+
+    <span class="kw">pub fn </span>register_removed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, reason: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <a class="self" href="#307">self</a>.by_name.insert(<a href="#307">name</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#95">Removed</a>(<a href="#307">reason</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()));
+    }
+
+    <span class="kw">pub fn </span>find_lints(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<a href="../../rustc_lint/struct.LintId.html">LintId</a>&gt;, <a href="#103">FindLintError</a>&gt; {
+        <span class="kw">match </span><a class="self" href="#311">self</a>.by_name.get(<a href="#311">lint_name</a>) {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#88">Id</a>(lint_id)) =&gt; <span class="prelude-val">Ok</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[lint_id]),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#91">Renamed</a>(<span class="kw">_</span>, lint_id)) =&gt; <span class="prelude-val">Ok</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[lint_id]),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#95">Removed</a>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<a href="#105">FindLintError::Removed</a>),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#100">Ignored</a>) =&gt; <span class="prelude-val">Ok</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[]),
+            <span class="prelude-val">None </span>=&gt; <span class="kw">loop </span>{
+                <span class="kw">return match </span><a class="self" href="#311">self</a>.lint_groups.get(<a href="#311">lint_name</a>) {
+                    <span class="prelude-val">Some</span>(<a href="#114">LintGroup</a> { lint_ids, depr, .. }) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(<a href="#108">LintAlias</a> { name, .. }) = <a href="#319">depr</a> {
+                            <a href="#311">lint_name</a> = <a href="#320">name</a>;
+                            <span class="kw">continue</span>;
+                        }
+                        <span class="prelude-val">Ok</span>(<a href="#319">lint_ids</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>())
+                    }
+                    <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(<a href="#105">FindLintError::Removed</a>),
+                };
+            },
+        }
+    }
+
+    <span class="doccomment">/// Checks the validity of lint names derived from the command line.
+    </span><span class="kw">pub fn </span>check_lint_name_cmdline(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        sess: <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a>,
+        lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        level: <a href="../../rustc_lint/enum.Level.html">Level</a>,
+        registered_tools: <span class="kw-2">&amp;</span><a href="../../rustc_middle/ty/type.RegisteredTools.html">RegisteredTools</a>,
+    ) {
+        <span class="kw">let </span>(tool_name, lint_name_only) = <a href="#1241">parse_lint_and_tool_name</a>(<a href="#336">lint_name</a>);
+        <span class="kw">if </span>lint_name_only == <span class="kw">crate</span>::WARNINGS.name_lower() &amp;&amp; <span class="macro">matches!</span>(level, Level::ForceWarn(<span class="kw">_</span>)) {
+            <a href="#335">sess</a>.emit_err(<a href="errors.rs.html#112">UnsupportedGroup</a> { lint_group: <a href="../../rustc_lint/builtin/static.WARNINGS.html"><span class="kw">crate</span>::WARNINGS</a>.name_lower() });
+            <span class="kw">return</span>;
+        }
+        <span class="kw">let </span>lint_name = <a href="#336">lint_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+        <span class="kw">match </span><a class="self" href="#334">self</a>.<a href="#400-405">check_lint_name</a>(<a href="#340">lint_name_only</a>, <a href="#340">tool_name</a>, <a href="#338">registered_tools</a>) {
+            <a href="#129">CheckLintNameResult::Warning</a>(msg, <span class="kw">_</span>) =&gt; {
+                <a href="#335">sess</a>.emit_warning(<a href="errors.rs.html#149">CheckNameWarning</a> {
+                    <a href="#347">msg</a>,
+                    sub: <a href="errors.rs.html#85">RequestedLevel</a> { <a href="#337">level</a>, <a href="#345">lint_name</a> },
+                });
+            }
+            <a href="#124">CheckLintNameResult::NoLint</a>(suggestion) =&gt; {
+                <a href="#335">sess</a>.emit_err(<a href="errors.rs.html#116">CheckNameUnknown</a> {
+                    lint_name: <a href="#345">lint_name</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+                    <a href="#353">suggestion</a>,
+                    sub: <a href="errors.rs.html#85">RequestedLevel</a> { <a href="#337">level</a>, <a href="#345">lint_name</a> },
+                });
+            }
+            <a href="#135">CheckLintNameResult::Tool</a>(result) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(<span class="kw">_</span>), new_name)) = <a href="#360">result</a> {
+                    <a href="#335">sess</a>.emit_warning(<a href="errors.rs.html#157">CheckNameDeprecated</a> {
+                        lint_name: <a href="#345">lint_name</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+                        <a href="#361">new_name</a>,
+                        sub: <a href="errors.rs.html#85">RequestedLevel</a> { <a href="#337">level</a>, <a href="#345">lint_name</a> },
+                    });
+                }
+            }
+            <a href="#126">CheckLintNameResult::NoTool</a> =&gt; {
+                <a href="#335">sess</a>.emit_err(<a href="errors.rs.html#141">CheckNameUnknownTool</a> {
+                    tool_name: <a href="#340">tool_name</a>.unwrap(),
+                    sub: <a href="errors.rs.html#85">RequestedLevel</a> { <a href="#337">level</a>, <a href="#345">lint_name</a> },
+                });
+            }
+            <span class="kw">_ </span>=&gt; {}
+        };
+    }
+
+    <span class="doccomment">/// True if this symbol represents a lint group name.
+    </span><span class="kw">pub fn </span>is_lint_group(<span class="kw-2">&amp;</span><span class="self">self</span>, lint_name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;is_lint_group(lint_name={:?}, lint_groups={:?})&quot;</span>,
+            lint_name,
+            <span class="self">self</span>.lint_groups.keys().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+        );
+        <span class="kw">let </span>lint_name_str = <a href="#380">lint_name</a>.as_str();
+        <a class="self" href="#380">self</a>.lint_groups.contains_key(<a href="#386">lint_name_str</a>) || {
+            <span class="kw">let </span>warnings_name_str = <a href="../../rustc_lint/builtin/static.WARNINGS.html"><span class="kw">crate</span>::WARNINGS</a>.name_lower();
+            <a href="#386">lint_name_str</a> == <a href="#388">warnings_name_str</a>
+        }
+    }
+
+    <span class="doccomment">/// Checks the name of a lint for its existence, and whether it was
+    /// renamed or removed. Generates a DiagnosticBuilder containing a
+    /// warning for renamed and removed lints. This is over both lint
+    /// names from attributes and those passed on the command line. Since
+    /// it emits non-fatal warnings and there are *two* lint passes that
+    /// inspect attributes, this is only run from the late pass to avoid
+    /// printing duplicate warnings.
+    </span><span class="kw">pub fn </span>check_lint_name(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        tool_name: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;,
+        registered_tools: <span class="kw-2">&amp;</span><a href="../../rustc_middle/ty/type.RegisteredTools.html">RegisteredTools</a>,
+    ) -&gt; CheckLintNameResult&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(tool_name) = <a href="#403">tool_name</a> {
+            <span class="comment">// FIXME: rustc and rustdoc are considered tools for lints, but not for attributes.
+            </span><span class="kw">if </span>tool_name != sym::rustc
+                &amp;&amp; tool_name != sym::rustdoc
+                &amp;&amp; !registered_tools.contains(<span class="kw-2">&amp;</span>Ident::with_dummy_span(tool_name))
+            {
+                <span class="kw">return </span><a href="#126">CheckLintNameResult::NoTool</a>;
+            }
+        }
+
+        <span class="kw">let </span>complete_name = <span class="kw">if let </span><span class="prelude-val">Some</span>(tool_name) = <a href="#403">tool_name</a> {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}::{}&quot;</span>, tool_name, lint_name)
+        } <span class="kw">else </span>{
+            <a href="#402">lint_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+        };
+        <span class="comment">// If the lint was scoped with `tool::` check if the tool lint exists
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(tool_name) = <a href="#403">tool_name</a> {
+            <span class="kw">match </span><a class="self" href="#401">self</a>.by_name.get(<span class="kw-2">&amp;</span><a href="#416">complete_name</a>) {
+                <span class="prelude-val">None </span>=&gt; <span class="kw">match </span><a class="self" href="#401">self</a>.lint_groups.get(<span class="kw-2">&amp;*</span><a href="#416">complete_name</a>) {
+                    <span class="comment">// If the lint isn&#39;t registered, there are two possibilities:
+                    </span><span class="prelude-val">None </span>=&gt; {
+                        <span class="comment">// 1. The tool is currently running, so this lint really doesn&#39;t exist.
+                        // FIXME: should this handle tools that never register a lint, like rustfmt?
+                        </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;lints={:?}&quot;</span>, <span class="self">self</span>.by_name.keys().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;());
+                        <span class="kw">let </span>tool_prefix = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}::&quot;</span>, tool_name);
+                        <span class="kw">return if </span><span class="self">self</span>.by_name.keys().any(|lint| lint.starts_with(<span class="kw-2">&amp;</span>tool_prefix)) {
+                            <a class="self" href="#401">self</a>.<a href="#480">no_lint_suggestion</a>(<span class="kw-2">&amp;</span><a href="#416">complete_name</a>)
+                        } <span class="kw">else </span>{
+                            <span class="comment">// 2. The tool isn&#39;t currently running, so no lints will be registered.
+                            // To avoid giving a false positive, ignore all unknown lints.
+                            </span><a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">None</span>, String::new())))
+                        };
+                    }
+                    <span class="prelude-val">Some</span>(<a href="#114">LintGroup</a> { lint_ids, .. }) =&gt; {
+                        <span class="kw">return </span><a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Ok</span>(<span class="kw-2">&amp;</span><a href="#439">lint_ids</a>));
+                    }
+                },
+                <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#88">Id</a>(<span class="kw-2">ref </span>id)) =&gt; <span class="kw">return </span><a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Ok</span>(slice::from_ref(<a href="#443">id</a>))),
+                <span class="comment">// If the lint was registered as removed or renamed by the lint tool, we don&#39;t need
+                // to treat tool_lints and rustc lints different and can use the code below.
+                </span><span class="kw">_ </span>=&gt; {}
+            }
+        }
+        <span class="kw">match </span><a class="self" href="#401">self</a>.by_name.get(<span class="kw-2">&amp;</span><a href="#416">complete_name</a>) {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#91">Renamed</a>(<span class="kw-2">ref </span>new_name, <span class="kw">_</span>)) =&gt; <a href="#129">CheckLintNameResult::Warning</a>(
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lint `{}` has been renamed to `{}`&quot;</span>, complete_name, new_name),
+                <span class="prelude-val">Some</span>(<a href="#450">new_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>()),
+            ),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#95">Removed</a>(<span class="kw-2">ref </span>reason)) =&gt; <a href="#129">CheckLintNameResult::Warning</a>(
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lint `{}` has been removed: {}&quot;</span>, complete_name, reason),
+                <span class="prelude-val">None</span>,
+            ),
+            <span class="prelude-val">None </span>=&gt; <span class="kw">match </span><a class="self" href="#401">self</a>.lint_groups.get(<span class="kw-2">&amp;*</span><a href="#416">complete_name</a>) {
+                <span class="comment">// If neither the lint, nor the lint group exists check if there is a `clippy::`
+                // variant of this lint
+                </span><span class="prelude-val">None </span>=&gt; <a class="self" href="#401">self</a>.<a href="#495-499">check_tool_name_for_backwards_compat</a>(<span class="kw-2">&amp;</span><a href="#416">complete_name</a>, <span class="string">&quot;clippy&quot;</span>),
+                <span class="prelude-val">Some</span>(<a href="#114">LintGroup</a> { lint_ids, depr, .. }) =&gt; {
+                    <span class="comment">// Check if the lint group name is deprecated
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(<a href="#108">LintAlias</a> { name, silent }) = <a href="#462">depr</a> {
+                        <span class="kw">let </span><a href="#114">LintGroup</a> { lint_ids, .. } = <a class="self" href="#401">self</a>.lint_groups.get(<a href="#464">name</a>).unwrap();
+                        <span class="kw">return if </span><span class="kw-2">*</span>silent {
+                            <a href="#122">CheckLintNameResult::Ok</a>(<span class="kw-2">&amp;</span><a href="#465">lint_ids</a>)
+                        } <span class="kw">else </span>{
+                            <a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#465">lint_ids</a>), (<span class="kw-2">*</span><a href="#464">name</a>).<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>())))
+                        };
+                    }
+                    <a href="#122">CheckLintNameResult::Ok</a>(<span class="kw-2">&amp;</span><a href="#462">lint_ids</a>)
+                }
+            },
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#88">Id</a>(<span class="kw-2">ref </span>id)) =&gt; <a href="#122">CheckLintNameResult::Ok</a>(slice::from_ref(<a href="#475">id</a>)),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#100">Ignored</a>) =&gt; <a href="#122">CheckLintNameResult::Ok</a>(<span class="kw-2">&amp;</span>[]),
+        }
+    }
+
+    <span class="kw">fn </span>no_lint_suggestion(<span class="kw-2">&amp;</span><span class="self">self</span>, lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; CheckLintNameResult&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">let </span>name_lower = <a href="#480">lint_name</a>.to_lowercase();
+
+        <span class="kw">if </span>lint_name.chars().any(char::is_uppercase) &amp;&amp; <span class="self">self</span>.find_lints(<span class="kw-2">&amp;</span>name_lower).is_ok() {
+            <span class="comment">// First check if the lint name is (partly) in upper case instead of lower case...
+            </span><span class="kw">return </span><a href="#124">CheckLintNameResult::NoLint</a>(<span class="prelude-val">Some</span>(Symbol::intern(<span class="kw-2">&amp;</span><a href="#481">name_lower</a>)));
+        }
+        <span class="comment">// ...if not, search for lints with a similar name
+        </span><span class="kw">let </span>groups = <a class="self" href="#480">self</a>.lint_groups.keys().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(Symbol::intern);
+        <span class="kw">let </span>lints = <a class="self" href="#480">self</a>.lints.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|l| Symbol::intern(<span class="kw-2">&amp;</span><a href="#489">l</a>.name_lower()));
+        <span class="kw">let </span>names: Vec&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; = <a href="#488">groups</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#489">lints</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="kw">let </span>suggestion = <a href="../../rustc_span/lev_distance/fn.find_best_match_for_name.html">find_best_match_for_name</a>(<span class="kw-2">&amp;</span><a href="#490">names</a>, Symbol::intern(<span class="kw-2">&amp;</span><a href="#481">name_lower</a>), <span class="prelude-val">None</span>);
+        <a href="#124">CheckLintNameResult::NoLint</a>(<a href="#491">suggestion</a>)
+    }
+
+    <span class="kw">fn </span>check_tool_name_for_backwards_compat(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        tool_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    ) -&gt; CheckLintNameResult&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">let </span>complete_name = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}::{}&quot;</span>, tool_name, lint_name);
+        <span class="kw">match </span><a class="self" href="#496">self</a>.by_name.get(<span class="kw-2">&amp;</span><a href="#500">complete_name</a>) {
+            <span class="prelude-val">None </span>=&gt; <span class="kw">match </span><a class="self" href="#496">self</a>.lint_groups.get(<span class="kw-2">&amp;*</span><a href="#500">complete_name</a>) {
+                <span class="comment">// Now we are sure, that this lint exists nowhere
+                </span><span class="prelude-val">None </span>=&gt; <a class="self" href="#496">self</a>.<a href="#480">no_lint_suggestion</a>(<a href="#497">lint_name</a>),
+                <span class="prelude-val">Some</span>(<a href="#114">LintGroup</a> { lint_ids, depr, .. }) =&gt; {
+                    <span class="comment">// Reaching this would be weird, but let&#39;s cover this case anyway
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(<a href="#108">LintAlias</a> { name, silent }) = <a href="#505">depr</a> {
+                        <span class="kw">let </span><a href="#114">LintGroup</a> { lint_ids, .. } = <a class="self" href="#496">self</a>.lint_groups.get(<a href="#507">name</a>).unwrap();
+                        <span class="kw">return if </span><span class="kw-2">*</span>silent {
+                            <a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#508">lint_ids</a>), <a href="#500">complete_name</a>)))
+                        } <span class="kw">else </span>{
+                            <a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#508">lint_ids</a>), (<span class="kw-2">*</span><a href="#507">name</a>).<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>())))
+                        };
+                    }
+                    <a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#505">lint_ids</a>), <a href="#500">complete_name</a>)))
+                }
+            },
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#88">Id</a>(<span class="kw-2">ref </span>id)) =&gt; {
+                <a href="#135">CheckLintNameResult::Tool</a>(<span class="prelude-val">Err</span>((<span class="prelude-val">Some</span>(slice::from_ref(<a href="#518">id</a>)), <a href="#500">complete_name</a>)))
+            }
+            <span class="prelude-val">Some</span>(other) =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;got renamed lint {:?}&quot;</span>, other);
+                <a href="#124">CheckLintNameResult::NoLint</a>(<span class="prelude-val">None</span>)
+            }
+        }
+    }
+}
+
+<span class="doccomment">/// Context for lint checking outside of type inference.
+</span><span class="kw">pub struct </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Type context we&#39;re checking in.
+    </span><span class="kw">pub </span>tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Current body, or `None` if outside a body.
+    </span><span class="kw">pub </span>enclosing_body: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a>&gt;,
+
+    <span class="doccomment">/// Type-checking results for the current body. Access using the `typeck_results`
+    /// and `maybe_typeck_results` methods, which handle querying the typeck results on demand.
+    </span><span class="comment">// FIXME(eddyb) move all the code accessing internal fields like this,
+    // to this module, to avoid exposing it to lint logic.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) cached_typeck_results: Cell&lt;<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;,
+
+    <span class="doccomment">/// Parameter environment for the item we are in.
+    </span><span class="kw">pub </span>param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Items accessible from the crate being checked.
+    </span><span class="kw">pub </span>access_levels: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="../../rustc_middle/middle/privacy/struct.AccessLevels.html">AccessLevels</a>,
+
+    <span class="doccomment">/// The store of registered lints and the lint levels.
+    </span><span class="kw">pub </span>lint_store: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="#61">LintStore</a>,
+
+    <span class="kw">pub </span>last_node_with_lint_attrs: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+
+    <span class="doccomment">/// Generic type parameters in scope for the item we are in.
+    </span><span class="kw">pub </span>generics: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Generics&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    <span class="doccomment">/// We are only looking at one module
+    </span><span class="kw">pub </span>only_module: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="doccomment">/// Context for lint checking of the AST, after expansion, before lowering to HIR.
+</span><span class="kw">pub struct </span>EarlyContext&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub </span>builder: LintLevelsBuilder&lt;<span class="lifetime">&#39;a</span>, <a href="levels.rs.html#154"><span class="kw">crate</span>::levels::TopDown</a>&gt;,
+    <span class="kw">pub </span>buffered: <a href="../../rustc_lint_defs/struct.LintBuffer.html">LintBuffer</a>,
+}
+
+<span class="kw">pub trait </span>LintPassObject: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {}
+
+<span class="kw">impl </span><a href="#567">LintPassObject</a> <span class="kw">for </span><a href="passes.rs.html#246">EarlyLintPassObject</a> {}
+
+<span class="kw">impl </span><a href="#567">LintPassObject</a> <span class="kw">for </span>LateLintPassObject&lt;<span class="lifetime">&#39;_</span>&gt; {}
+
+<span class="kw">pub trait </span>LintContext: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {
+    <span class="kw">type </span>PassObject: <a href="#567">LintPassObject</a>;
+
+    <span class="kw">fn </span>sess(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a>;
+    <span class="kw">fn </span>lints(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="#61">LintStore</a>;
+
+    <span class="kw">fn </span>lookup_with_diagnostics(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: <span class="prelude-ty">Option</span>&lt;<span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+        diagnostic: <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics</a>,
+    ) {
+        <a class="self" href="#580">self</a>.<a href="#876-881">lookup</a>(<a href="#581">lint</a>, <a href="#582">span</a>, |lint| {
+            <span class="comment">// We first generate a blank diagnostic.
+            </span><span class="kw">let </span><span class="kw-2">mut </span>db = <a href="#586">lint</a>.build(<span class="string">&quot;&quot;</span>);
+
+            <span class="comment">// Now, set up surrounding context.
+            </span><span class="kw">let </span>sess = <a class="self" href="#580">self</a>.<a href="#576">sess</a>();
+            <span class="kw">match </span><a href="#584">diagnostic</a> {
+                BuiltinLintDiagnostics::UnicodeTextFlow(span, content) =&gt; {
+                    <span class="kw">let </span>spans: Vec&lt;<span class="kw">_</span>&gt; = <a href="#593">content</a>
+                        .char_indices()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|(i, c)| {
+                            <a href="../../rustc_ast/util/unicode/constant.TEXT_FLOW_CONTROL_CHARS.html">TEXT_FLOW_CONTROL_CHARS</a>.contains(<span class="kw-2">&amp;</span><a href="#596">c</a>).then(|| {
+                                <span class="kw">let </span>lo = <a href="#593">span</a>.lo() + BytePos(<span class="number">2 </span>+ <a href="#596">i</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>);
+                                (<a href="#596">c</a>, <a href="#593">span</a>.with_lo(<a href="#598">lo</a>).with_hi(<a href="#598">lo</a> + BytePos(<a href="#596">c</a>.len_utf8() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)))
+                            })
+                        })
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+                    <span class="kw">let </span>(an, s) = <span class="kw">match </span><a href="#594">spans</a>.len() {
+                        <span class="number">1 </span>=&gt; (<span class="string">&quot;an &quot;</span>, <span class="string">&quot;&quot;</span>),
+                        <span class="kw">_ </span>=&gt; (<span class="string">&quot;&quot;</span>, <span class="string">&quot;s&quot;</span>),
+                    };
+                    <a href="#588">db</a>.span_label(<a href="#593">span</a>, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                        <span class="string">&quot;this comment contains {}invisible unicode text flow control codepoint{}&quot;</span>,
+                        an,
+                        s,
+                    ));
+                    <span class="kw">for </span>(c, span) <span class="kw">in </span><span class="kw-2">&amp;</span>spans {
+                        db.span_label(<span class="kw-2">*</span>span, <span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, c));
+                    }
+                    <a href="#588">db</a>.note(
+                        <span class="string">&quot;these kind of unicode codepoints change the way text flows on \
+                         applications that support them, but can cause confusion because they \
+                         change the order of characters on the screen&quot;</span>,
+                    );
+                    <span class="kw">if </span>!spans.is_empty() {
+                        <a href="#588">db</a>.multipart_suggestion_with_style(
+                            <span class="string">&quot;if their presence wasn&#39;t intentional, you can remove them&quot;</span>,
+                            <a href="#594">spans</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(<span class="kw">_</span>, span)| (<a href="#623">span</a>, <span class="string">&quot;&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>())).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+                            Applicability::MachineApplicable,
+                            SuggestionStyle::HideCodeAlways,
+                        );
+                    }
+                },
+                BuiltinLintDiagnostics::Normal =&gt; (),
+                BuiltinLintDiagnostics::AbsPathWithModule(span) =&gt; {
+                    <span class="kw">let </span>(sugg, app) = <span class="kw">match </span><a href="#591">sess</a>.source_map().span_to_snippet(<a href="#630">span</a>) {
+                        <span class="prelude-val">Ok</span>(<span class="kw-2">ref </span>s) =&gt; {
+                            <span class="comment">// FIXME(Manishearth) ideally the emitting code
+                            // can tell us whether or not this is global
+                            </span><span class="kw">let </span>opt_colon =
+                                <span class="kw">if </span>s.trim_start().starts_with(<span class="string">&quot;::&quot;</span>) { <span class="string">&quot;&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;::&quot; </span>};
+
+                            (<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;crate{}{}&quot;</span>, opt_colon, s), Applicability::MachineApplicable)
+                        }
+                        <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; (<span class="string">&quot;crate::&lt;path&gt;&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(), Applicability::HasPlaceholders),
+                    };
+                    <a href="#588">db</a>.span_suggestion(<a href="#630">span</a>, <span class="string">&quot;use `crate`&quot;</span>, <a href="#631">sugg</a>, <a href="#631">app</a>);
+                }
+                BuiltinLintDiagnostics::ProcMacroDeriveResolutionFallback(span) =&gt; {
+                    <a href="#588">db</a>.span_label(
+                        <a href="#644">span</a>,
+                        <span class="string">&quot;names from parent modules are not accessible without an explicit import&quot;</span>,
+                    );
+                }
+                BuiltinLintDiagnostics::MacroExpandedMacroExportsAccessedByAbsolutePaths(
+                    span_def,
+                ) =&gt; {
+                    <a href="#588">db</a>.span_note(<a href="#651">span_def</a>, <span class="string">&quot;the macro is defined here&quot;</span>);
+                }
+                BuiltinLintDiagnostics::ElidedLifetimesInPaths(
+                    n,
+                    path_span,
+                    incl_angl_brckt,
+                    insertion_span,
+                ) =&gt; {
+                    <a href="../../rustc_errors/fn.add_elided_lifetime_in_path_suggestion.html">add_elided_lifetime_in_path_suggestion</a>(
+                        <a href="#591">sess</a>.source_map(),
+                        <span class="kw-2">&amp;mut </span><a href="#588">db</a>,
+                        <a href="#656">n</a>,
+                        <a href="#657">path_span</a>,
+                        <a href="#658">incl_angl_brckt</a>,
+                        <a href="#659">insertion_span</a>,
+                    );
+                }
+                BuiltinLintDiagnostics::UnknownCrateTypes(span, note, sugg) =&gt; {
+                    <a href="#588">db</a>.span_suggestion(<a href="#670">span</a>, <span class="kw-2">&amp;</span><a href="#670">note</a>, <a href="#670">sugg</a>, Applicability::MaybeIncorrect);
+                }
+                BuiltinLintDiagnostics::UnusedImports(message, replaces, in_test_module) =&gt; {
+                    <span class="kw">if </span>!replaces.is_empty() {
+                        <a href="#588">db</a>.tool_only_multipart_suggestion(
+                            <span class="kw-2">&amp;</span><a href="#673">message</a>,
+                            <a href="#673">replaces</a>,
+                            Applicability::MachineApplicable,
+                        );
+                    }
+
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(span) = <a href="#673">in_test_module</a> {
+                        <a href="#588">db</a>.span_help(
+                            <a class="self" href="#580">self</a>.<a href="#576">sess</a>().source_map().guess_head_span(<a href="#682">span</a>),
+                            <span class="string">&quot;consider adding a `#[cfg(test)]` to the containing module&quot;</span>,
+                        );
+                    }
+                }
+                BuiltinLintDiagnostics::RedundantImport(spans, ident) =&gt; {
+                    <span class="kw">for </span>(span, is_imported) <span class="kw">in </span>spans {
+                        <span class="kw">let </span>introduced = <span class="kw">if </span>is_imported { <span class="string">&quot;imported&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;defined&quot; </span>};
+                        db.span_label(
+                            span,
+                            <span class="macro">format!</span>(<span class="string">&quot;the item `{}` is already {} here&quot;</span>, ident, introduced),
+                        );
+                    }
+                }
+                BuiltinLintDiagnostics::DeprecatedMacro(suggestion, span) =&gt; {
+                    stability::deprecation_suggestion(<span class="kw-2">&amp;mut </span><a href="#588">db</a>, <span class="string">&quot;macro&quot;</span>, <a href="#698">suggestion</a>, <a href="#698">span</a>)
+                }
+                BuiltinLintDiagnostics::UnusedDocComment(span) =&gt; {
+                    <a href="#588">db</a>.span_label(<a href="#701">span</a>, <span class="string">&quot;rustdoc does not generate documentation for macro invocations&quot;</span>);
+                    <a href="#588">db</a>.help(<span class="string">&quot;to document an item produced by a macro, \
+                                  the macro must produce the documentation as part of its expansion&quot;</span>);
+                }
+                BuiltinLintDiagnostics::PatternsInFnsWithoutBody(span, ident) =&gt; {
+                    <a href="#588">db</a>.span_suggestion(<a href="#706">span</a>, <span class="string">&quot;remove `mut` from the parameter&quot;</span>, <a href="#706">ident</a>, Applicability::MachineApplicable);
+                }
+                BuiltinLintDiagnostics::MissingAbi(span, default_abi) =&gt; {
+                    <a href="#588">db</a>.span_label(<a href="#709">span</a>, <span class="string">&quot;ABI should be specified here&quot;</span>);
+                    <a href="#588">db</a>.help(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;the default ABI is {}&quot;</span>, default_abi.name()));
+                }
+                BuiltinLintDiagnostics::LegacyDeriveHelpers(span) =&gt; {
+                    <a href="#588">db</a>.span_label(<a href="#713">span</a>, <span class="string">&quot;the attribute is introduced here&quot;</span>);
+                }
+                BuiltinLintDiagnostics::ProcMacroBackCompat(note) =&gt; {
+                    <a href="#588">db</a>.note(<span class="kw-2">&amp;</span><a href="#716">note</a>);
+                }
+                BuiltinLintDiagnostics::OrPatternsBackCompat(span,suggestion) =&gt; {
+                    <a href="#588">db</a>.span_suggestion(<a href="#719">span</a>, <span class="string">&quot;use pat_param to preserve semantics&quot;</span>, <a href="#719">suggestion</a>, Applicability::MachineApplicable);
+                }
+                BuiltinLintDiagnostics::ReservedPrefix(span) =&gt; {
+                    <a href="#588">db</a>.span_label(<a href="#722">span</a>, <span class="string">&quot;unknown prefix&quot;</span>);
+                    <a href="#588">db</a>.span_suggestion_verbose(
+                        <a href="#722">span</a>.shrink_to_hi(),
+                        <span class="string">&quot;insert whitespace here to avoid this being parsed as a prefix in Rust 2021&quot;</span>,
+                        <span class="string">&quot; &quot;</span>,
+                        Applicability::MachineApplicable,
+                    );
+                }
+                <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics::UnusedBuiltinAttribute</a> {
+                    attr_name,
+                    macro_name,
+                    invoc_span
+                } =&gt; {
+                    <a href="#588">db</a>.span_note(
+                        <a href="#734">invoc_span</a>,
+                        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;the built-in attribute `{attr_name}` will be ignored, since it&#39;s applied to the macro invocation `{macro_name}`&quot;</span>)
+                    );
+                }
+                BuiltinLintDiagnostics::TrailingMacro(is_trailing, name) =&gt; {
+                    <span class="kw">if </span>is_trailing {
+                        <a href="#588">db</a>.note(<span class="string">&quot;macro invocations at the end of a block are treated as expressions&quot;</span>);
+                        <a href="#588">db</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;to ignore the value produced by the macro, add a semicolon after the invocation of `{name}`&quot;</span>));
+                    }
+                }
+                BuiltinLintDiagnostics::BreakWithLabelAndLoop(span) =&gt; {
+                    <a href="#588">db</a>.multipart_suggestion(
+                        <span class="string">&quot;wrap this expression in parentheses&quot;</span>,
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[(span.shrink_to_lo(), <span class="string">&quot;(&quot;</span>.to_string()),
+                             (span.shrink_to_hi(), <span class="string">&quot;)&quot;</span>.to_string())],
+                        Applicability::MachineApplicable
+                    );
+                }
+                BuiltinLintDiagnostics::NamedAsmLabel(help) =&gt; {
+                    <a href="#588">db</a>.help(<span class="kw-2">&amp;</span><a href="#755">help</a>);
+                    <a href="#588">db</a>.note(<span class="string">&quot;see the asm section of Rust By Example &lt;https://doc.rust-lang.org/nightly/rust-by-example/unsafe/asm.html#labels&gt; for more information&quot;</span>);
+                },
+                BuiltinLintDiagnostics::UnexpectedCfg((name, name_span), <span class="prelude-val">None</span>) =&gt; {
+                    <span class="kw">let </span><span class="prelude-val">Some</span>(names_valid) = <span class="kw-2">&amp;</span><a href="#591">sess</a>.parse_sess.check_config.names_valid <span class="kw">else </span>{
+                        <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;it shouldn&#39;t be possible to have a diagnostic on a name if name checking is not enabled&quot;</span>);
+                    };
+                    <span class="kw">let </span>possibilities: Vec&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; = <a href="#760">names_valid</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|s| <span class="kw-2">*</span><a href="#763">s</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+                    <span class="comment">// Suggest the most probable if we found one
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(best_match) = <a href="../../rustc_span/lev_distance/fn.find_best_match_for_name.html">find_best_match_for_name</a>(<span class="kw-2">&amp;</span><a href="#763">possibilities</a>, <a href="#759">name</a>, <span class="prelude-val">None</span>) {
+                        <a href="#588">db</a>.span_suggestion(<a href="#759">name_span</a>, <span class="string">&quot;did you mean&quot;</span>, <a href="#766">best_match</a>, Applicability::MaybeIncorrect);
+                    }
+                },
+                BuiltinLintDiagnostics::UnexpectedCfg((name, name_span), <span class="prelude-val">Some</span>((value, value_span))) =&gt; {
+                    <span class="kw">let </span><span class="prelude-val">Some</span>(values) = <span class="kw-2">&amp;</span><a href="#591">sess</a>.parse_sess.check_config.values_valid.get(<span class="kw-2">&amp;</span><a href="#770">name</a>) <span class="kw">else </span>{
+                        <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;it shouldn&#39;t be possible to have a diagnostic on a value whose name is not in values&quot;</span>);
+                    };
+                    <span class="kw">let </span>possibilities: Vec&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; = <a href="#771">values</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>s| <a href="#774">s</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+                    <span class="comment">// Show the full list if all possible values for a given name, but don&#39;t do it
+                    // for names as the possibilities could be very long
+                    </span><span class="kw">if </span>!possibilities.is_empty() {
+                        {
+                            <span class="kw">let </span><span class="kw-2">mut </span>possibilities = <a href="#774">possibilities</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(Symbol::as_str).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+                            <a href="#780">possibilities</a>.sort();
+
+                            <span class="kw">let </span>possibilities = <a href="#780">possibilities</a>.join(<span class="string">&quot;, &quot;</span>);
+                            <a href="#588">db</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;expected values for `{name}` are: {possibilities}&quot;</span>));
+                        }
+
+                        <span class="comment">// Suggest the most probable if we found one
+                        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(best_match) = <a href="../../rustc_span/lev_distance/fn.find_best_match_for_name.html">find_best_match_for_name</a>(<span class="kw-2">&amp;</span><a href="#774">possibilities</a>, <a href="#770">value</a>, <span class="prelude-val">None</span>) {
+                            <a href="#588">db</a>.span_suggestion(<a href="#770">value_span</a>, <span class="string">&quot;did you mean&quot;</span>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;\&quot;{best_match}\&quot;&quot;</span>), Applicability::MaybeIncorrect);
+                        }
+                    } <span class="kw">else </span>{
+                        <a href="#588">db</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;no expected value for `{name}`&quot;</span>));
+                        <span class="kw">if </span>name != sym::feature {
+                            <a href="#588">db</a>.span_suggestion(<a href="#770">name_span</a>.shrink_to_hi().to(<a href="#770">value_span</a>), <span class="string">&quot;remove the value&quot;</span>, <span class="string">&quot;&quot;</span>, Applicability::MaybeIncorrect);
+                        }
+                    }
+                },
+                BuiltinLintDiagnostics::DeprecatedWhereclauseLocation(new_span, suggestion) =&gt; {
+                    <a href="#588">db</a>.multipart_suggestion(
+                        <span class="string">&quot;move it to the end of the type declaration&quot;</span>,
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[(db.span.primary_span().unwrap(), <span class="string">&quot;&quot;</span>.to_string()), (new_span, suggestion)],
+                        Applicability::MachineApplicable,
+                    );
+                    <a href="#588">db</a>.note(
+                        <span class="string">&quot;see issue #89122 &lt;https://github.com/rust-lang/rust/issues/89122&gt; for more information&quot;</span>,
+                    );
+                },
+                <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics::SingleUseLifetime</a> {
+                    param_span,
+                    use_span: <span class="prelude-val">Some</span>((use_span, elide)),
+                    deletion_span,
+                } =&gt; {
+                    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>param_span, <span class="question-mark">?</span>use_span, <span class="question-mark">?</span>deletion_span);
+                    <a href="#588">db</a>.span_label(<a href="#809">param_span</a>, <span class="string">&quot;this lifetime...&quot;</span>);
+                    <a href="#588">db</a>.span_label(<a href="#810">use_span</a>, <span class="string">&quot;...is used only here&quot;</span>);
+                    <span class="kw">let </span>msg = <span class="string">&quot;elide the single-use lifetime&quot;</span>;
+                    <span class="kw">let </span>(use_span, replace_lt) = <span class="kw">if </span>elide {
+                        <span class="kw">let </span>use_span = <a href="#591">sess</a>.source_map().span_extend_while(
+                            <a href="#810">use_span</a>,
+                            char::is_whitespace,
+                        ).unwrap_or(<a href="#810">use_span</a>);
+                        (<a href="#818">use_span</a>, String::new())
+                    } <span class="kw">else </span>{
+                        (<a href="#810">use_span</a>, <span class="string">&quot;&#39;_&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>())
+                    };
+                    <a href="#588">db</a>.multipart_suggestion(
+                        <a href="#816">msg</a>,
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[(deletion_span, String::new()), (use_span, replace_lt)],
+                        Applicability::MachineApplicable,
+                    );
+                },
+                <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics::SingleUseLifetime</a> {
+                    param_span: <span class="kw">_</span>,
+                    use_span: <span class="prelude-val">None</span>,
+                    deletion_span,
+                } =&gt; {
+                    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>deletion_span);
+                    <a href="#588">db</a>.span_suggestion(
+                        <a href="#835">deletion_span</a>,
+                        <span class="string">&quot;elide the unused lifetime&quot;</span>,
+                        <span class="string">&quot;&quot;</span>,
+                        Applicability::MachineApplicable,
+                    );
+                },
+                <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics::NamedArgumentUsedPositionally</a>{ position_sp_to_replace, position_sp_for_msg, named_arg_sp, named_arg_name, is_formatting_arg} =&gt; {
+                    <a href="#588">db</a>.span_label(<a href="#845">named_arg_sp</a>, <span class="string">&quot;this named argument is referred to by position in formatting string&quot;</span>);
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(positional_arg_for_msg) = <a href="#845">position_sp_for_msg</a> {
+                        <span class="kw">let </span>msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;this formatting argument uses named argument `{}` by position&quot;</span>, named_arg_name);
+                        <a href="#588">db</a>.span_label(<a href="#847">positional_arg_for_msg</a>, <a href="#848">msg</a>);
+                    }
+
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(positional_arg_to_replace) = <a href="#845">position_sp_to_replace</a> {
+                        <span class="kw">let </span>name = <span class="kw">if </span>is_formatting_arg { <a href="#845">named_arg_name</a> + <span class="string">&quot;$&quot; </span>} <span class="kw">else </span>{ <a href="#845">named_arg_name</a> };
+                        <span class="kw">let </span>span_to_replace = <span class="kw">if let </span><span class="prelude-val">Ok</span>(positional_arg_content) =
+                            <a class="self" href="#580">self</a>.<a href="#576">sess</a>().source_map().span_to_snippet(<a href="#852">positional_arg_to_replace</a>) &amp;&amp; <a href="#854">positional_arg_content</a>.starts_with(<span class="string">&#39;:&#39;</span>) {
+                            <a href="#852">positional_arg_to_replace</a>.shrink_to_lo()
+                        } <span class="kw">else </span>{
+                            <a href="#852">positional_arg_to_replace</a>
+                        };
+                        <a href="#588">db</a>.span_suggestion_verbose(
+                            <a href="#854">span_to_replace</a>,
+                            <span class="string">&quot;use the named argument by name to avoid ambiguity&quot;</span>,
+                            <a href="#853">name</a>,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                }
+            }
+            <span class="comment">// Rewrap `db`, and pass control to the user.
+            </span><a href="#583">decorate</a>(LintDiagnosticBuilder::new(<a href="#588">db</a>));
+        });
+    }
+
+    <span class="comment">// FIXME: These methods should not take an Into&lt;MultiSpan&gt; -- instead, callers should need to
+    // set the span in their `decorate` function (preferably using set_span).
+    </span><span class="kw">fn </span>lookup&lt;S: Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: <span class="prelude-ty">Option</span>&lt;S&gt;,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+    );
+
+    <span class="doccomment">/// Emit a lint at `span` from a lint struct (some type that implements `DecorateLint`,
+    /// typically generated by `#[derive(LintDiagnostic)]`).
+    </span><span class="kw">fn </span>emit_spanned_lint&lt;S: Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: S,
+        decorator: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; DecorateLint&lt;<span class="lifetime">&#39;a</span>, ()&gt;,
+    ) {
+        <a class="self" href="#886">self</a>.<a href="#876-881">lookup</a>(<a href="#887">lint</a>, <span class="prelude-val">Some</span>(<a href="#888">span</a>), |diag| <a href="#889">decorator</a>.<a href="../../rustc_errors/diagnostic/trait.DecorateLint.html">decorate_lint</a>(<a href="#891">diag</a>));
+    }
+
+    <span class="kw">fn </span>struct_span_lint&lt;S: Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: S,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+    ) {
+        <a class="self" href="#895">self</a>.<a href="#876-881">lookup</a>(<a href="#896">lint</a>, <span class="prelude-val">Some</span>(<a href="#897">span</a>), <a href="#898">decorate</a>);
+    }
+
+    <span class="doccomment">/// Emit a lint from a lint struct (some type that implements `DecorateLint`, typically
+    /// generated by `#[derive(LintDiagnostic)]`).
+    </span><span class="kw">fn </span>emit_lint(<span class="kw-2">&amp;</span><span class="self">self</span>, lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>, decorator: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; DecorateLint&lt;<span class="lifetime">&#39;a</span>, ()&gt;) {
+        <a class="self" href="#905">self</a>.<a href="#876-881">lookup</a>(<a href="#905">lint</a>, <span class="prelude-val">None </span><span class="kw">as </span><span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, |diag| <a href="#905">decorator</a>.<a href="../../rustc_errors/diagnostic/trait.DecorateLint.html">decorate_lint</a>(<a href="#906">diag</a>));
+    }
+
+    <span class="doccomment">/// Emit a lint at the appropriate level, with no associated span.
+    </span><span class="kw">fn </span>lint(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+    ) {
+        <a class="self" href="#911">self</a>.<a href="#876-881">lookup</a>(<a href="#912">lint</a>, <span class="prelude-val">None </span><span class="kw">as </span><span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, <a href="#913">decorate</a>);
+    }
+
+    <span class="doccomment">/// This returns the lint level for the given lint at the current location.
+    </span><span class="kw">fn </span>get_lint_level(<span class="kw-2">&amp;</span><span class="self">self</span>, lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>) -&gt; <a href="../../rustc_lint/enum.Level.html">Level</a>;
+
+    <span class="doccomment">/// This function can be used to manually fulfill an expectation. This can
+    /// be used for lints which contain several spans, and should be suppressed,
+    /// if either location was marked with an expectation.
+    ///
+    /// Note that this function should only be called for [`LintExpectationId`]s
+    /// retrieved from the current lint pass. Buffered or manually created ids can
+    /// cause ICEs.
+    </span><span class="kw">fn </span>fulfill_expectation(<span class="kw-2">&amp;</span><span class="self">self</span>, expectation: <a href="../../rustc_lint_defs/enum.LintExpectationId.html">LintExpectationId</a>) {
+        <span class="comment">// We need to make sure that submitted expectation ids are correctly fulfilled suppressed
+        // and stored between compilation sessions. To not manually do these steps, we simply create
+        // a dummy diagnostic and emit is as usual, which will be suppressed and stored like a normal
+        // expected lint diagnostic.
+        </span><a class="self" href="#928">self</a>.<a href="#576">sess</a>()
+            .struct_expect(
+                <span class="string">&quot;this is a dummy diagnostic, to submit and store an expectation&quot;</span>,
+                <a href="#928">expectation</a>,
+            )
+            .emit();
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; EarlyContext&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(
+        sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../rustc_session/session/struct.Session.html">Session</a>,
+        warn_about_weird_lints: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        lint_store: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#61">LintStore</a>,
+        registered_tools: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../rustc_middle/ty/type.RegisteredTools.html">RegisteredTools</a>,
+        buffered: <a href="../../rustc_lint_defs/struct.LintBuffer.html">LintBuffer</a>,
+    ) -&gt; EarlyContext&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a href="#562">EarlyContext</a> {
+            builder: LintLevelsBuilder::new(
+                <a href="#944">sess</a>,
+                <a href="#945">warn_about_weird_lints</a>,
+                <a href="#946">lint_store</a>,
+                <a href="#947">registered_tools</a>,
+            ),
+            <a href="#948">buffered</a>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="#573">LintContext</a> <span class="kw">for </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>PassObject = LateLintPassObject&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="doccomment">/// Gets the overall compiler `Session` object.
+    </span><span class="kw">fn </span>sess(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#966">self</a>.tcx.sess
+    }
+
+    <span class="kw">fn </span>lints(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="#61">LintStore</a> {
+        <span class="kw-2">&amp;*</span><a class="self" href="#970">self</a>.lint_store
+    }
+
+    <span class="kw">fn </span>lookup&lt;S: Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: <span class="prelude-ty">Option</span>&lt;S&gt;,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+    ) {
+        <span class="kw">let </span>hir_id = <a class="self" href="#975">self</a>.last_node_with_lint_attrs;
+
+        <span class="kw">match </span><a href="#977">span</a> {
+            <span class="prelude-val">Some</span>(s) =&gt; <a class="self" href="#975">self</a>.tcx.struct_span_lint_hir(<a href="#976">lint</a>, <a href="#980">hir_id</a>, <a href="#983">s</a>, <a href="#978">decorate</a>),
+            <span class="prelude-val">None </span>=&gt; <a class="self" href="#975">self</a>.tcx.struct_lint_node(<a href="#976">lint</a>, <a href="#980">hir_id</a>, <a href="#978">decorate</a>),
+        }
+    }
+
+    <span class="kw">fn </span>get_lint_level(<span class="kw-2">&amp;</span><span class="self">self</span>, lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>) -&gt; <a href="../../rustc_lint/enum.Level.html">Level</a> {
+        <a class="self" href="#988">self</a>.tcx.lint_level_at_node(<a href="#988">lint</a>, <a class="self" href="#988">self</a>.last_node_with_lint_attrs).<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl </span><a href="#573">LintContext</a> <span class="kw">for </span>EarlyContext&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">type </span>PassObject = <a href="passes.rs.html#246">EarlyLintPassObject</a>;
+
+    <span class="doccomment">/// Gets the overall compiler `Session` object.
+    </span><span class="kw">fn </span>sess(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#997">self</a>.builder.<a href="levels.rs.html#384">sess</a>()
+    }
+
+    <span class="kw">fn </span>lints(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="#61">LintStore</a> {
+        <a class="self" href="#1001">self</a>.builder.<a href="levels.rs.html#388">lint_store</a>()
+    }
+
+    <span class="kw">fn </span>lookup&lt;S: Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>,
+        span: <span class="prelude-ty">Option</span>&lt;S&gt;,
+        decorate: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnOnce(LintDiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt;),
+    ) {
+        <a class="self" href="#1006">self</a>.builder.<a href="levels.rs.html#938-943">struct_lint</a>(<a href="#1007">lint</a>, <a href="#1008">span</a>.map(|s| <a href="#1011">s</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()), <a href="#1009">decorate</a>)
+    }
+
+    <span class="kw">fn </span>get_lint_level(<span class="kw-2">&amp;</span><span class="self">self</span>, lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint/struct.Lint.html">Lint</a>) -&gt; <a href="../../rustc_lint/enum.Level.html">Level</a> {
+        <a class="self" href="#1014">self</a>.builder.<a href="levels.rs.html#932">lint_level</a>(<a href="#1014">lint</a>).<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Gets the type-checking results for the current body,
+    /// or `None` if outside a body.
+    </span><span class="kw">pub fn </span>maybe_typeck_results(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="self" href="#1022">self</a>.cached_typeck_results.get().or_else(|| {
+            <a class="self" href="#1022">self</a>.enclosing_body.map(|body| {
+                <span class="kw">let </span>typeck_results = <a class="self" href="#1022">self</a>.tcx.typeck_body(<a href="#1024">body</a>);
+                <a class="self" href="#1022">self</a>.cached_typeck_results.set(<span class="prelude-val">Some</span>(<a href="#1025">typeck_results</a>));
+                <a href="#1025">typeck_results</a>
+            })
+        })
+    }
+
+    <span class="doccomment">/// Gets the type-checking results for the current body.
+    /// As this will ICE if called outside bodies, only call when working with
+    /// `Expr` or `Pat` nodes (they are guaranteed to be found only in bodies).
+    </span><span class="attribute">#[track_caller]
+    </span><span class="kw">pub fn </span>typeck_results(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#1036">self</a>.<a href="#1022">maybe_typeck_results</a>().expect(<span class="string">&quot;`LateContext::typeck_results` called outside of body&quot;</span>)
+    }
+
+    <span class="doccomment">/// Returns the final resolution of a `QPath`, or `Res::Err` if unavailable.
+    /// Unlike `.typeck_results().qpath_res(qpath, id)`, this can be used even outside
+    /// bodies (e.g. for paths in `hir::Ty`), without any risk of ICE-ing.
+    </span><span class="kw">pub fn </span>qpath_res(<span class="kw-2">&amp;</span><span class="self">self</span>, qpath: <span class="kw-2">&amp;</span>hir::QPath&lt;<span class="lifetime">&#39;_</span>&gt;, id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) -&gt; <a href="../../rustc_hir/def/enum.Res.html">Res</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#1043">qpath</a> {
+            hir::QPath::Resolved(<span class="kw">_</span>, <span class="kw-2">ref </span>path) =&gt; <a href="#1045">path</a>.res,
+            hir::QPath::TypeRelative(..) | hir::QPath::LangItem(..) =&gt; <span class="self"><a href="#1043">self</a>
+                </span>.<a href="#1022">maybe_typeck_results</a>()
+                .filter(|typeck_results| <a href="#1048">typeck_results</a>.hir_owner == <a href="#1043">id</a>.owner)
+                .or_else(|| {
+                    <span class="kw">if </span><span class="self">self</span>.tcx.has_typeck_results(id.owner.to_def_id()) {
+                        <span class="prelude-val">Some</span>(<a class="self" href="#1043">self</a>.tcx.typeck(<a href="#1043">id</a>.owner))
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">None
+                    </span>}
+                })
+                .and_then(|typeck_results| <a href="#1056">typeck_results</a>.type_dependent_def(<a href="#1043">id</a>))
+                .map_or(Res::Err, |(kind, def_id)| Res::Def(<a href="#1057">kind</a>, <a href="#1057">def_id</a>)),
+        }
+    }
+
+    <span class="doccomment">/// Check if a `DefId`&#39;s path matches the given absolute type path usage.
+    ///
+    /// Anonymous scopes such as `extern` imports are matched with `kw::Empty`;
+    /// inherent `impl` blocks are matched with the name of the type.
+    ///
+    /// Instead of using this method, it is often preferable to instead use
+    /// `rustc_diagnostic_item` or a `lang_item`. This is less prone to errors
+    /// as paths get invalidated if the target definition moves.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore (no context or def id available)
+    /// if cx.match_def_path(def_id, &amp;[sym::core, sym::option, sym::Option]) {
+    ///     // The given `def_id` is that of an `Option` type
+    /// }
+    /// ```
+    ///
+    /// Used by clippy, but should be replaced by diagnostic items eventually.
+    </span><span class="kw">pub fn </span>match_def_path(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, path: <span class="kw-2">&amp;</span>[<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>]) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>names = <a class="self" href="#1079">self</a>.<a href="#1095">get_def_path</a>(<a href="#1079">def_id</a>);
+
+        <a href="#1080">names</a>.len() == <a href="#1079">path</a>.len() &amp;&amp; <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#1080">names</a>, <a href="#1079">path</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">all</a>(|(a, <span class="kw-2">&amp;</span>b)| <a href="#1082">a</a> == <a href="#1082">b</a>)
+    }
+
+    <span class="doccomment">/// Gets the absolute path of `def_id` as a vector of `Symbol`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore (no context or def id available)
+    /// let def_path = cx.get_def_path(def_id);
+    /// if let &amp;[sym::core, sym::option, sym::Option] = &amp;def_path[..] {
+    ///     // The given `def_id` is that of an `Option` type
+    /// }
+    /// ```
+    </span><span class="kw">pub fn </span>get_def_path(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Vec&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; {
+        <span class="kw">pub struct </span>AbsolutePathPrinter&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">pub </span>tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        }
+
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Printer&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>AbsolutePathPrinter&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">type </span>Error = !;
+
+            <span class="kw">type </span>Path = Vec&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;;
+            <span class="kw">type </span>Region = ();
+            <span class="kw">type </span>Type = ();
+            <span class="kw">type </span>DynExistential = ();
+            <span class="kw">type </span>Const = ();
+
+            <span class="kw">fn </span>tcx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <a class="self" href="#1109">self</a>.tcx
+            }
+
+            <span class="kw">fn </span>print_region(<span class="self">self</span>, _region: ty::Region&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Region, <span class="self">Self</span>::Error&gt; {
+                <span class="prelude-val">Ok</span>(())
+            }
+
+            <span class="kw">fn </span>print_type(<span class="self">self</span>, _ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Type, <span class="self">Self</span>::Error&gt; {
+                <span class="prelude-val">Ok</span>(())
+            }
+
+            <span class="kw">fn </span>print_dyn_existential(
+                <span class="self">self</span>,
+                _predicates: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::List&lt;ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, ty::ExistentialPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;,
+            ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::DynExistential, <span class="self">Self</span>::Error&gt; {
+                <span class="prelude-val">Ok</span>(())
+            }
+
+            <span class="kw">fn </span>print_const(<span class="self">self</span>, _ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Const, <span class="self">Self</span>::Error&gt; {
+                <span class="prelude-val">Ok</span>(())
+            }
+
+            <span class="kw">fn </span>path_crate(<span class="self">self</span>, cnum: <a href="../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt; {
+                <span class="prelude-val">Ok</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="self">self</span>.tcx.crate_name(cnum)])
+            }
+
+            <span class="kw">fn </span>path_qualified(
+                <span class="self">self</span>,
+                self_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+                trait_ref: <span class="prelude-ty">Option</span>&lt;ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+            ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt; {
+                <span class="kw">if </span>trait_ref.is_none() {
+                    <span class="kw">if let </span>ty::Adt(def, substs) = <a href="#1138">self_ty</a>.kind() {
+                        <span class="kw">return </span><a class="self" href="#1137">self</a>.<a href="../../rustc_middle/ty/print/trait.Printer.html">print_def_path</a>(<a href="#1142">def</a>.did(), <a href="#1142">substs</a>);
+                    }
+                }
+
+                <span class="comment">// This shouldn&#39;t ever be needed, but just in case:
+                </span><a class="macro" href="../../rustc_middle/ty/print/pretty/macro.with_no_trimmed_paths.html">with_no_trimmed_paths!</a>({
+                    <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[<span class="kw">match </span>trait_ref {
+                        <span class="prelude-val">Some</span>(trait_ref) =&gt; Symbol::intern(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, trait_ref)),
+                        <span class="prelude-val">None </span>=&gt; Symbol::intern(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;&lt;{}&gt;&quot;</span>, self_ty)),
+                    }])
+                })
+            }
+
+            <span class="kw">fn </span>path_append_impl(
+                <span class="self">self</span>,
+                print_prefix: <span class="kw">impl </span>FnOnce(<span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt;,
+                _disambiguated_data: <span class="kw-2">&amp;</span><a href="../../rustc_hir/definitions/struct.DisambiguatedDefPathData.html">DisambiguatedDefPathData</a>,
+                self_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+                trait_ref: <span class="prelude-ty">Option</span>&lt;ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+            ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>path = print_prefix(<span class="self">self</span>)<span class="question-mark">?</span>;
+
+                <span class="comment">// This shouldn&#39;t ever be needed, but just in case:
+                </span><a href="#1163">path</a>.push(<span class="kw">match </span><a href="#1161">trait_ref</a> {
+                    <span class="prelude-val">Some</span>(trait_ref) =&gt; {
+                        <a class="macro" href="../../rustc_middle/ty/print/pretty/macro.with_no_trimmed_paths.html">with_no_trimmed_paths!</a>(Symbol::intern(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                            <span class="string">&quot;&lt;impl {} for {}&gt;&quot;</span>,
+                            trait_ref.print_only_trait_path(),
+                            self_ty
+                        )))
+                    }
+                    <span class="prelude-val">None </span>=&gt; {
+                        <a class="macro" href="../../rustc_middle/ty/print/pretty/macro.with_no_trimmed_paths.html">with_no_trimmed_paths!</a>(Symbol::intern(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;&lt;impl {}&gt;&quot;</span>, self_ty)))
+                    }
+                });
+
+                <span class="prelude-val">Ok</span>(<a href="#1163">path</a>)
+            }
+
+            <span class="kw">fn </span>path_append(
+                <span class="self">self</span>,
+                print_prefix: <span class="kw">impl </span>FnOnce(<span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt;,
+                disambiguated_data: <span class="kw-2">&amp;</span><a href="../../rustc_hir/definitions/struct.DisambiguatedDefPathData.html">DisambiguatedDefPathData</a>,
+            ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>path = print_prefix(<span class="self">self</span>)<span class="question-mark">?</span>;
+
+                <span class="comment">// Skip `::{{extern}}` blocks and `::{{constructor}}` on tuple/unit structs.
+                </span><span class="kw">if let </span>DefPathData::ForeignMod | DefPathData::Ctor = <a href="#1185">disambiguated_data</a>.data {
+                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#1187">path</a>);
+                }
+
+                <a href="#1187">path</a>.push(Symbol::intern(<span class="kw-2">&amp;</span><a href="#1185">disambiguated_data</a>.data.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()));
+                <span class="prelude-val">Ok</span>(<a href="#1187">path</a>)
+            }
+
+            <span class="kw">fn </span>path_generic_args(
+                <span class="self">self</span>,
+                print_prefix: <span class="kw">impl </span>FnOnce(<span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt;,
+                _args: <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+            ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Path, <span class="self">Self</span>::Error&gt; {
+                <a href="#1200">print_prefix</a>(<a class="self" href="#1199">self</a>)
+            }
+        }
+
+        <a href="#1096">AbsolutePathPrinter</a> { tcx: <a class="self" href="#1095">self</a>.tcx }.<a href="../../rustc_middle/ty/print/trait.Printer.html">print_def_path</a>(<a href="#1095">def_id</a>, <span class="kw-2">&amp;</span>[]).unwrap()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="../../rustc_target/abi/trait.HasDataLayout.html">abi::HasDataLayout</a> <span class="kw">for </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>data_layout(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../rustc_target/abi/struct.TargetDataLayout.html">abi::TargetDataLayout</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#1213">self</a>.tcx.data_layout
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; ty::layout::HasTyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>tcx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#1220">self</a>.tcx
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; ty::layout::HasParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>param_env(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#1227">self</a>.param_env
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; LayoutOfHelpers&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>LayoutOfResult = <span class="prelude-ty">Result</span>&lt;TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;, LayoutError&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>handle_layout_err(<span class="kw-2">&amp;</span><span class="self">self</span>, err: LayoutError&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw">_</span>: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <span class="kw">_</span>: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; LayoutError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#1236">err</a>
+    }
+}
+
+<span class="kw">pub fn </span>parse_lint_and_tool_name(lint_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; (<span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;, <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+    <span class="kw">match </span><a href="#1241">lint_name</a>.split_once(<span class="string">&quot;::&quot;</span>) {
+        <span class="prelude-val">Some</span>((tool_name, lint_name)) =&gt; {
+            <span class="kw">let </span>tool_name = Symbol::intern(<a href="#1243">tool_name</a>);
+
+            (<span class="prelude-val">Some</span>(<a href="#1244">tool_name</a>), <a href="#1243">lint_name</a>)
+        }
+        <span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, <a href="#1241">lint_name</a>),
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_lint" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,1064 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/intrinsicck.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intrinsicck.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../../../rustc_ast/ast/enum.InlineAsmTemplatePiece.html">rustc_ast::InlineAsmTemplatePiece</a>;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashSet;
+<span class="kw">use </span><a href="../../../rustc_errors/macro.struct_span_err.html">rustc_errors::struct_span_err</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../rustc_index/vec/trait.Idx.html">rustc_index::vec::Idx</a>;
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../../rustc_middle/ty/layout/enum.LayoutError.html">LayoutError</a>, <a href="../../../rustc_middle/ty/layout/enum.SizeSkeleton.html">SizeSkeleton</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/sty/trait.Article.html">Article</a>, <a href="../../../rustc_type_ir/enum.FloatTy.html">FloatTy</a>, <a href="../../../rustc_type_ir/enum.IntTy.html">IntTy</a>, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="../../../rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>, <a href="../../../rustc_type_ir/enum.UintTy.html">UintTy</a>};
+<span class="kw">use </span><a href="../../../rustc_lint_defs/index.html">rustc_session::lint</a>;
+<span class="kw">use </span>rustc_span::{<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+<span class="kw">use </span>rustc_target::abi::{Pointer, <a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>};
+<span class="kw">use </span>rustc_target::asm::{<a href="../../../rustc_target/asm/enum.InlineAsmReg.html">InlineAsmReg</a>, <a href="../../../rustc_target/asm/enum.InlineAsmRegClass.html">InlineAsmRegClass</a>, <a href="../../../rustc_target/asm/enum.InlineAsmRegOrRegClass.html">InlineAsmRegOrRegClass</a>, <a href="../../../rustc_target/asm/enum.InlineAsmType.html">InlineAsmType</a>};
+
+<span class="kw">use </span><a href="fn_ctxt/mod.rs.html#40"><span class="kw">super</span>::FnCtxt</a>;
+
+<span class="doccomment">/// If the type is `Option&lt;T&gt;`, it will return `T`, otherwise
+/// the type itself. Works on most `Option`-like types.
+</span><span class="kw">fn </span>unpack_option_like&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">let </span>ty::Adt(def, substs) = <span class="kw-2">*</span><a href="#17">ty</a>.kind() <span class="kw">else </span>{ <span class="kw">return </span><a href="#17">ty</a> };
+
+    <span class="kw">if </span>def.variants().len() == <span class="number">2 </span>&amp;&amp; !def.repr().c() &amp;&amp; def.repr().int.is_none() {
+        <span class="kw">let </span>data_idx;
+
+        <span class="kw">let </span>one = VariantIdx::new(<span class="number">1</span>);
+        <span class="kw">let </span>zero = VariantIdx::new(<span class="number">0</span>);
+
+        <span class="kw">if </span>def.variant(zero).fields.is_empty() {
+            <a href="#21">data_idx</a> = <a href="#23">one</a>;
+        } <span class="kw">else if </span>def.variant(one).fields.is_empty() {
+            <a href="#21">data_idx</a> = <a href="#24">zero</a>;
+        } <span class="kw">else </span>{
+            <span class="kw">return </span><a href="#17">ty</a>;
+        }
+
+        <span class="kw">if </span>def.variant(data_idx).fields.len() == <span class="number">1 </span>{
+            <span class="kw">return </span><a href="#18">def</a>.variant(<a href="#21">data_idx</a>).fields[<span class="number">0</span>].ty(<a href="#17">tcx</a>, <a href="#18">substs</a>);
+        }
+    }
+
+    <a href="#17">ty</a>
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>check_transmute(<span class="kw-2">&amp;</span><span class="self">self</span>, span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, from: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, to: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span>convert = |ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;| {
+            <span class="kw">let </span>ty = <a class="self" href="#43">self</a>.resolve_vars_if_possible(<a href="#44">ty</a>);
+            <span class="kw">let </span>ty = <a class="self" href="#43">self</a>.tcx.normalize_erasing_regions(<a class="self" href="#43">self</a>.param_env, <a href="#45">ty</a>);
+            (SizeSkeleton::compute(<a href="#46">ty</a>, <a class="self" href="#43">self</a>.tcx, <a class="self" href="#43">self</a>.param_env), <a href="#46">ty</a>)
+        };
+        <span class="kw">let </span>(sk_from, from) = <a href="#44">convert</a>(<a href="#43">from</a>);
+        <span class="kw">let </span>(sk_to, to) = <a href="#44">convert</a>(<a href="#43">to</a>);
+
+        <span class="comment">// Check for same size using the skeletons.
+        </span><span class="kw">if let </span>(<span class="prelude-val">Ok</span>(sk_from), <span class="prelude-val">Ok</span>(sk_to)) = (<a href="#49">sk_from</a>, <a href="#50">sk_to</a>) {
+            <span class="kw">if </span>sk_from.same_size(sk_to) {
+                <span class="kw">return</span>;
+            }
+
+            <span class="comment">// Special-case transmuting from `typeof(function)` and
+            // `Option&lt;typeof(function)&gt;` to present a clearer error.
+            </span><span class="kw">let </span>from = <a href="#17">unpack_option_like</a>(<a class="self" href="#43">self</a>.tcx, <a href="#49">from</a>);
+            <span class="kw">if let </span>(<span class="kw-2">&amp;</span>ty::FnDef(..), SizeSkeleton::Known(size_to)) = (<a href="#60">from</a>.kind(), <a href="#53">sk_to</a>) &amp;&amp; <a href="#61">size_to</a> == Pointer.size(<span class="kw-2">&amp;</span><a class="self" href="#43">self</a>.tcx) {
+                <a class="macro" href="../../../rustc_errors/macro.struct_span_err.html">struct_span_err!</a>(<span class="self">self</span>.tcx.sess, span, E0591, <span class="string">&quot;can&#39;t transmute zero-sized type&quot;</span>)
+                    .note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;source type: {from}&quot;</span>))
+                    .note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;target type: {to}&quot;</span>))
+                    .help(<span class="string">&quot;cast with `as` to a pointer instead&quot;</span>)
+                    .emit();
+                <span class="kw">return</span>;
+            }
+        }
+
+        <span class="comment">// Try to display a sensible error with as much information as possible.
+        </span><span class="kw">let </span>skeleton_string = |ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, sk| <span class="kw">match </span><a href="#72">sk</a> {
+            <span class="prelude-val">Ok</span>(SizeSkeleton::Known(size)) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{} bits&quot;</span>, size.bits()),
+            <span class="prelude-val">Ok</span>(<a href="../../../rustc_middle/ty/layout/enum.SizeSkeleton.html">SizeSkeleton::Pointer</a> { tail, .. }) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;pointer to `{tail}`&quot;</span>),
+            <span class="prelude-val">Err</span>(LayoutError::Unknown(bad)) =&gt; {
+                <span class="kw">if </span>bad == ty {
+                    <span class="string">&quot;this type does not have a fixed size&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>()
+                } <span class="kw">else </span>{
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;size can vary because of {bad}&quot;</span>)
+                }
+            }
+            <span class="prelude-val">Err</span>(err) =&gt; <a href="#82">err</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(),
+        };
+
+        <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="macro" href="../../../rustc_errors/macro.struct_span_err.html">struct_span_err!</a>(
+            <span class="self">self</span>.tcx.sess,
+            span,
+            E0512,
+            <span class="string">&quot;cannot transmute between types of different sizes, \
+                                        or dependently-sized types&quot;
+        </span>);
+        <span class="kw">if </span>from == to {
+            <a href="#85">err</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;`{from}` does not have a fixed size&quot;</span>));
+        } <span class="kw">else </span>{
+            <a href="#85">err</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;source type: `{}` ({})&quot;</span>, from, skeleton_string(from, sk_from)))
+                .note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;target type: `{}` ({})&quot;</span>, to, skeleton_string(to, sk_to)));
+        }
+        <a href="#85">err</a>.emit();
+    }
+}
+
+<span class="kw">pub struct </span>InlineAsmCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    get_operand_ty: Box&lt;<span class="kw">dyn </span>Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; InlineAsmCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new_global_asm(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#102">InlineAsmCtxt</a> {
+            <a href="#109">tcx</a>,
+            param_env: ty::ParamEnv::empty(),
+            get_operand_ty: Box::new(|e| <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;asm operand in global asm: {e:?}&quot;</span>)),
+        }
+    }
+
+    <span class="kw">pub fn </span>new_in_fn(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        get_operand_ty: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>,
+    ) -&gt; <span class="self">Self </span>{
+        <a href="#102">InlineAsmCtxt</a> { <a href="#118">tcx</a>, <a href="#119">param_env</a>, get_operand_ty: Box::new(<a href="#120">get_operand_ty</a>) }
+    }
+
+    <span class="comment">// FIXME(compiler-errors): This could use `&lt;$ty as Pointee&gt;::Metadata == ()`
+    </span><span class="kw">fn </span>is_thin_ptr_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// Type still may have region variables, but `Sized` does not depend
+        // on those, so just erase them before querying.
+        </span><span class="kw">if </span>ty.is_sized(<span class="self">self</span>.tcx.at(DUMMY_SP), <span class="self">self</span>.param_env) {
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        }
+        <span class="kw">if let </span>ty::Foreign(..) = <a href="#126">ty</a>.kind() {
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        }
+        <span class="bool-val">false
+    </span>}
+
+    <span class="kw">fn </span>check_asm_operand_type(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        idx: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        reg: <a href="../../../rustc_target/asm/enum.InlineAsmRegOrRegClass.html">InlineAsmRegOrRegClass</a>,
+        expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        template: <span class="kw-2">&amp;</span>[<a href="../../../rustc_ast/ast/enum.InlineAsmTemplatePiece.html">InlineAsmTemplatePiece</a>],
+        is_input: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        tied_input: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_target/asm/enum.InlineAsmType.html">InlineAsmType</a>&gt;)&gt;,
+        target_features: <span class="kw-2">&amp;</span>FxHashSet&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_target/asm/enum.InlineAsmType.html">InlineAsmType</a>&gt; {
+        <span class="kw">let </span>ty = (<a class="self" href="#139">self</a>.get_operand_ty)(<a href="#142">expr</a>);
+        <span class="kw">if </span>ty.has_infer_types_or_consts() {
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;inference variable in asm operand ty: {:?} {:?}&quot;</span>, expr, ty);
+        }
+        <span class="kw">let </span>asm_ty_isize = <span class="kw">match </span><a class="self" href="#139">self</a>.tcx.sess.target.pointer_width {
+            <span class="number">16 </span>=&gt; InlineAsmType::I16,
+            <span class="number">32 </span>=&gt; InlineAsmType::I32,
+            <span class="number">64 </span>=&gt; InlineAsmType::I64,
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        };
+
+        <span class="kw">let </span>asm_ty = <span class="kw">match </span><span class="kw-2">*</span><a href="#148">ty</a>.kind() {
+            <span class="comment">// `!` is allowed for input but not for output (issue #87802)
+            </span>ty::Never <span class="kw">if </span><a href="#144">is_input</a> =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+            ty::Error(<span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+            ty::Int(IntTy::I8) | ty::Uint(UintTy::U8) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::I8),
+            ty::Int(IntTy::I16) | ty::Uint(UintTy::U16) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::I16),
+            ty::Int(IntTy::I32) | ty::Uint(UintTy::U32) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::I32),
+            ty::Int(IntTy::I64) | ty::Uint(UintTy::U64) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::I64),
+            ty::Int(IntTy::I128) | ty::Uint(UintTy::U128) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::I128),
+            ty::Int(IntTy::Isize) | ty::Uint(UintTy::Usize) =&gt; <span class="prelude-val">Some</span>(<a href="#152">asm_ty_isize</a>),
+            ty::Float(FloatTy::F32) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::F32),
+            ty::Float(FloatTy::F64) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::F64),
+            ty::FnPtr(<span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(<a href="#152">asm_ty_isize</a>),
+            ty::RawPtr(<a href="../../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { ty, mutbl: <span class="kw">_ </span>}) <span class="kw">if </span><a class="self" href="#139">self</a>.<a href="#126">is_thin_ptr_ty</a>(<a href="#172">ty</a>) =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#152">asm_ty_isize</a>)
+            }
+            ty::Adt(adt, substs) <span class="kw">if </span><a href="#175">adt</a>.repr().simd() =&gt; {
+                <span class="kw">let </span>fields = <span class="kw-2">&amp;</span><a href="#175">adt</a>.non_enum_variant().fields;
+                <span class="kw">let </span>elem_ty = <a href="#176">fields</a>[<span class="number">0</span>].ty(<a class="self" href="#139">self</a>.tcx, <a href="#175">substs</a>);
+                <span class="kw">match </span><a href="#177">elem_ty</a>.kind() {
+                    ty::Never | ty::Error(<span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+                    ty::Int(IntTy::I8) | ty::Uint(UintTy::U8) =&gt; {
+                        <span class="prelude-val">Some</span>(InlineAsmType::VecI8(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>))
+                    }
+                    ty::Int(IntTy::I16) | ty::Uint(UintTy::U16) =&gt; {
+                        <span class="prelude-val">Some</span>(InlineAsmType::VecI16(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>))
+                    }
+                    ty::Int(IntTy::I32) | ty::Uint(UintTy::U32) =&gt; {
+                        <span class="prelude-val">Some</span>(InlineAsmType::VecI32(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>))
+                    }
+                    ty::Int(IntTy::I64) | ty::Uint(UintTy::U64) =&gt; {
+                        <span class="prelude-val">Some</span>(InlineAsmType::VecI64(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>))
+                    }
+                    ty::Int(IntTy::I128) | ty::Uint(UintTy::U128) =&gt; {
+                        <span class="prelude-val">Some</span>(InlineAsmType::VecI128(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>))
+                    }
+                    ty::Int(IntTy::Isize) | ty::Uint(UintTy::Usize) =&gt; {
+                        <span class="prelude-val">Some</span>(<span class="kw">match </span><a class="self" href="#139">self</a>.tcx.sess.target.pointer_width {
+                            <span class="number">16 </span>=&gt; InlineAsmType::VecI16(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>),
+                            <span class="number">32 </span>=&gt; InlineAsmType::VecI32(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>),
+                            <span class="number">64 </span>=&gt; InlineAsmType::VecI64(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>),
+                            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+                        })
+                    }
+                    ty::Float(FloatTy::F32) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::VecF32(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>)),
+                    ty::Float(FloatTy::F64) =&gt; <span class="prelude-val">Some</span>(InlineAsmType::VecF64(<a href="#176">fields</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>)),
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                }
+            }
+            ty::Infer(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        };
+        <span class="kw">let </span><span class="prelude-val">Some</span>(asm_ty) = <a href="#159">asm_ty</a> <span class="kw">else </span>{
+            <span class="kw">let </span>msg = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;cannot use value of type `{ty}` for inline assembly&quot;</span>);
+            <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="self" href="#139">self</a>.tcx.sess.struct_span_err(<a href="#142">expr</a>.span, <a href="#212">msg</a>);
+            <a href="#213">err</a>.note(
+                <span class="string">&quot;only integers, floats, SIMD vectors, pointers and function pointers \
+                 can be used as arguments for inline assembly&quot;</span>,
+            );
+            <a href="#213">err</a>.emit();
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        };
+
+        <span class="comment">// Check that the type implements Copy. The only case where this can
+        // possibly fail is for SIMD types which don&#39;t #[derive(Copy)].
+        </span><span class="kw">if </span>!ty.is_copy_modulo_regions(<span class="self">self</span>.tcx.at(expr.span), <span class="self">self</span>.param_env) {
+            <span class="kw">let </span>msg = <span class="string">&quot;arguments for inline assembly must be copyable&quot;</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="self" href="#139">self</a>.tcx.sess.struct_span_err(<a href="#142">expr</a>.span, <a href="#225">msg</a>);
+            <a href="#226">err</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;`{ty}` does not implement the Copy trait&quot;</span>));
+            <a href="#226">err</a>.emit();
+        }
+
+        <span class="comment">// Ideally we wouldn&#39;t need to do this, but LLVM&#39;s register allocator
+        // really doesn&#39;t like it when tied operands have different types.
+        //
+        // This is purely an LLVM limitation, but we have to live with it since
+        // there is no way to hide this with implicit conversions.
+        //
+        // For the purposes of this check we only look at the `InlineAsmType`,
+        // which means that pointers and integers are treated as identical (modulo
+        // size).
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>((in_expr, <span class="prelude-val">Some</span>(in_asm_ty))) = <a href="#145">tied_input</a> {
+            <span class="kw">if </span>in_asm_ty != asm_ty {
+                <span class="kw">let </span>msg = <span class="string">&quot;incompatible types for asm inout argument&quot;</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="self" href="#139">self</a>.tcx.sess.struct_span_err(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[in_expr.span, expr.span], <a href="#242">msg</a>);
+
+                <span class="kw">let </span>in_expr_ty = (<a class="self" href="#139">self</a>.get_operand_ty)(<a href="#240">in_expr</a>);
+                <a href="#243">err</a>.span_label(<a href="#240">in_expr</a>.span, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;type `{in_expr_ty}`&quot;</span>));
+                <a href="#243">err</a>.span_label(<a href="#142">expr</a>.span, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;type `{ty}`&quot;</span>));
+                <a href="#243">err</a>.note(
+                    <span class="string">&quot;asm inout arguments must have the same type, \
+                    unless they are both pointers or integers of the same size&quot;</span>,
+                );
+                <a href="#243">err</a>.emit();
+            }
+
+            <span class="comment">// All of the later checks have already been done on the input, so
+            // let&#39;s not emit errors and warnings twice.
+            </span><span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#211">asm_ty</a>);
+        }
+
+        <span class="comment">// Check the type against the list of types supported by the selected
+        // register class.
+        </span><span class="kw">let </span>asm_arch = <a class="self" href="#139">self</a>.tcx.sess.asm_arch.unwrap();
+        <span class="kw">let </span>reg_class = <a href="#141">reg</a>.reg_class();
+        <span class="kw">let </span>supported_tys = <a href="#263">reg_class</a>.supported_types(<a href="#262">asm_arch</a>);
+        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, feature)) = <a href="#264">supported_tys</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|&amp;&amp;(t, <span class="kw">_</span>)| <a href="#265">t</a> == <a href="#211">asm_ty</a>) <span class="kw">else </span>{
+            <span class="kw">let </span>msg = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;type `{ty}` cannot be used with this register class&quot;</span>);
+            <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="self" href="#139">self</a>.tcx.sess.struct_span_err(<a href="#142">expr</a>.span, <a href="#266">msg</a>);
+            <span class="kw">let </span>supported_tys: Vec&lt;<span class="kw">_</span>&gt; =
+                <a href="#264">supported_tys</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(t, <span class="kw">_</span>)| <a href="#269">t</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+            <a href="#267">err</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;register class `{}` supports these types: {}&quot;</span>,
+                reg_class.name(),
+                supported_tys.join(<span class="string">&quot;, &quot;</span>),
+            ));
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(suggest) = <a href="#263">reg_class</a>.suggest_class(<a href="#262">asm_arch</a>, <a href="#211">asm_ty</a>) {
+                <a href="#267">err</a>.help(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;consider using the `{}` register class instead&quot;</span>,
+                    suggest.name()
+                ));
+            }
+            <a href="#267">err</a>.emit();
+            <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#211">asm_ty</a>);
+        };
+
+        <span class="comment">// Check whether the selected type requires a target feature. Note that
+        // this is different from the feature check we did earlier. While the
+        // previous check checked that this register class is usable at all
+        // with the currently enabled features, some types may only be usable
+        // with a register class when a certain feature is enabled. We check
+        // this here since it depends on the results of typeck.
+        //
+        // Also note that this check isn&#39;t run when the operand type is never
+        // (!). In that case we still need the earlier check to verify that the
+        // register class is usable at all.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(feature) = <a href="#265">feature</a> {
+            <span class="kw">if </span>!target_features.contains(<span class="kw-2">&amp;</span>feature) {
+                <span class="kw">let </span>msg = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;`{}` target feature is not enabled&quot;</span>, feature);
+                <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="self" href="#139">self</a>.tcx.sess.struct_span_err(<a href="#142">expr</a>.span, <a href="#297">msg</a>);
+                <a href="#298">err</a>.note(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;this is required to use type `{}` with register class `{}`&quot;</span>,
+                    ty,
+                    reg_class.name(),
+                ));
+                <a href="#298">err</a>.emit();
+                <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#211">asm_ty</a>);
+            }
+        }
+
+        <span class="comment">// Check whether a modifier is suggested for using this type.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>((suggested_modifier, suggested_result)) =
+            <a href="#263">reg_class</a>.suggest_modifier(<a href="#262">asm_arch</a>, <a href="#211">asm_ty</a>)
+        {
+            <span class="comment">// Search for any use of this operand without a modifier and emit
+            // the suggestion for them.
+            </span><span class="kw">let </span><span class="kw-2">mut </span>spans = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+            <span class="kw">for </span>piece <span class="kw">in </span>template {
+                <span class="kw">if let </span><span class="kw-2">&amp;</span>InlineAsmTemplatePiece::Placeholder { operand_idx, modifier, span } = piece
+                {
+                    <span class="kw">if </span>operand_idx == idx &amp;&amp; modifier.is_none() {
+                        spans.push(span);
+                    }
+                }
+            }
+            <span class="kw">if </span>!spans.is_empty() {
+                <span class="kw">let </span>(default_modifier, default_result) =
+                    <a href="#263">reg_class</a>.default_modifier(<a href="#262">asm_arch</a>).unwrap();
+                <a class="self" href="#139">self</a>.tcx.struct_span_lint_hir(
+                    lint::builtin::ASM_SUB_REGISTER,
+                    <a href="#142">expr</a>.hir_id,
+                    <a href="#315">spans</a>,
+                    |lint| {
+                        <span class="kw">let </span>msg = <span class="string">&quot;formatting may not be suitable for sub-register argument&quot;</span>;
+                        <span class="kw">let </span><span class="kw-2">mut </span>err = <a href="#331">lint</a>.build(<a href="#332">msg</a>);
+                        <a href="#333">err</a>.span_label(<a href="#142">expr</a>.span, <span class="string">&quot;for this argument&quot;</span>);
+                        <a href="#333">err</a>.help(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;use `{{{idx}:{suggested_modifier}}}` to have the register formatted as `{suggested_result}`&quot;</span>,
+                        ));
+                        <a href="#333">err</a>.help(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;or use `{{{idx}:{default_modifier}}}` to keep the default formatting of `{default_result}`&quot;</span>,
+                        ));
+                        <a href="#333">err</a>.emit();
+                    },
+                );
+            }
+        }
+
+        <span class="prelude-val">Some</span>(<a href="#211">asm_ty</a>)
+    }
+
+    <span class="kw">pub fn </span>check_asm(<span class="kw-2">&amp;</span><span class="self">self</span>, asm: <span class="kw-2">&amp;</span>hir::InlineAsm&lt;<span class="lifetime">&#39;tcx</span>&gt;, enclosing_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <span class="kw">let </span>hir = <a class="self" href="#350">self</a>.tcx.hir();
+        <span class="kw">let </span>enclosing_def_id = <a href="#351">hir</a>.local_def_id(<a href="#350">enclosing_id</a>).to_def_id();
+        <span class="kw">let </span>target_features = <a class="self" href="#350">self</a>.tcx.asm_target_features(<a href="#352">enclosing_def_id</a>);
+        <span class="kw">let </span><span class="prelude-val">Some</span>(asm_arch) = <a class="self" href="#350">self</a>.tcx.sess.asm_arch <span class="kw">else </span>{
+            <a class="self" href="#350">self</a>.tcx.sess.delay_span_bug(<a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>, <span class="string">&quot;target architecture does not support asm&quot;</span>);
+            <span class="kw">return</span>;
+        };
+        <span class="kw">for </span>(idx, (op, op_sp)) <span class="kw">in </span>asm.operands.iter().enumerate() {
+            <span class="comment">// Validate register classes against currently enabled target
+            // features. We check that at least one type is available for
+            // the enabled features.
+            //
+            // We ignore target feature requirements for clobbers: if the
+            // feature is disabled then the compiler doesn&#39;t care what we
+            // do with the registers.
+            //
+            // Note that this is only possible for explicit register
+            // operands, which cannot be used in the asm string.
+            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(reg) = op.reg() {
+                <span class="comment">// Some explicit registers cannot be used depending on the
+                // target. Reject those here.
+                </span><span class="kw">if let </span>InlineAsmRegOrRegClass::Reg(reg) = reg {
+                    <span class="kw">if let </span>InlineAsmReg::Err = reg {
+                        <span class="comment">// `validate` will panic on `Err`, as an error must
+                        // already have been reported.
+                        </span><span class="kw">continue</span>;
+                    }
+                    <span class="kw">if let </span><span class="prelude-val">Err</span>(msg) = reg.validate(
+                        asm_arch,
+                        <span class="self">self</span>.tcx.sess.relocation_model(),
+                        <span class="kw-2">&amp;</span>target_features,
+                        <span class="kw-2">&amp;</span><span class="self">self</span>.tcx.sess.target,
+                        op.is_clobber(),
+                    ) {
+                        <span class="kw">let </span>msg = <span class="macro">format!</span>(<span class="string">&quot;cannot use register `{}`: {}&quot;</span>, reg.name(), msg);
+                        <span class="self">self</span>.tcx.sess.struct_span_err(<span class="kw-2">*</span>op_sp, <span class="kw-2">&amp;</span>msg).emit();
+                        <span class="kw">continue</span>;
+                    }
+                }
+
+                <span class="kw">if </span>!op.is_clobber() {
+                    <span class="kw">let </span><span class="kw-2">mut </span>missing_required_features = <span class="macro">vec!</span>[];
+                    <span class="kw">let </span>reg_class = reg.reg_class();
+                    <span class="kw">if let </span>InlineAsmRegClass::Err = reg_class {
+                        <span class="kw">continue</span>;
+                    }
+                    <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw">_</span>, feature) <span class="kw">in </span>reg_class.supported_types(asm_arch) {
+                        <span class="kw">match </span>feature {
+                            <span class="prelude-val">Some</span>(feature) =&gt; {
+                                <span class="kw">if </span>target_features.contains(<span class="kw-2">&amp;</span>feature) {
+                                    missing_required_features.clear();
+                                    <span class="kw">break</span>;
+                                } <span class="kw">else </span>{
+                                    missing_required_features.push(feature);
+                                }
+                            }
+                            <span class="prelude-val">None </span>=&gt; {
+                                missing_required_features.clear();
+                                <span class="kw">break</span>;
+                            }
+                        }
+                    }
+
+                    <span class="comment">// We are sorting primitive strs here and can use unstable sort here
+                    </span>missing_required_features.sort_unstable();
+                    missing_required_features.dedup();
+                    <span class="kw">match </span><span class="kw-2">&amp;</span>missing_required_features[..] {
+                        [] =&gt; {}
+                        [feature] =&gt; {
+                            <span class="kw">let </span>msg = <span class="macro">format!</span>(
+                                <span class="string">&quot;register class `{}` requires the `{}` target feature&quot;</span>,
+                                reg_class.name(),
+                                feature
+                            );
+                            <span class="self">self</span>.tcx.sess.struct_span_err(<span class="kw-2">*</span>op_sp, <span class="kw-2">&amp;</span>msg).emit();
+                            <span class="comment">// register isn&#39;t enabled, don&#39;t do more checks
+                            </span><span class="kw">continue</span>;
+                        }
+                        features =&gt; {
+                            <span class="kw">let </span>msg = <span class="macro">format!</span>(
+                                <span class="string">&quot;register class `{}` requires at least one of the following target features: {}&quot;</span>,
+                                reg_class.name(),
+                                features
+                                    .iter()
+                                    .map(|f| f.as_str())
+                                    .intersperse(<span class="string">&quot;, &quot;</span>)
+                                    .collect::&lt;String&gt;(),
+                            );
+                            <span class="self">self</span>.tcx.sess.struct_span_err(<span class="kw-2">*</span>op_sp, <span class="kw-2">&amp;</span>msg).emit();
+                            <span class="comment">// register isn&#39;t enabled, don&#39;t do more checks
+                            </span><span class="kw">continue</span>;
+                        }
+                    }
+                }
+            }
+
+            <span class="kw">match </span><span class="kw-2">*</span>op {
+                hir::InlineAsmOperand::In { reg, <span class="kw-2">ref </span>expr } =&gt; {
+                    <span class="self">self</span>.check_asm_operand_type(
+                        idx,
+                        reg,
+                        expr,
+                        asm.template,
+                        <span class="bool-val">true</span>,
+                        <span class="prelude-val">None</span>,
+                        <span class="kw-2">&amp;</span>target_features,
+                    );
+                }
+                hir::InlineAsmOperand::Out { reg, late: <span class="kw">_</span>, <span class="kw-2">ref </span>expr } =&gt; {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                        <span class="self">self</span>.check_asm_operand_type(
+                            idx,
+                            reg,
+                            expr,
+                            asm.template,
+                            <span class="bool-val">false</span>,
+                            <span class="prelude-val">None</span>,
+                            <span class="kw-2">&amp;</span>target_features,
+                        );
+                    }
+                }
+                hir::InlineAsmOperand::InOut { reg, late: <span class="kw">_</span>, <span class="kw-2">ref </span>expr } =&gt; {
+                    <span class="self">self</span>.check_asm_operand_type(
+                        idx,
+                        reg,
+                        expr,
+                        asm.template,
+                        <span class="bool-val">false</span>,
+                        <span class="prelude-val">None</span>,
+                        <span class="kw-2">&amp;</span>target_features,
+                    );
+                }
+                hir::InlineAsmOperand::SplitInOut { reg, late: <span class="kw">_</span>, <span class="kw-2">ref </span>in_expr, <span class="kw-2">ref </span>out_expr } =&gt; {
+                    <span class="kw">let </span>in_ty = <span class="self">self</span>.check_asm_operand_type(
+                        idx,
+                        reg,
+                        in_expr,
+                        asm.template,
+                        <span class="bool-val">true</span>,
+                        <span class="prelude-val">None</span>,
+                        <span class="kw-2">&amp;</span>target_features,
+                    );
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(out_expr) = out_expr {
+                        <span class="self">self</span>.check_asm_operand_type(
+                            idx,
+                            reg,
+                            out_expr,
+                            asm.template,
+                            <span class="bool-val">false</span>,
+                            <span class="prelude-val">Some</span>((in_expr, in_ty)),
+                            <span class="kw-2">&amp;</span>target_features,
+                        );
+                    }
+                }
+                <span class="comment">// No special checking is needed for these:
+                // - Typeck has checked that Const operands are integers.
+                // - AST lowering guarantees that SymStatic points to a static.
+                </span>hir::InlineAsmOperand::Const { .. } | hir::InlineAsmOperand::SymStatic { .. } =&gt; {}
+                <span class="comment">// Check that sym actually points to a function. Later passes
+                // depend on this.
+                </span>hir::InlineAsmOperand::SymFn { anon_const } =&gt; {
+                    <span class="kw">let </span>ty = <span class="self">self</span>.tcx.typeck_body(anon_const.body).node_type(anon_const.hir_id);
+                    <span class="kw">match </span>ty.kind() {
+                        ty::Never | ty::Error(<span class="kw">_</span>) =&gt; {}
+                        ty::FnDef(..) =&gt; {}
+                        <span class="kw">_ </span>=&gt; {
+                            <span class="kw">let </span><span class="kw-2">mut </span>err =
+                                <span class="self">self</span>.tcx.sess.struct_span_err(<span class="kw-2">*</span>op_sp, <span class="string">&quot;invalid `sym` operand&quot;</span>);
+                            err.span_label(
+                                <span class="self">self</span>.tcx.hir().span(anon_const.body.hir_id),
+                                <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;is {} `{}`&quot;</span>, ty.kind().article(), ty),
+                            );
+                            err.help(<span class="string">&quot;`sym` operands must refer to either a function or a static&quot;</span>);
+                            err.emit();
+                        }
+                    };
+                }
+            }
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

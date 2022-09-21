@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["always_storage_live_locals","The set of locals in a MIR body that do not have `StorageLive`/`StorageDead` annotations."]]};

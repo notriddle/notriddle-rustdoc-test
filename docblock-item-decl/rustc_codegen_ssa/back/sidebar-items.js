@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["archive",""],["command","A thin wrapper around `Command` in the standard library which allows us to read the arguments that are built up."],["link",""],["linker",""],["lto",""],["metadata","Reading of the rustc metadata for rlibs and dylibs"],["rpath",""],["symbol_export",""],["write",""]]};

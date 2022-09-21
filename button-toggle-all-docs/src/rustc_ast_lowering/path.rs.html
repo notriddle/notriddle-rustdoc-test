@@ -1,0 +1,798 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_ast_lowering/src/path.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>path.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_ast_lowering/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_ast_lowering/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_ast_lowering/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="lib.rs.html#265"><span class="kw">crate</span>::ImplTraitPosition</a>;
+
+<span class="kw">use </span><span class="kw">super</span>::errors::{<a href="errors.rs.html#7">GenericTypeWithParentheses</a>, <a href="errors.rs.html#16">UseAngleBrackets</a>};
+<span class="kw">use </span><a href="lib.rs.html#160"><span class="kw">super</span>::ResolverAstLoweringExt</a>;
+<span class="kw">use super</span>::{<a href="lib.rs.html#2566">GenericArgsCtor</a>, <a href="../../rustc_hir/def/enum.LifetimeRes.html">LifetimeRes</a>, <a href="lib.rs.html#466">ParenthesizedGenericArgs</a>};
+<span class="kw">use super</span>::{<a href="lib.rs.html#240">ImplTraitContext</a>, <a href="lib.rs.html#92">LoweringContext</a>, <a href="lib.rs.html#457">ParamMode</a>};
+
+<span class="kw">use </span>rustc_ast::{<span class="self"><a href="../../rustc_ast/index.html">self</a> </span><span class="kw">as </span>ast, <span class="kw-2">*</span>};
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../rustc_hir/def/struct.PartialRes.html">PartialRes</a>, <a href="../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span><a href="../../rustc_hir/hir/enum.GenericArg.html">rustc_hir::GenericArg</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>};
+<span class="kw">use </span>rustc_span::{BytePos, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec::smallvec</a>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;hir</span>&gt; LoweringContext&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;hir</span>&gt; {
+    <span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lower_qpath(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        qself: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;<a href="../../rustc_ast/ast/struct.QSelf.html">QSelf</a>&gt;,
+        p: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Path.html">Path</a>,
+        param_mode: <a href="lib.rs.html#457">ParamMode</a>,
+        itctx: <span class="kw-2">&amp;</span><a href="lib.rs.html#240">ImplTraitContext</a>,
+    ) -&gt; hir::QPath&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>qself_position = qself.as_ref().map(|q| q.position);
+        <span class="kw">let </span>qself = qself.as_ref().map(|q| <span class="self">self</span>.lower_ty(<span class="kw-2">&amp;</span>q.ty, itctx));
+
+        <span class="kw">let </span>partial_res =
+            <span class="self">self</span>.resolver.get_partial_res(id).unwrap_or_else(|| PartialRes::new(Res::Err));
+
+        <span class="kw">let </span>path_span_lo = p.span.shrink_to_lo();
+        <span class="kw">let </span>proj_start = p.segments.len() - partial_res.unresolved_segments();
+        <span class="kw">let </span>path = <span class="self">self</span>.arena.alloc(hir::Path {
+            res: <span class="self">self</span>.lower_res(partial_res.base_res()),
+            segments: <span class="self">self</span>.arena.alloc_from_iter(p.segments[..proj_start].iter().enumerate().map(
+                |(i, segment)| {
+                    <span class="kw">let </span>param_mode = <span class="kw">match </span>(qself_position, param_mode) {
+                        (<span class="prelude-val">Some</span>(j), ParamMode::Optional) <span class="kw">if </span>i &lt; j =&gt; {
+                            <span class="comment">// This segment is part of the trait path in a
+                            // qualified path - one of `a`, `b` or `Trait`
+                            // in `&lt;X as a::b::Trait&gt;::T::U::method`.
+                            </span>ParamMode::Explicit
+                        }
+                        <span class="kw">_ </span>=&gt; param_mode,
+                    };
+
+                    <span class="kw">let </span>parenthesized_generic_args = <span class="kw">match </span>partial_res.base_res() {
+                        <span class="comment">// `a::b::Trait(Args)`
+                        </span>Res::Def(DefKind::Trait, <span class="kw">_</span>) <span class="kw">if </span>i + <span class="number">1 </span>== proj_start =&gt; {
+                            ParenthesizedGenericArgs::Ok
+                        }
+                        <span class="comment">// `a::b::Trait(Args)::TraitItem`
+                        </span>Res::Def(DefKind::AssocFn, <span class="kw">_</span>)
+                        | Res::Def(DefKind::AssocConst, <span class="kw">_</span>)
+                        | Res::Def(DefKind::AssocTy, <span class="kw">_</span>)
+                            <span class="kw">if </span>i + <span class="number">2 </span>== proj_start =&gt;
+                        {
+                            ParenthesizedGenericArgs::Ok
+                        }
+                        <span class="comment">// Avoid duplicated errors.
+                        </span>Res::Err =&gt; ParenthesizedGenericArgs::Ok,
+                        <span class="comment">// An error
+                        </span><span class="kw">_ </span>=&gt; ParenthesizedGenericArgs::Err,
+                    };
+
+                    <span class="self">self</span>.lower_path_segment(
+                        p.span,
+                        segment,
+                        param_mode,
+                        parenthesized_generic_args,
+                        itctx,
+                    )
+                },
+            )),
+            span: <span class="self">self</span>.lower_span(
+                p.segments[..proj_start]
+                    .last()
+                    .map_or(path_span_lo, |segment| path_span_lo.to(segment.span())),
+            ),
+        });
+
+        <span class="comment">// Simple case, either no projections, or only fully-qualified.
+        // E.g., `std::mem::size_of` or `&lt;I as Iterator&gt;::Item`.
+        </span><span class="kw">if </span>partial_res.unresolved_segments() == <span class="number">0 </span>{
+            <span class="kw">return </span>hir::QPath::Resolved(qself, path);
+        }
+
+        <span class="comment">// Create the innermost type that we&#39;re projecting from.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>ty = <span class="kw">if </span>path.segments.is_empty() {
+            <span class="comment">// If the base path is empty that means there exists a
+            // syntactical `Self`, e.g., `&amp;i32` in `&lt;&amp;i32&gt;::clone`.
+            </span>qself.expect(<span class="string">&quot;missing QSelf for &lt;T&gt;::...&quot;</span>)
+        } <span class="kw">else </span>{
+            <span class="comment">// Otherwise, the base path is an implicit `Self` type path,
+            // e.g., `Vec` in `Vec::new` or `&lt;I as Iterator&gt;::Item` in
+            // `&lt;I as Iterator&gt;::Item::default`.
+            </span><span class="kw">let </span>new_id = <span class="self">self</span>.next_id();
+            <span class="self">self</span>.arena.alloc(<span class="self">self</span>.ty_path(new_id, path.span, hir::QPath::Resolved(qself, path)))
+        };
+
+        <span class="comment">// Anything after the base path are associated &quot;extensions&quot;,
+        // out of which all but the last one are associated types,
+        // e.g., for `std::vec::Vec::&lt;T&gt;::IntoIter::Item::clone`:
+        // * base path is `std::vec::Vec&lt;T&gt;`
+        // * &quot;extensions&quot; are `IntoIter`, `Item` and `clone`
+        // * type nodes are:
+        //   1. `std::vec::Vec&lt;T&gt;` (created above)
+        //   2. `&lt;std::vec::Vec&lt;T&gt;&gt;::IntoIter`
+        //   3. `&lt;&lt;std::vec::Vec&lt;T&gt;&gt;::IntoIter&gt;::Item`
+        // * final path is `&lt;&lt;&lt;std::vec::Vec&lt;T&gt;&gt;::IntoIter&gt;::Item&gt;::clone`
+        </span><span class="kw">for </span>(i, segment) <span class="kw">in </span>p.segments.iter().enumerate().skip(proj_start) {
+            <span class="kw">let </span>hir_segment = <span class="self">self</span>.arena.alloc(<span class="self">self</span>.lower_path_segment(
+                p.span,
+                segment,
+                param_mode,
+                ParenthesizedGenericArgs::Err,
+                itctx,
+            ));
+            <span class="kw">let </span>qpath = hir::QPath::TypeRelative(ty, hir_segment);
+
+            <span class="comment">// It&#39;s finished, return the extension of the right node type.
+            </span><span class="kw">if </span>i == p.segments.len() - <span class="number">1 </span>{
+                <span class="kw">return </span>qpath;
+            }
+
+            <span class="comment">// Wrap the associated extension in another type node.
+            </span><span class="kw">let </span>new_id = <span class="self">self</span>.next_id();
+            ty = <span class="self">self</span>.arena.alloc(<span class="self">self</span>.ty_path(new_id, path_span_lo.to(segment.span()), qpath));
+        }
+
+        <span class="comment">// We should&#39;ve returned in the for loop above.
+
+        </span><span class="self">self</span>.diagnostic().span_bug(
+            p.span,
+            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                <span class="string">&quot;lower_qpath: no final extension segment in {}..{}&quot;</span>,
+                proj_start,
+                p.segments.len()
+            ),
+        );
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lower_path_extra(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        res: <a href="../../rustc_hir/def/enum.Res.html">Res</a>,
+        p: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Path.html">Path</a>,
+        param_mode: <a href="lib.rs.html#457">ParamMode</a>,
+    ) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Path&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <a class="self" href="#146">self</a>.arena.alloc(<a href="../../rustc_hir/hir/struct.Path.html">hir::Path</a> {
+            <a href="#147">res</a>,
+            segments: <a class="self" href="#146">self</a>.arena.alloc_from_iter(<a href="#148">p</a>.segments.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|segment| {
+                <a class="self" href="#146">self</a>.<a href="#177-184">lower_path_segment</a>(
+                    <a href="#148">p</a>.span,
+                    <a href="#153">segment</a>,
+                    <a href="#149">param_mode</a>,
+                    <a href="lib.rs.html#468">ParenthesizedGenericArgs::Err</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#266">ImplTraitPosition::Path</a>),
+                )
+            })),
+            span: <a class="self" href="#146">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#148">p</a>.span),
+        })
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lower_path(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        p: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Path.html">Path</a>,
+        param_mode: <a href="lib.rs.html#457">ParamMode</a>,
+    ) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Path&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>res = <a class="self" href="#167">self</a>.<a href="lib.rs.html#752">expect_full_res</a>(<a href="#168">id</a>);
+        <span class="kw">let </span>res = <a class="self" href="#167">self</a>.<a href="lib.rs.html#735">lower_res</a>(<a href="#172">res</a>);
+        <a class="self" href="#167">self</a>.<a href="#145-150">lower_path_extra</a>(<a href="#173">res</a>, <a href="#169">p</a>, <a href="#170">param_mode</a>)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lower_path_segment(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        path_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        segment: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.PathSegment.html">PathSegment</a>,
+        param_mode: <a href="lib.rs.html#457">ParamMode</a>,
+        parenthesized_generic_args: <a href="lib.rs.html#466">ParenthesizedGenericArgs</a>,
+        itctx: <span class="kw-2">&amp;</span><a href="lib.rs.html#240">ImplTraitContext</a>,
+    ) -&gt; hir::PathSegment&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;path_span: {:?}, lower_path_segment(segment: {:?})&quot;</span>, path_span, segment,);
+        <span class="kw">let </span>(<span class="kw-2">mut </span>generic_args, infer_args) = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>generic_args) = <a href="#180">segment</a>.args {
+            <span class="kw">match </span><span class="kw-2">**</span><a href="#186">generic_args</a> {
+                GenericArgs::AngleBracketed(<span class="kw-2">ref </span>data) =&gt; {
+                    <a class="self" href="#178">self</a>.<a href="#315-320">lower_angle_bracketed_parameter_data</a>(<a href="#188">data</a>, <a href="#181">param_mode</a>, <a href="#183">itctx</a>)
+                }
+                GenericArgs::Parenthesized(<span class="kw-2">ref </span>data) =&gt; <span class="kw">match </span><a href="#182">parenthesized_generic_args</a> {
+                    <a href="lib.rs.html#467">ParenthesizedGenericArgs::Ok</a> =&gt; <a class="self" href="#178">self</a>.<a href="#342-345">lower_parenthesized_parameter_data</a>(<a href="#191">data</a>),
+                    <a href="lib.rs.html#468">ParenthesizedGenericArgs::Err</a> =&gt; {
+                        <span class="comment">// Suggest replacing parentheses with angle brackets `Trait(params...)` to `Trait&lt;params...&gt;`
+                        </span><span class="kw">let </span>sub = <span class="kw">if </span>!data.inputs.is_empty() {
+                            <span class="comment">// Start of the span to the 1st character of 1st argument
+                            </span><span class="kw">let </span>open_param = <a href="#191">data</a>.inputs_span.shrink_to_lo().to(<a href="#191">data</a>
+                                .inputs
+                                .first()
+                                .unwrap()
+                                .span
+                                .shrink_to_lo());
+                            <span class="comment">// Last character position of last argument to the end of the span
+                            </span><span class="kw">let </span>close_param = <a href="#191">data</a>
+                                .inputs
+                                .last()
+                                .unwrap()
+                                .span
+                                .shrink_to_hi()
+                                .to(<a href="#191">data</a>.inputs_span.shrink_to_hi());
+
+                            <span class="prelude-val">Some</span>(<a href="errors.rs.html#16">UseAngleBrackets</a> { <a href="#197">open_param</a>, <a href="#204">close_param</a> })
+                        } <span class="kw">else </span>{
+                            <span class="prelude-val">None
+                        </span>};
+                        <a class="self" href="#178">self</a>.tcx.sess.emit_err(<a href="errors.rs.html#7">GenericTypeWithParentheses</a> { span: <a href="#191">data</a>.span, <a href="#195">sub</a> });
+                        (
+                            <a class="self" href="#178">self</a>.<a href="#315-320">lower_angle_bracketed_parameter_data</a>(
+                                <span class="kw-2">&amp;</span><a href="#191">data</a>.as_angle_bracketed_args(),
+                                <a href="#181">param_mode</a>,
+                                <a href="#183">itctx</a>,
+                            )
+                            .<span class="number">0</span>,
+                            <span class="bool-val">false</span>,
+                        )
+                    }
+                },
+            }
+        } <span class="kw">else </span>{
+            (
+                <a href="lib.rs.html#2566">GenericArgsCtor</a> {
+                    args: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+                    bindings: <span class="kw-2">&amp;</span>[],
+                    parenthesized: <span class="bool-val">false</span>,
+                    span: <a href="#179">path_span</a>.shrink_to_hi(),
+                },
+                <a href="#181">param_mode</a> == <a href="lib.rs.html#463">ParamMode::Optional</a>,
+            )
+        };
+
+        <span class="kw">let </span>has_lifetimes =
+            <a href="#186">generic_args</a>.args.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|arg| <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(arg, GenericArg::Lifetime(<span class="kw">_</span>)));
+        <span class="kw">if </span>!generic_args.parenthesized &amp;&amp; !has_lifetimes {
+            <a class="self" href="#178">self</a>.<a href="#272-278">maybe_insert_elided_lifetimes_in_path</a>(
+                <a href="#179">path_span</a>,
+                <a href="#180">segment</a>.id,
+                <a href="#180">segment</a>.ident.span,
+                <span class="kw-2">&amp;mut </span><a href="#186">generic_args</a>,
+            );
+        }
+
+        <span class="kw">let </span>res = <a class="self" href="#178">self</a>.<a href="lib.rs.html#752">expect_full_res</a>(<a href="#180">segment</a>.id);
+        <span class="kw">let </span>hir_id = <a class="self" href="#178">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#180">segment</a>.id);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;lower_path_segment: ident={:?} original-id={:?} new-id={:?}&quot;</span>,
+            segment.ident, segment.id, hir_id,
+        );
+
+        <a href="../../rustc_hir/hir/struct.PathSegment.html">hir::PathSegment</a> {
+            ident: <a class="self" href="#178">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#180">segment</a>.ident),
+            <a href="#253">hir_id</a>,
+            res: <a class="self" href="#178">self</a>.<a href="lib.rs.html#735">lower_res</a>(<a href="#252">res</a>),
+            <a href="#186">infer_args</a>,
+            args: <span class="kw">if </span>generic_args.is_empty() &amp;&amp; generic_args.span.is_empty() {
+                <span class="prelude-val">None
+            </span>} <span class="kw">else </span>{
+                <span class="prelude-val">Some</span>(<a href="#186">generic_args</a>.<a href="lib.rs.html#2578">into_generic_args</a>(<a class="self" href="#178">self</a>))
+            },
+        }
+    }
+
+    <span class="kw">fn </span>maybe_insert_elided_lifetimes_in_path(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        path_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        segment_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        segment_ident_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        generic_args: <span class="kw-2">&amp;mut </span>GenericArgsCtor&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    ) {
+        <span class="kw">let </span>(start, end) = <span class="kw">match </span><a class="self" href="#273">self</a>.resolver.<a href="lib.rs.html#165">get_lifetime_res</a>(<a href="#275">segment_id</a>) {
+            <span class="prelude-val">Some</span>(<a href="../../rustc_hir/def/enum.LifetimeRes.html">LifetimeRes::ElidedAnchor</a> { start, end }) =&gt; (<a href="#280">start</a>, <a href="#280">end</a>),
+            <span class="prelude-val">None </span>=&gt; <span class="kw">return</span>,
+            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(),
+        };
+        <span class="kw">let </span>expected_lifetimes = <a href="#279">end</a>.as_usize() - <a href="#279">start</a>.as_usize();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(expected_lifetimes);
+
+        <span class="comment">// Note: these spans are used for diagnostics when they can&#39;t be inferred.
+        // See rustc_resolve::late::lifetimes::LifetimeContext::add_missing_lifetime_specifiers_label
+        </span><span class="kw">let </span>elided_lifetime_span = <span class="kw">if </span>generic_args.span.is_empty() {
+            <span class="comment">// If there are no brackets, use the identifier span.
+            // HACK: we use find_ancestor_inside to properly suggest elided spans in paths
+            // originating from macros, since the segment&#39;s span might be from a macro arg.
+            </span><a href="#276">segment_ident_span</a>.find_ancestor_inside(<a href="#274">path_span</a>).unwrap_or(<a href="#274">path_span</a>)
+        } <span class="kw">else if </span>generic_args.is_empty() {
+            <span class="comment">// If there are brackets, but not generic arguments, then use the opening bracket
+            </span><a href="#277">generic_args</a>.span.with_hi(<a href="#277">generic_args</a>.span.lo() + BytePos(<span class="number">1</span>))
+        } <span class="kw">else </span>{
+            <span class="comment">// Else use an empty span right after the opening bracket.
+            </span><a href="#277">generic_args</a>.span.with_lo(<a href="#277">generic_args</a>.span.lo() + BytePos(<span class="number">1</span>)).shrink_to_lo()
+        };
+
+        <a href="#277">generic_args</a>.args.insert_many(
+            <span class="number">0</span>,
+            (<a href="#279">start</a>.as_u32()..<a href="#279">end</a>.as_u32()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|i| {
+                <span class="kw">let </span>id = NodeId::from_u32(<a href="#304">i</a>);
+                <span class="kw">let </span>l = <a class="self" href="#273">self</a>.<a href="lib.rs.html#2098">lower_lifetime</a>(<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Lifetime.html">Lifetime</a> {
+                    <a href="#305">id</a>,
+                    ident: Ident::new(kw::UnderscoreLifetime, <a href="#289">elided_lifetime_span</a>),
+                });
+                GenericArg::Lifetime(<a href="#306">l</a>)
+            }),
+        );
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lower_angle_bracketed_parameter_data(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        data: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.AngleBracketedArgs.html">AngleBracketedArgs</a>,
+        param_mode: <a href="lib.rs.html#457">ParamMode</a>,
+        itctx: <span class="kw-2">&amp;</span><a href="lib.rs.html#240">ImplTraitContext</a>,
+    ) -&gt; (GenericArgsCtor&lt;<span class="lifetime">&#39;hir</span>&gt;, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) {
+        <span class="kw">let </span>has_non_lt_args = <a href="#317">data</a>.args.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|arg| <span class="kw">match </span><a href="#321">arg</a> {
+            AngleBracketedArg::Arg(ast::GenericArg::Lifetime(<span class="kw">_</span>))
+            | AngleBracketedArg::Constraint(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+            AngleBracketedArg::Arg(ast::GenericArg::Type(<span class="kw">_</span>) | ast::GenericArg::Const(<span class="kw">_</span>)) =&gt; <span class="bool-val">true</span>,
+        });
+        <span class="kw">let </span>args = <a href="#317">data</a>
+            .args
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|arg| <span class="kw">match </span><a href="#329">arg</a> {
+                AngleBracketedArg::Arg(arg) =&gt; <span class="prelude-val">Some</span>(<a class="self" href="#316">self</a>.<a href="lib.rs.html#1119">lower_generic_arg</a>(<a href="#330">arg</a>, <a href="#319">itctx</a>)),
+                AngleBracketedArg::Constraint(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="kw">let </span>bindings = <a class="self" href="#316">self</a>.arena.alloc_from_iter(<a href="#317">data</a>.args.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|arg| <span class="kw">match </span><a href="#334">arg</a> {
+            AngleBracketedArg::Constraint(c) =&gt; <span class="prelude-val">Some</span>(<a class="self" href="#316">self</a>.<a href="lib.rs.html#983">lower_assoc_ty_constraint</a>(<a href="#335">c</a>, <a href="#319">itctx</a>)),
+            AngleBracketedArg::Arg(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+        }));
+        <span class="kw">let </span>ctor = <a href="lib.rs.html#2566">GenericArgsCtor</a> { <a href="#326">args</a>, <a href="#334">bindings</a>, parenthesized: <span class="bool-val">false</span>, span: <a href="#317">data</a>.span };
+        (<a href="#338">ctor</a>, !<a href="#321">has_non_lt_args</a> &amp;&amp; <a href="#318">param_mode</a> == <a href="lib.rs.html#463">ParamMode::Optional</a>)
+    }
+
+    <span class="kw">fn </span>lower_parenthesized_parameter_data(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        data: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.ParenthesizedArgs.html">ParenthesizedArgs</a>,
+    ) -&gt; (GenericArgsCtor&lt;<span class="lifetime">&#39;hir</span>&gt;, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) {
+        <span class="comment">// Switch to `PassThrough` mode for anonymous lifetimes; this
+        // means that we permit things like `&amp;Ref&lt;T&gt;`, where `Ref` has
+        // a hidden lifetime parameter. This is needed for backwards
+        // compatibility, even in contexts like an impl header where
+        // we generally don&#39;t permit such things (see #51008).
+        </span><span class="kw">let </span><a href="../../rustc_ast/ast/struct.ParenthesizedArgs.html">ParenthesizedArgs</a> { span, inputs, inputs_span, output } = <a href="#344">data</a>;
+        <span class="kw">let </span>inputs = <a class="self" href="#343">self</a>.arena.alloc_from_iter(<a href="#351">inputs</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|ty| {
+            <a class="self" href="#343">self</a>.<a href="lib.rs.html#1238">lower_ty_direct</a>(<a href="#352">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#276">ImplTraitPosition::FnTraitParam</a>))
+        }));
+        <span class="kw">let </span>output_ty = <span class="kw">match </span><a href="#351">output</a> {
+            FnRetTy::Ty(ty) =&gt; {
+                <a class="self" href="#343">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<span class="kw-2">&amp;</span><a href="#356">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#282">ImplTraitPosition::FnTraitReturn</a>))
+            }
+            FnRetTy::Default(<span class="kw">_</span>) =&gt; <a class="self" href="#343">self</a>.arena.alloc(<a class="self" href="#343">self</a>.<a href="lib.rs.html#1234">ty_tup</a>(<span class="kw-2">*</span><a href="#351">span</a>, <span class="kw-2">&amp;</span>[])),
+        };
+        <span class="kw">let </span>args = <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[GenericArg::Type(<span class="self">self</span>.arena.alloc(<span class="self">self</span>.ty_tup(<span class="kw-2">*</span>inputs_span, inputs)))];
+        <span class="kw">let </span>binding = <a class="self" href="#343">self</a>.<a href="#375-379">output_ty_binding</a>(<a href="#355">output_ty</a>.span, <a href="#355">output_ty</a>);
+        (
+            <a href="lib.rs.html#2566">GenericArgsCtor</a> {
+                <a href="#361">args</a>,
+                bindings: <a class="macro" href="lib.rs.html#76-80">arena_vec!</a>[<span class="self">self</span>; binding],
+                parenthesized: <span class="bool-val">true</span>,
+                span: <a href="#344">data</a>.inputs_span,
+            },
+            <span class="bool-val">false</span>,
+        )
+    }
+
+    <span class="doccomment">/// An associated type binding `Output = $ty`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>output_ty_binding(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Ty&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    ) -&gt; hir::TypeBinding&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>ident = Ident::with_dummy_span(hir::FN_OUTPUT_NAME);
+        <span class="kw">let </span>kind = <a href="../../rustc_hir/hir/enum.TypeBindingKind.html">hir::TypeBindingKind::Equality</a> { term: <a href="#378">ty</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>() };
+        <span class="kw">let </span>args = <a class="macro" href="lib.rs.html#76-80">arena_vec!</a>[<span class="self">self</span>;];
+        <span class="kw">let </span>bindings = <a class="macro" href="lib.rs.html#76-80">arena_vec!</a>[<span class="self">self</span>;];
+        <span class="kw">let </span>gen_args = <a class="self" href="#376">self</a>.arena.alloc(<a href="../../rustc_hir/hir/struct.GenericArgs.html">hir::GenericArgs</a> {
+            <a href="#382">args</a>,
+            <a href="#383">bindings</a>,
+            parenthesized: <span class="bool-val">false</span>,
+            span_ext: <a href="../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>,
+        });
+        <a href="../../rustc_hir/hir/struct.TypeBinding.html">hir::TypeBinding</a> {
+            hir_id: <a class="self" href="#376">self</a>.<a href="lib.rs.html#726">next_id</a>(),
+            <a href="#384">gen_args</a>,
+            span: <a class="self" href="#376">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#377">span</a>),
+            <a href="#380">ident</a>,
+            <a href="#381">kind</a>,
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_ast_lowering" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

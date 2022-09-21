@@ -1,0 +1,1028 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/ty/diagnostics.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>diagnostics.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Diagnostics related methods for `Ty`.
+
+</span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/control_flow/enum.ControlFlow.html">std::ops::ControlFlow</a>;
+
+<span class="kw">use </span><span class="kw">crate</span>::ty::{
+    <a href="visit.rs.html#56">visit::TypeVisitable</a>, <a href="consts.rs.html#25">Const</a>, <a href="consts/kind.rs.html#55">ConstKind</a>, <a href="mod.rs.html#315">DefIdTree</a>, <a href="sty.rs.html#664">ExistentialPredicate</a>, <a href="consts/kind.rs.html#118">InferConst</a>, <a href="../../../rustc_middle/ty/enum.InferTy.html">InferTy</a>,
+    <a href="mod.rs.html#827">PolyTraitPredicate</a>, <a href="mod.rs.html#484">Ty</a>, <a href="context.rs.html#1029">TyCtxt</a>, <a href="visit.rs.html#167">TypeSuperVisitable</a>, <a href="visit.rs.html#180">TypeVisitor</a>,
+};
+
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span>rustc_errors::{<a href="../../../rustc_lint_defs/enum.Applicability.html">Applicability</a>, <a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, <a href="../../../rustc_errors/diagnostic/enum.DiagnosticArgValue.html">DiagnosticArgValue</a>, <a href="../../../rustc_errors/diagnostic/trait.IntoDiagnosticArg.html">IntoDiagnosticArg</a>};
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/hir/enum.WherePredicate.html">rustc_hir::WherePredicate</a>;
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/ty/enum.TyKind.html">rustc_type_ir::sty::TyKind</a>::<span class="kw-2">*</span>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="../../../rustc_errors/diagnostic/trait.IntoDiagnosticArg.html">IntoDiagnosticArg</a> <span class="kw">for </span>Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>into_diagnostic_arg(<span class="self">self</span>) -&gt; DiagnosticArgValue&lt;<span class="lifetime">&#39;static</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}&quot;</span>, <span class="self">self</span>).<a href="../../../rustc_errors/diagnostic/trait.IntoDiagnosticArg.html">into_diagnostic_arg</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Similar to `Ty::is_primitive`, but also considers inferred numeric values to be primitive.
+    </span><span class="kw">pub fn </span>is_primitive_ty(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+            <span class="self">self</span>.kind(),
+            Bool | Char
+                | Str
+                | Int(<span class="kw">_</span>)
+                | Uint(<span class="kw">_</span>)
+                | Float(<span class="kw">_</span>)
+                | Infer(
+                    InferTy::IntVar(<span class="kw">_</span>)
+                        | InferTy::FloatVar(<span class="kw">_</span>)
+                        | InferTy::FreshIntTy(<span class="kw">_</span>)
+                        | InferTy::FreshFloatTy(<span class="kw">_</span>)
+                )
+        )
+    }
+
+    <span class="doccomment">/// Whether the type is succinctly representable as a type instead of just referred to with a
+    /// description in error messages. This is used in the main error message.
+    </span><span class="kw">pub fn </span>is_simple_ty(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a class="self" href="#45">self</a>.<a href="sty.rs.html#1639">kind</a>() {
+            Bool
+            | Char
+            | Str
+            | Int(<span class="kw">_</span>)
+            | Uint(<span class="kw">_</span>)
+            | Float(<span class="kw">_</span>)
+            | Infer(
+                InferTy::IntVar(<span class="kw">_</span>)
+                | InferTy::FloatVar(<span class="kw">_</span>)
+                | InferTy::FreshIntTy(<span class="kw">_</span>)
+                | InferTy::FreshFloatTy(<span class="kw">_</span>),
+            ) =&gt; <span class="bool-val">true</span>,
+            Ref(<span class="kw">_</span>, x, <span class="kw">_</span>) | Array(x, <span class="kw">_</span>) | Slice(x) =&gt; <a href="#59">x</a>.<a href="util.rs.html#1065">peel_refs</a>().<a href="#45">is_simple_ty</a>(),
+            Tuple(tys) <span class="kw">if </span><a href="#60">tys</a>.is_empty() =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="doccomment">/// Whether the type is succinctly representable as a type instead of just referred to with a
+    /// description in error messages. This is used in the primary span label. Beyond what
+    /// `is_simple_ty` includes, it also accepts ADTs with no type arguments and references to
+    /// ADTs with no type arguments.
+    </span><span class="kw">pub fn </span>is_simple_text(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a class="self" href="#69">self</a>.<a href="sty.rs.html#1639">kind</a>() {
+            Adt(<span class="kw">_</span>, substs) =&gt; <a href="#71">substs</a>.<a href="subst.rs.html#360-362">non_erasable_generics</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().is_none(),
+            Ref(<span class="kw">_</span>, ty, <span class="kw">_</span>) =&gt; <a href="#72">ty</a>.<a href="#69">is_simple_text</a>(),
+            <span class="kw">_ </span>=&gt; <a class="self" href="#69">self</a>.<a href="#45">is_simple_ty</a>(),
+        }
+    }
+}
+
+<span class="kw">pub trait </span>IsSuggestable&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Whether this makes sense to suggest in a diagnostic.
+    ///
+    /// We filter out certain types and constants since they don&#39;t provide
+    /// meaningful rendered suggestions when pretty-printed. We leave some
+    /// nonsense, such as region vars, since those render as `&#39;_` and are
+    /// usually okay to reinterpret as elided lifetimes.
+    ///
+    /// Only if `infer_suggestable` is true, we consider type and const
+    /// inference variables to be suggestable.
+    </span><span class="kw">fn </span>is_suggestable(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, infer_suggestable: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, T&gt; IsSuggestable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>T
+<span class="kw">where
+    </span>T: TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">fn </span>is_suggestable(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, infer_suggestable: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#95">self</a>.<a href="visit.rs.html#67">visit_with</a>(<span class="kw-2">&amp;mut </span><a href="#435">IsSuggestableVisitor</a> { <a href="#95">tcx</a>, <a href="#95">infer_suggestable</a> }).is_continue()
+    }
+}
+
+<span class="kw">pub fn </span>suggest_arbitrary_trait_bound&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    generics: <span class="kw-2">&amp;</span>hir::Generics&lt;<span class="lifetime">&#39;_</span>&gt;,
+    err: <span class="kw-2">&amp;mut </span><a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+    trait_pred: PolyTraitPredicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    associated_ty: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">if </span>!trait_pred.is_suggestable(tcx, <span class="bool-val">false</span>) {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="kw">let </span>param_name = <a href="#104">trait_pred</a>.<a href="sty.rs.html#1068">skip_binder</a>().<a href="mod.rs.html#848">self_ty</a>().<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+    <span class="kw">let </span><span class="kw-2">mut </span>constraint = <a href="#104">trait_pred</a>.<a href="print/pretty.rs.html#2461-2463">print_modifiers_and_trait_path</a>().<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>((name, term)) = <a href="#105">associated_ty</a> {
+        <span class="comment">// FIXME: this case overlaps with code in TyCtxt::note_and_explain_type_err.
+        // That should be extracted into a helper function.
+        </span><span class="kw">if </span>constraint.ends_with(<span class="string">&#39;&gt;&#39;</span>) {
+            <a href="#112">constraint</a> = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}, {} = {}&gt;&quot;</span>, <span class="kw-2">&amp;</span>constraint[..constraint.len() - <span class="number">1</span>], name, term);
+        } <span class="kw">else </span>{
+            <a href="#112">constraint</a>.push_str(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;&lt;{} = {}&gt;&quot;</span>, name, term));
+        }
+    }
+
+    <span class="kw">let </span>param = <a href="#102">generics</a>.params.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|p| <a href="#124">p</a>.name.ident().as_str() == <a href="#111">param_name</a>);
+
+    <span class="comment">// Skip, there is a param named Self
+    </span><span class="kw">if </span>param.is_some() &amp;&amp; param_name == <span class="string">&quot;Self&quot; </span>{
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Suggest a where clause bound for a non-type parameter.
+    </span><a href="#103">err</a>.span_suggestion_verbose(
+        <a href="#102">generics</a>.tail_span_for_predicate_suggestion(),
+        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+            <span class="string">&quot;consider {} `where` clause, but there might be an alternative better way to express \
+             this requirement&quot;</span>,
+            <span class="kw">if </span>generics.where_clause_span.is_empty() { <span class="string">&quot;introducing a&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;extending the&quot; </span>},
+        ),
+        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{} {}: {}&quot;</span>, generics.add_where_or_trailing_comma(), param_name, constraint),
+        Applicability::MaybeIncorrect,
+    );
+    <span class="bool-val">true
+</span>}
+
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">enum </span>SuggestChangingConstraintsMessage&lt;<span class="lifetime">&#39;a</span>&gt; {
+    RestrictBoundFurther,
+    RestrictType { ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> },
+    RestrictTypeFurther { ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> },
+    RemovingQSized,
+}
+
+<span class="kw">fn </span>suggest_removing_unsized_bound(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    generics: <span class="kw-2">&amp;</span>hir::Generics&lt;<span class="lifetime">&#39;_</span>&gt;,
+    suggestions: <span class="kw-2">&amp;mut </span>Vec&lt;(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, SuggestChangingConstraintsMessage&lt;<span class="lifetime">&#39;_</span>&gt;)&gt;,
+    param: <span class="kw-2">&amp;</span>hir::GenericParam&lt;<span class="lifetime">&#39;_</span>&gt;,
+    def_id: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+) {
+    <span class="comment">// See if there&#39;s a `?Sized` bound that can be removed to suggest that.
+    // First look at the `where` clause because we can have `where T: ?Sized`,
+    // then look at params.
+    </span><span class="kw">let </span>param_def_id = <a href="#154">tcx</a>.<a href="../hir/mod.rs.html#95">hir</a>().<a href="../hir/map/mod.rs.html#176">local_def_id</a>(<a href="#157">param</a>.hir_id);
+    <span class="kw">for </span>(where_pos, predicate) <span class="kw">in </span>generics.predicates.iter().enumerate() {
+        <span class="kw">let </span>WherePredicate::BoundPredicate(predicate) = predicate <span class="kw">else </span>{
+            <span class="kw">continue</span>;
+        };
+        <span class="kw">if </span>!predicate.is_param_bound(param_def_id.to_def_id()) {
+            <span class="kw">continue</span>;
+        };
+
+        <span class="kw">for </span>(pos, bound) <span class="kw">in </span>predicate.bounds.iter().enumerate() {
+            <span class="kw">let    </span>hir::GenericBound::Trait(poly, hir::TraitBoundModifier::Maybe) = bound <span class="kw">else </span>{
+                <span class="kw">continue</span>;
+            };
+            <span class="kw">if </span>poly.trait_ref.trait_def_id() != def_id {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">let </span>sp = generics.span_for_bound_removal(where_pos, pos);
+            suggestions.push((
+                sp,
+                String::new(),
+                SuggestChangingConstraintsMessage::RemovingQSized,
+            ));
+        }
+    }
+}
+
+<span class="doccomment">/// Suggest restricting a type param with a new bound.
+</span><span class="kw">pub fn </span>suggest_constraining_type_param(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    generics: <span class="kw-2">&amp;</span>hir::Generics&lt;<span class="lifetime">&#39;_</span>&gt;,
+    err: <span class="kw-2">&amp;mut </span><a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+    param_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    constraint: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    def_id: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#207-212">suggest_constraining_type_params</a>(
+        <a href="#191">tcx</a>,
+        <a href="#192">generics</a>,
+        <a href="#193">err</a>,
+        [(<a href="#194">param_name</a>, <a href="#195">constraint</a>, <a href="#196">def_id</a>)].<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>(),
+    )
+}
+
+<span class="doccomment">/// Suggest restricting a type param with a new bound.
+</span><span class="kw">pub fn </span>suggest_constraining_type_params&lt;<span class="lifetime">&#39;a</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    generics: <span class="kw-2">&amp;</span>hir::Generics&lt;<span class="lifetime">&#39;_</span>&gt;,
+    err: <span class="kw-2">&amp;mut </span><a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+    param_names_and_constraints: <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;)&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>grouped = FxHashMap::default();
+    <a href="#211">param_names_and_constraints</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">for_each</a>(|(param_name, constraint, def_id)| {
+        <a href="#213">grouped</a>.entry(<a href="#214">param_name</a>).or_insert(Vec::new()).push((<a href="#214">constraint</a>, <a href="#214">def_id</a>))
+    });
+
+    <span class="kw">let </span><span class="kw-2">mut </span>applicability = Applicability::MachineApplicable;
+    <span class="kw">let </span><span class="kw-2">mut </span>suggestions = Vec::new();
+
+    <span class="kw">for </span>(param_name, <span class="kw-2">mut </span>constraints) <span class="kw">in </span>grouped {
+        <span class="kw">let </span>param = generics.params.iter().find(|p| p.name.ident().as_str() == param_name);
+        <span class="kw">let </span><span class="prelude-val">Some</span>(param) = param <span class="kw">else </span>{ <span class="kw">return </span><span class="bool-val">false </span>};
+
+        {
+            <span class="kw">let </span><span class="kw-2">mut </span>sized_constraints =
+                constraints.drain_filter(|(<span class="kw">_</span>, def_id)| <span class="kw-2">*</span>def_id == tcx.lang_items().sized_trait());
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((constraint, def_id)) = sized_constraints.next() {
+                applicability = Applicability::MaybeIncorrect;
+
+                err.span_label(
+                    param.span,
+                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;this type parameter needs to be `{}`&quot;</span>, constraint),
+                );
+                suggest_removing_unsized_bound(tcx, generics, <span class="kw-2">&amp;mut </span>suggestions, param, def_id);
+            }
+        }
+
+        <span class="kw">if </span>constraints.is_empty() {
+            <span class="kw">continue</span>;
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>constraint = constraints.iter().map(|<span class="kw-2">&amp;</span>(c, <span class="kw">_</span>)| c).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        constraint.sort();
+        constraint.dedup();
+        <span class="kw">let </span>constraint = constraint.join(<span class="string">&quot; + &quot;</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>suggest_restrict = |span, bound_list_non_empty| {
+            suggestions.push((
+                span,
+                <span class="kw">if </span>bound_list_non_empty {
+                    <span class="macro">format!</span>(<span class="string">&quot; + {}&quot;</span>, constraint)
+                } <span class="kw">else </span>{
+                    <span class="macro">format!</span>(<span class="string">&quot; {}&quot;</span>, constraint)
+                },
+                SuggestChangingConstraintsMessage::RestrictBoundFurther,
+            ))
+        };
+
+        <span class="comment">// When the type parameter has been provided bounds
+        //
+        //    Message:
+        //      fn foo&lt;T&gt;(t: T) where T: Foo { ... }
+        //                            ^^^^^^
+        //                            |
+        //                            help: consider further restricting this bound with `+ Bar`
+        //
+        //    Suggestion:
+        //      fn foo&lt;T&gt;(t: T) where T: Foo { ... }
+        //                                  ^
+        //                                  |
+        //                                  replace with: ` + Bar`
+        //
+        // Or, if user has provided some bounds, suggest restricting them:
+        //
+        //   fn foo&lt;T: Foo&gt;(t: T) { ... }
+        //             ---
+        //             |
+        //             help: consider further restricting this bound with `+ Bar`
+        //
+        // Suggestion for tools in this case is:
+        //
+        //   fn foo&lt;T: Foo&gt;(t: T) { ... }
+        //          --
+        //          |
+        //          replace with: `T: Bar +`
+        </span><span class="kw">let </span>param_def_id = tcx.hir().local_def_id(param.hir_id);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(span) = generics.bounds_span_for_suggestions(param_def_id) {
+            suggest_restrict(span, <span class="bool-val">true</span>);
+            <span class="kw">continue</span>;
+        }
+
+        <span class="kw">if </span>generics.has_where_clause_predicates {
+            <span class="comment">// This part is a bit tricky, because using the `where` clause user can
+            // provide zero, one or many bounds for the same type parameter, so we
+            // have following cases to consider:
+            //
+            // When the type parameter has been provided zero bounds
+            //
+            //    Message:
+            //      fn foo&lt;X, Y&gt;(x: X, y: Y) where Y: Foo { ... }
+            //             - help: consider restricting this type parameter with `where X: Bar`
+            //
+            //    Suggestion:
+            //      fn foo&lt;X, Y&gt;(x: X, y: Y) where Y: Foo { ... }
+            //                                           - insert: `, X: Bar`
+            </span>suggestions.push((
+                generics.tail_span_for_predicate_suggestion(),
+                constraints
+                    .iter()
+                    .map(|<span class="kw-2">&amp;</span>(constraint, <span class="kw">_</span>)| <span class="macro">format!</span>(<span class="string">&quot;, {}: {}&quot;</span>, param_name, constraint))
+                    .collect::&lt;String&gt;(),
+                SuggestChangingConstraintsMessage::RestrictTypeFurther { ty: param_name },
+            ));
+            <span class="kw">continue</span>;
+        }
+
+        <span class="comment">// Additionally, there may be no `where` clause but the generic parameter has a default:
+        //
+        //    Message:
+        //      trait Foo&lt;T=()&gt; {... }
+        //                - help: consider further restricting this type parameter with `where T: Zar`
+        //
+        //    Suggestion:
+        //      trait Foo&lt;T=()&gt; {... }
+        //                     - insert: `where T: Zar`
+        </span><span class="kw">if </span><span class="macro">matches!</span>(param.kind, hir::GenericParamKind::Type { default: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. }) {
+            <span class="comment">// Suggest a bound, but there is no existing `where` clause *and* the type param has a
+            // default (`&lt;T=Foo&gt;`), so we suggest adding `where T: Bar`.
+            </span>suggestions.push((
+                generics.tail_span_for_predicate_suggestion(),
+                <span class="macro">format!</span>(<span class="string">&quot; where {}: {}&quot;</span>, param_name, constraint),
+                SuggestChangingConstraintsMessage::RestrictTypeFurther { ty: param_name },
+            ));
+            <span class="kw">continue</span>;
+        }
+
+        <span class="comment">// If user has provided a colon, don&#39;t suggest adding another:
+        //
+        //   fn foo&lt;T:&gt;(t: T) { ... }
+        //            - insert: consider restricting this type parameter with `T: Foo`
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(colon_span) = param.colon_span {
+            suggestions.push((
+                colon_span.shrink_to_hi(),
+                <span class="macro">format!</span>(<span class="string">&quot; {}&quot;</span>, constraint),
+                SuggestChangingConstraintsMessage::RestrictType { ty: param_name },
+            ));
+            <span class="kw">continue</span>;
+        }
+
+        <span class="comment">// If user hasn&#39;t provided any bounds, suggest adding a new one:
+        //
+        //   fn foo&lt;T&gt;(t: T) { ... }
+        //          - help: consider restricting this type parameter with `T: Foo`
+        </span>suggestions.push((
+            param.span.shrink_to_hi(),
+            <span class="macro">format!</span>(<span class="string">&quot;: {}&quot;</span>, constraint),
+            SuggestChangingConstraintsMessage::RestrictType { ty: param_name },
+        ));
+    }
+
+    <span class="kw">if </span>suggestions.len() == <span class="number">1 </span>{
+        <span class="kw">let </span>(span, suggestion, msg) = <a href="#219">suggestions</a>.pop().unwrap();
+
+        <span class="kw">let </span>s;
+        <span class="kw">let </span>msg = <span class="kw">match </span><a href="#362">msg</a> {
+            <a href="#147">SuggestChangingConstraintsMessage::RestrictBoundFurther</a> =&gt; {
+                <span class="string">&quot;consider further restricting this bound&quot;
+            </span>}
+            <a href="#148">SuggestChangingConstraintsMessage::RestrictType</a> { ty } =&gt; {
+                <a href="#364">s</a> = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;consider restricting type parameter `{}`&quot;</span>, ty);
+                <span class="kw-2">&amp;</span><a href="#364">s</a>
+            }
+            <a href="#149">SuggestChangingConstraintsMessage::RestrictTypeFurther</a> { ty } =&gt; {
+                <a href="#364">s</a> = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;consider further restricting type parameter `{}`&quot;</span>, ty);
+                <span class="kw-2">&amp;</span><a href="#364">s</a>
+            }
+            <a href="#150">SuggestChangingConstraintsMessage::RemovingQSized</a> =&gt; {
+                <span class="string">&quot;consider removing the `?Sized` bound to make the type parameter `Sized`&quot;
+            </span>}
+        };
+
+        <a href="#210">err</a>.span_suggestion_verbose(<a href="#362">span</a>, <a href="#365">msg</a>, <a href="#362">suggestion</a>, <a href="#218">applicability</a>);
+    } <span class="kw">else if </span>suggestions.len() &gt; <span class="number">1 </span>{
+        <a href="#210">err</a>.multipart_suggestion_verbose(
+            <span class="string">&quot;consider restricting type parameters&quot;</span>,
+            <a href="#219">suggestions</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(span, suggestion, <span class="kw">_</span>)| (<a href="#386">span</a>, <a href="#386">suggestion</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+            <a href="#218">applicability</a>,
+        );
+    }
+
+    <span class="bool-val">true
+</span>}
+
+<span class="doccomment">/// Collect al types that have an implicit `&#39;static` obligation that we could suggest `&#39;_` for.
+</span><span class="kw">pub struct </span>TraitObjectVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt;(<span class="kw">pub </span>Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, <span class="kw">pub </span><span class="kw">crate</span>::hir::map::Map&lt;<span class="lifetime">&#39;tcx</span>&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;v</span>&gt; hir::intravisit::Visitor&lt;<span class="lifetime">&#39;v</span>&gt; <span class="kw">for </span>TraitObjectVisitor&lt;<span class="lifetime">&#39;v</span>&gt; {
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>hir::Ty&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <span class="kw">match </span><a href="#398">ty</a>.kind {
+            hir::TyKind::TraitObject(
+                <span class="kw">_</span>,
+                <a href="../../../rustc_hir/hir/struct.Lifetime.html">hir::Lifetime</a> {
+                    name:
+                        hir::LifetimeName::ImplicitObjectLifetimeDefault | hir::LifetimeName::Static,
+                    ..
+                },
+                <span class="kw">_</span>,
+            ) =&gt; {
+                <a class="self" href="#398">self</a>.<span class="number">0</span>.push(<a href="#398">ty</a>);
+            }
+            hir::TyKind::OpaqueDef(item_id, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#398">self</a>.<span class="number">0</span>.push(<a href="#398">ty</a>);
+                <span class="kw">let </span>item = <a class="self" href="#398">self</a>.<span class="number">1</span>.<a href="../hir/map/mod.rs.html#359">item</a>(<a href="#411">item_id</a>);
+                hir::intravisit::walk_item(<a class="self" href="#398">self</a>, <a href="#413">item</a>);
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+        hir::intravisit::walk_ty(<a class="self" href="#398">self</a>, <a href="#398">ty</a>);
+    }
+}
+
+<span class="doccomment">/// Collect al types that have an implicit `&#39;static` obligation that we could suggest `&#39;_` for.
+</span><span class="kw">pub struct </span>StaticLifetimeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt;(<span class="kw">pub </span>Vec&lt;<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, <span class="kw">pub </span><span class="kw">crate</span>::hir::map::Map&lt;<span class="lifetime">&#39;tcx</span>&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;v</span>&gt; hir::intravisit::Visitor&lt;<span class="lifetime">&#39;v</span>&gt; <span class="kw">for </span>StaticLifetimeVisitor&lt;<span class="lifetime">&#39;v</span>&gt; {
+    <span class="kw">fn </span>visit_lifetime(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lt: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="../../../rustc_hir/hir/struct.Lifetime.html">hir::Lifetime</a>) {
+        <span class="kw">if let </span>hir::LifetimeName::ImplicitObjectLifetimeDefault | hir::LifetimeName::Static =
+            <a href="#426">lt</a>.name
+        {
+            <a class="self" href="#426">self</a>.<span class="number">0</span>.push(<a href="#426">lt</a>.span);
+        }
+    }
+}
+
+<span class="kw">pub struct </span>IsSuggestableVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    infer_suggestable: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>IsSuggestableVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>BreakTy = ();
+
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">match </span><a href="#443">t</a>.<a href="sty.rs.html#1639">kind</a>() {
+            Infer(InferTy::TyVar(<span class="kw">_</span>)) <span class="kw">if </span><a class="self" href="#443">self</a>.infer_suggestable =&gt; {}
+
+            FnDef(..)
+            | Closure(..)
+            | Infer(..)
+            | Generator(..)
+            | GeneratorWitness(..)
+            | Bound(<span class="kw">_</span>, <span class="kw">_</span>)
+            | Placeholder(<span class="kw">_</span>)
+            | Error(<span class="kw">_</span>) =&gt; {
+                <span class="kw">return </span>ControlFlow::Break(());
+            }
+
+            Opaque(did, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>parent = <a class="self" href="#443">self</a>.tcx.<a href="mod.rs.html#320">parent</a>(<span class="kw-2">*</span><a href="#458">did</a>);
+                <span class="kw">if let </span>hir::def::DefKind::TyAlias | hir::def::DefKind::AssocTy = <a class="self" href="#443">self</a>.tcx.<a href="query.rs.html#375">def_kind</a>(<a href="#459">parent</a>)
+                    &amp;&amp; <span class="kw">let </span>Opaque(parent_did, <span class="kw">_</span>) = <a class="self" href="#443">self</a>.tcx.<a href="query.rs.html#337">type_of</a>(<a href="#459">parent</a>).<a href="sty.rs.html#1639">kind</a>()
+                    &amp;&amp; <a href="#461">parent_did</a> == <a href="#458">did</a>
+                {
+                    <span class="comment">// Okay
+                </span>} <span class="kw">else </span>{
+                    <span class="kw">return </span>ControlFlow::Break(());
+                }
+            }
+
+            Dynamic(dty, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+                <span class="kw">for </span>pred <span class="kw">in </span><span class="kw-2">*</span>dty {
+                    <span class="kw">match </span>pred.skip_binder() {
+                        ExistentialPredicate::Trait(<span class="kw">_</span>) | ExistentialPredicate::Projection(<span class="kw">_</span>) =&gt; {
+                            <span class="comment">// Okay
+                        </span>}
+                        <span class="kw">_ </span>=&gt; <span class="kw">return </span>ControlFlow::Break(()),
+                    }
+                }
+            }
+
+            Param(param) =&gt; {
+                <span class="comment">// FIXME: It would be nice to make this not use string manipulation,
+                // but it&#39;s pretty hard to do this, since `ty::ParamTy` is missing
+                // sufficient info to determine if it is synthetic, and we don&#39;t
+                // always have a convenient way of getting `ty::Generics` at the call
+                // sites we invoke `IsSuggestable::is_suggestable`.
+                </span><span class="kw">if </span>param.name.as_str().starts_with(<span class="string">&quot;impl &quot;</span>) {
+                    <span class="kw">return </span>ControlFlow::Break(());
+                }
+            }
+
+            <span class="kw">_ </span>=&gt; {}
+        }
+
+        <a href="#443">t</a>.<a href="visit.rs.html#174">super_visit_with</a>(<a class="self" href="#443">self</a>)
+    }
+
+    <span class="kw">fn </span>visit_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">match </span><a href="#498">c</a>.<a href="consts.rs.html#53">kind</a>() {
+            <a href="consts/kind.rs.html#60">ConstKind::Infer</a>(<a href="consts/kind.rs.html#120">InferConst::Var</a>(<span class="kw">_</span>)) <span class="kw">if </span><a class="self" href="#498">self</a>.infer_suggestable =&gt; {}
+
+            <a href="consts/kind.rs.html#60">ConstKind::Infer</a>(..)
+            | <a href="consts/kind.rs.html#63">ConstKind::Bound</a>(..)
+            | <a href="consts/kind.rs.html#66">ConstKind::Placeholder</a>(..)
+            | <a href="consts/kind.rs.html#77">ConstKind::Error</a>(..) =&gt; {
+                <span class="kw">return </span>ControlFlow::Break(());
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+
+        <a href="#498">c</a>.<a href="visit.rs.html#174">super_visit_with</a>(<a class="self" href="#498">self</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["compress",""],["dominators",""],["eval","Evaluate the link-eval virtual forest, providing the currently minimum semi value for the passed `node` (which may be itself)."],["is_processed",""]],"struct":[["Dominators",""],["Iter",""],["PreOrderFrame",""],["PreorderIndex",""]]};

@@ -1,0 +1,4 @@
+(function() {var implementors = {};
+implementors["core"] = [];
+implementors["std"] = [{"text":"impl !<a class=\"trait\" href=\"std/marker/trait.Sized.html\" title=\"trait std::marker::Sized\">Sized</a> for <a class=\"struct\" href=\"std/ffi/struct.OsStr.html\" title=\"struct std::ffi::OsStr\">OsStr</a>","synthetic":true,"types":["std::ffi::os_str::OsStr"]},{"text":"impl !<a class=\"trait\" href=\"std/marker/trait.Sized.html\" title=\"trait std::marker::Sized\">Sized</a> for <a class=\"struct\" href=\"std/path/struct.Path.html\" title=\"struct std::path::Path\">Path</a>","synthetic":true,"types":["std::path::Path"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

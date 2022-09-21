@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["escape_to_fmt","Escapes to use as a formatting string."],["expr_addr_of_mut",""],["expr_method_call",""],["expr_paren",""]],"struct":[["Capture","Information about a captured element."],["Context",""]]};

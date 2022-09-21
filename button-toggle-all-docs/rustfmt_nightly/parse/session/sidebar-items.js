@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["default_handler",""],["silent_emitter",""]],"struct":[["ParseSess","ParseSess holds structs necessary for constructing a parser."],["SilentEmitter","Emitter which discards every error."],["SilentOnIgnoredFilesEmitter","Emit errors against every files expect ones specified in the `ignore_path_set`."]]};

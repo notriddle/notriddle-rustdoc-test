@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Compatibility",""],["Error","Similar to `Issue`, but contains some extra information"],["Issue",""]],"struct":[["ArgMatrix",""],["ExpectedIdx",""],["ProvidedIdx",""]]};

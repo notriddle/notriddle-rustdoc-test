@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["EncoderState",""],["GraphEncoder",""],["NodeInfo",""],["SerializedDepGraph","Data for use when recompiling the current crate."],["SerializedDepNodeIndex",""],["Stat",""]]};

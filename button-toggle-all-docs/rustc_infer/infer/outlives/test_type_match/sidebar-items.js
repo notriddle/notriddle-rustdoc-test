@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["can_match_erased_ty","True if a (potentially higher-ranked) outlives"],["extract_verify_if_eq","Given a “verify-if-eq” type test like:"]],"struct":[["Match",""]]};

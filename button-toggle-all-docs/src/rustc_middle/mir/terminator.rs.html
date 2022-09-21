@@ -1,0 +1,898 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/mir/terminator.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>terminator.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../lib.rs.html#95"><span class="kw">crate</span>::mir</a>;
+<span class="kw">use </span><a href="interpret/value.rs.html#113"><span class="kw">crate</span>::mir::interpret::Scalar</a>;
+<span class="kw">use </span><span class="kw">crate</span>::ty::{<a class="self" href="../lib.rs.html#98">self</a>, <a href="../ty/mod.rs.html#484">Ty</a>, <a href="../ty/context.rs.html#1029">TyCtxt</a>};
+<span class="kw">use </span>smallvec::{<a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec</a>, <a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">SmallVec</a>};
+
+<span class="kw">use super</span>::{<a href="mod.rs.html#1014-1042">BasicBlock</a>, <a href="syntax.rs.html#757">InlineAsmOperand</a>, <a href="syntax.rs.html#959">Operand</a>, <a href="mod.rs.html#578">SourceInfo</a>, <a href="syntax.rs.html#492">TerminatorKind</a>};
+<span class="kw">use </span><a href="../../../rustc_ast/ast/enum.InlineAsmTemplatePiece.html">rustc_ast::InlineAsmTemplatePiece</a>;
+<span class="kw">pub use </span><a href="../../../rustc_middle/mir/enum.Mutability.html">rustc_ast::Mutability</a>;
+<span class="kw">use </span><a href="../../../rustc_macros/derive.HashStable.html">rustc_macros::HashStable</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/borrow/enum.Cow.html">std::borrow::Cow</a>;
+<span class="kw">use </span>std::fmt::{<a class="self" href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/core/fmt/macros/derive.Debug.html">Debug</a>, <a href="https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html">Formatter</a>, <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Write.html">Write</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/slice/index.html">std::slice</a>;
+
+<span class="kw">pub use </span><a href="mod.rs.html#58"><span class="kw">super</span>::query</a>::<span class="kw-2">*</span>;
+
+<span class="attribute">#[derive(Debug, Clone, TyEncodable, TyDecodable, Hash, HashStable, PartialEq)]
+</span><span class="kw">pub struct </span>SwitchTargets {
+    <span class="doccomment">/// Possible values. The locations to branch to in each case
+    /// are found in the corresponding indices from the `targets` vector.
+    </span>values: SmallVec&lt;[<a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>; <span class="number">1</span>]&gt;,
+
+    <span class="doccomment">/// Possible branch sites. The last element of this vector is used
+    /// for the otherwise branch, so targets.len() == values.len() + 1
+    /// should hold.
+    </span><span class="comment">//
+    // This invariant is quite non-obvious and also could be improved.
+    // One way to make this invariant is to have something like this instead:
+    //
+    // branches: Vec&lt;(ConstInt, BasicBlock)&gt;,
+    // otherwise: Option&lt;BasicBlock&gt; // exhaustive if None
+    //
+    // However we’ve decided to keep this as-is until we figure a case
+    // where some other approach seems to be strictly better than other.
+    </span>targets: SmallVec&lt;[<a href="mod.rs.html#1014-1042">BasicBlock</a>; <span class="number">2</span>]&gt;,
+}
+
+<span class="kw">impl </span><a href="#18">SwitchTargets</a> {
+    <span class="doccomment">/// Creates switch targets from an iterator of values and target blocks.
+    ///
+    /// The iterator may be empty, in which case the `SwitchInt` instruction is equivalent to
+    /// `goto otherwise;`.
+    </span><span class="kw">pub fn </span>new(targets: <span class="kw">impl </span>Iterator&lt;Item = (<a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>, <a href="mod.rs.html#1014-1042">BasicBlock</a>)&gt;, otherwise: <a href="mod.rs.html#1014-1042">BasicBlock</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>(values, <span class="kw-2">mut </span>targets): (SmallVec&lt;<span class="kw">_</span>&gt;, SmallVec&lt;<span class="kw">_</span>&gt;) = <a href="#43">targets</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">unzip</a>();
+        <a href="#44">targets</a>.push(<a href="#43">otherwise</a>);
+        <span class="self">Self </span>{ <a href="#44">values</a>, <a href="#44">targets</a> }
+    }
+
+    <span class="doccomment">/// Builds a switch targets definition that jumps to `then` if the tested value equals `value`,
+    /// and to `else_` if not.
+    </span><span class="kw">pub fn </span>static_if(value: <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>, then: <a href="mod.rs.html#1014-1042">BasicBlock</a>, else_: <a href="mod.rs.html#1014-1042">BasicBlock</a>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ values: <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[value], targets: <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[then, else_] }
+    }
+
+    <span class="doccomment">/// Returns the fallback target that is jumped to when none of the values match the operand.
+    </span><span class="kw">pub fn </span>otherwise(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="mod.rs.html#1014-1042">BasicBlock</a> {
+        <span class="kw-2">*</span><a class="self" href="#56">self</a>.targets.last().unwrap()
+    }
+
+    <span class="doccomment">/// Returns an iterator over the switch targets.
+    ///
+    /// The iterator will yield tuples containing the value and corresponding target to jump to, not
+    /// including the `otherwise` fallback target.
+    ///
+    /// Note that this may yield 0 elements. Only the `otherwise` branch is mandatory.
+    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; SwitchTargetsIter&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <a href="#87">SwitchTargetsIter</a> { inner: <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<span class="kw-2">&amp;</span><a class="self" href="#66">self</a>.values, <span class="kw-2">&amp;</span><a class="self" href="#66">self</a>.targets) }
+    }
+
+    <span class="doccomment">/// Returns a slice with all possible jump targets (including the fallback target).
+    </span><span class="kw">pub fn </span>all_targets(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<a href="mod.rs.html#1014-1042">BasicBlock</a>] {
+        <span class="kw-2">&amp;</span><a class="self" href="#71">self</a>.targets
+    }
+
+    <span class="kw">pub fn </span>all_targets_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>[<a href="mod.rs.html#1014-1042">BasicBlock</a>] {
+        <span class="kw-2">&amp;mut </span><a class="self" href="#75">self</a>.targets
+    }
+
+    <span class="doccomment">/// Finds the `BasicBlock` to which this `SwitchInt` will branch given the
+    /// specific value.  This cannot fail, as it&#39;ll return the `otherwise`
+    /// branch if there&#39;s not a specific match for the value.
+    </span><span class="kw">pub fn </span>target_for_value(<span class="kw-2">&amp;</span><span class="self">self</span>, value: <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>) -&gt; <a href="mod.rs.html#1014-1042">BasicBlock</a> {
+        <a class="self" href="#82">self</a>.<a href="#66">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find_map</a>(|(v, t)| (<a href="#83">v</a> == <a href="#82">value</a>).then_some(<a href="#83">t</a>)).unwrap_or_else(|| <a class="self" href="#82">self</a>.<a href="#56">otherwise</a>())
+    }
+}
+
+<span class="kw">pub struct </span>SwitchTargetsIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    inner: iter::Zip&lt;slice::Iter&lt;<span class="lifetime">&#39;a</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>&gt;, slice::Iter&lt;<span class="lifetime">&#39;a</span>, <a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">Iterator</a> <span class="kw">for </span>SwitchTargetsIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = (<a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>, <a href="mod.rs.html#1014-1042">BasicBlock</a>);
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <a class="self" href="#94">self</a>.inner.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().map(|(val, bb)| (<span class="kw-2">*</span><a href="#95">val</a>, <span class="kw-2">*</span><a href="#95">bb</a>))
+    }
+
+    <span class="kw">fn </span>size_hint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;) {
+        <a class="self" href="#98">self</a>.inner.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">size_hint</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/iter/traits/exact_size/trait.ExactSizeIterator.html">ExactSizeIterator</a> <span class="kw">for </span>SwitchTargetsIter&lt;<span class="lifetime">&#39;a</span>&gt; {}
+
+<span class="attribute">#[derive(Clone, Debug, TyEncodable, TyDecodable, HashStable, TypeFoldable, TypeVisitable)]
+</span><span class="kw">pub struct </span>Terminator&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>source_info: <a href="mod.rs.html#578">SourceInfo</a>,
+    <span class="kw">pub </span>kind: TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">pub type </span>Successors&lt;<span class="lifetime">&#39;a</span>&gt; = <span class="kw">impl </span>Iterator&lt;Item = <a href="mod.rs.html#1014-1042">BasicBlock</a>&gt; + <span class="lifetime">&#39;a</span>;
+<span class="kw">pub type </span>SuccessorsMut&lt;<span class="lifetime">&#39;a</span>&gt; =
+    iter::Chain&lt;std::option::IntoIter&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;, slice::IterMut&lt;<span class="lifetime">&#39;a</span>, <a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt;;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Terminator&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>successors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Successors&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <a class="self" href="#116">self</a>.kind.<a href="#147">successors</a>()
+    }
+
+    <span class="kw">pub fn </span>successors_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; SuccessorsMut&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <a class="self" href="#120">self</a>.kind.<a href="#189">successors_mut</a>()
+    }
+
+    <span class="kw">pub fn </span>unwind(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt; {
+        <a class="self" href="#124">self</a>.kind.<a href="#227">unwind</a>()
+    }
+
+    <span class="kw">pub fn </span>unwind_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt; {
+        <a class="self" href="#128">self</a>.kind.<a href="#247">unwind_mut</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>if_(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cond: Operand&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        t: <a href="mod.rs.html#1014-1042">BasicBlock</a>,
+        f: <a href="mod.rs.html#1014-1042">BasicBlock</a>,
+    ) -&gt; TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="syntax.rs.html#504">TerminatorKind::SwitchInt</a> {
+            discr: <a href="#136">cond</a>,
+            switch_ty: <a href="#135">tcx</a>.types.bool,
+            targets: SwitchTargets::static_if(<span class="number">0</span>, <a href="#138">f</a>, <a href="#137">t</a>),
+        }
+    }
+
+    <span class="kw">pub fn </span>successors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Successors&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">use </span><a href="syntax.rs.html#492"><span class="self">self</span>::TerminatorKind</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#147">self</a> </span>{
+            <a href="syntax.rs.html#522">Resume</a>
+            | <a href="syntax.rs.html#528">Abort</a>
+            | <a href="syntax.rs.html#682">GeneratorDrop</a>
+            | <a href="syntax.rs.html#541">Return</a>
+            | <a href="syntax.rs.html#546">Unreachable</a>
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. } =&gt; {
+                <span class="prelude-val">None</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>((<span class="kw-2">&amp;</span>[]).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+            }
+            <a href="syntax.rs.html#494">Goto</a> { target: t }
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(t), .. }
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(t), cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#661">Yield</a> { resume: t, drop: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#596">DropAndReplace</a> { target: t, unwind: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#564">Drop</a> { target: t, unwind: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#641">Assert</a> { target: t, cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#705">FalseUnwind</a> { real_target: t, unwind: <span class="prelude-val">None </span>}
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(t), cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(t), .. } =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#159">t</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>((<span class="kw-2">&amp;</span>[]).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+            }
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(t), cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. }
+            | <a href="syntax.rs.html#661">Yield</a> { resume: t, drop: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. }
+            | <a href="syntax.rs.html#596">DropAndReplace</a> { target: t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. }
+            | <a href="syntax.rs.html#564">Drop</a> { target: t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. }
+            | <a href="syntax.rs.html#641">Assert</a> { target: t, cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. }
+            | <a href="syntax.rs.html#705">FalseUnwind</a> { real_target: t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u) }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(t), cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>u), .. } =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#171">t</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(slice::from_ref(<a href="#171">u</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+            }
+            <a href="syntax.rs.html#504">SwitchInt</a> { <span class="kw-2">ref </span>targets, .. } =&gt; {
+                <span class="prelude-val">None</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#180">targets</a>.targets.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+            }
+            <a href="syntax.rs.html#690">FalseEdge</a> { real_target, <span class="kw-2">ref </span>imaginary_target } =&gt; <span class="prelude-val">Some</span>(<a href="#183">real_target</a>)
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(slice::from_ref(<a href="#183">imaginary_target</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()),
+        }
+    }
+
+    <span class="kw">pub fn </span>successors_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; SuccessorsMut&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">use </span><a href="syntax.rs.html#492"><span class="self">self</span>::TerminatorKind</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#189">self</a> </span>{
+            <a href="syntax.rs.html#522">Resume</a>
+            | <a href="syntax.rs.html#528">Abort</a>
+            | <a href="syntax.rs.html#682">GeneratorDrop</a>
+            | <a href="syntax.rs.html#541">Return</a>
+            | <a href="syntax.rs.html#546">Unreachable</a>
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. } =&gt; <span class="prelude-val">None</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<span class="kw-2">&amp;mut </span>[]),
+            <a href="syntax.rs.html#494">Goto</a> { target: <span class="kw-2">ref mut </span>t }
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), .. }
+            | <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#661">Yield</a> { resume: <span class="kw-2">ref mut </span>t, drop: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#596">DropAndReplace</a> { target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#564">Drop</a> { target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#641">Assert</a> { target: <span class="kw-2">ref mut </span>t, cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#705">FalseUnwind</a> { real_target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">None </span>}
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), cleanup: <span class="prelude-val">None</span>, .. }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), .. } =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#199">t</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<span class="kw-2">&amp;mut </span>[])
+            }
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. }
+            | <a href="syntax.rs.html#661">Yield</a> { resume: <span class="kw-2">ref mut </span>t, drop: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. }
+            | <a href="syntax.rs.html#596">DropAndReplace</a> { target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. }
+            | <a href="syntax.rs.html#564">Drop</a> { target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. }
+            | <a href="syntax.rs.html#641">Assert</a> { target: <span class="kw-2">ref mut </span>t, cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. }
+            | <a href="syntax.rs.html#705">FalseUnwind</a> { real_target: <span class="kw-2">ref mut </span>t, unwind: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u) }
+            | <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>t), cleanup: <span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>u), .. } =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#211">t</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(slice::from_mut(<a href="#211">u</a>))
+            }
+            <a href="syntax.rs.html#504">SwitchInt</a> { <span class="kw-2">ref mut </span>targets, .. } =&gt; <span class="prelude-val">None</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<span class="kw-2">&amp;mut </span><a href="#220">targets</a>.targets),
+            <a href="syntax.rs.html#690">FalseEdge</a> { <span class="kw-2">ref mut </span>real_target, <span class="kw-2">ref mut </span>imaginary_target } =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#221">real_target</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(slice::from_mut(<a href="#221">imaginary_target</a>))
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>unwind(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#227">self</a> </span>{
+            <a href="syntax.rs.html#494">TerminatorKind::Goto</a> { .. }
+            | <a href="syntax.rs.html#522">TerminatorKind::Resume</a>
+            | <a href="syntax.rs.html#528">TerminatorKind::Abort</a>
+            | <a href="syntax.rs.html#541">TerminatorKind::Return</a>
+            | <a href="syntax.rs.html#546">TerminatorKind::Unreachable</a>
+            | <a href="syntax.rs.html#682">TerminatorKind::GeneratorDrop</a>
+            | <a href="syntax.rs.html#661">TerminatorKind::Yield</a> { .. }
+            | <a href="syntax.rs.html#504">TerminatorKind::SwitchInt</a> { .. }
+            | <a href="syntax.rs.html#690">TerminatorKind::FalseEdge</a> { .. } =&gt; <span class="prelude-val">None</span>,
+            <a href="syntax.rs.html#613">TerminatorKind::Call</a> { cleanup: <span class="kw-2">ref </span>unwind, .. }
+            | <a href="syntax.rs.html#641">TerminatorKind::Assert</a> { cleanup: <span class="kw-2">ref </span>unwind, .. }
+            | <a href="syntax.rs.html#596">TerminatorKind::DropAndReplace</a> { <span class="kw-2">ref </span>unwind, .. }
+            | <a href="syntax.rs.html#564">TerminatorKind::Drop</a> { <span class="kw-2">ref </span>unwind, .. }
+            | <a href="syntax.rs.html#705">TerminatorKind::FalseUnwind</a> { <span class="kw-2">ref </span>unwind, .. }
+            | <a href="syntax.rs.html#719">TerminatorKind::InlineAsm</a> { cleanup: <span class="kw-2">ref </span>unwind, .. } =&gt; <span class="prelude-val">Some</span>(<a href="#238">unwind</a>),
+        }
+    }
+
+    <span class="kw">pub fn </span>unwind_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#1014-1042">BasicBlock</a>&gt;&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#247">self</a> </span>{
+            <a href="syntax.rs.html#494">TerminatorKind::Goto</a> { .. }
+            | <a href="syntax.rs.html#522">TerminatorKind::Resume</a>
+            | <a href="syntax.rs.html#528">TerminatorKind::Abort</a>
+            | <a href="syntax.rs.html#541">TerminatorKind::Return</a>
+            | <a href="syntax.rs.html#546">TerminatorKind::Unreachable</a>
+            | <a href="syntax.rs.html#682">TerminatorKind::GeneratorDrop</a>
+            | <a href="syntax.rs.html#661">TerminatorKind::Yield</a> { .. }
+            | <a href="syntax.rs.html#504">TerminatorKind::SwitchInt</a> { .. }
+            | <a href="syntax.rs.html#690">TerminatorKind::FalseEdge</a> { .. } =&gt; <span class="prelude-val">None</span>,
+            <a href="syntax.rs.html#613">TerminatorKind::Call</a> { cleanup: <span class="kw-2">ref mut </span>unwind, .. }
+            | <a href="syntax.rs.html#641">TerminatorKind::Assert</a> { cleanup: <span class="kw-2">ref mut </span>unwind, .. }
+            | <a href="syntax.rs.html#596">TerminatorKind::DropAndReplace</a> { <span class="kw-2">ref mut </span>unwind, .. }
+            | <a href="syntax.rs.html#564">TerminatorKind::Drop</a> { <span class="kw-2">ref mut </span>unwind, .. }
+            | <a href="syntax.rs.html#705">TerminatorKind::FalseUnwind</a> { <span class="kw-2">ref mut </span>unwind, .. }
+            | <a href="syntax.rs.html#719">TerminatorKind::InlineAsm</a> { cleanup: <span class="kw-2">ref mut </span>unwind, .. } =&gt; <span class="prelude-val">Some</span>(<a href="#258">unwind</a>),
+        }
+    }
+
+    <span class="kw">pub fn </span>as_switch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span>Operand&lt;<span class="lifetime">&#39;tcx</span>&gt;, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><a href="#18">SwitchTargets</a>)&gt; {
+        <span class="kw">match </span><span class="self"><a href="#267">self</a> </span>{
+            <a href="syntax.rs.html#504">TerminatorKind::SwitchInt</a> { discr, switch_ty, targets } =&gt; {
+                <span class="prelude-val">Some</span>((<a href="#269">discr</a>, <span class="kw-2">*</span><a href="#269">switch_ty</a>, <a href="#269">targets</a>))
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>as_goto(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#1014-1042">BasicBlock</a>&gt; {
+        <span class="kw">match </span><span class="self"><a href="#276">self</a> </span>{
+            <a href="syntax.rs.html#494">TerminatorKind::Goto</a> { target } =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><a href="#278">target</a>),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">Debug</a> <span class="kw">for </span>TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, fmt: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="self">self</span>.fmt_head(fmt)<span class="question-mark">?</span>;
+        <span class="kw">let </span>successor_count = <a class="self" href="#285">self</a>.<a href="#147">successors</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">count</a>();
+        <span class="kw">let </span>labels = <a class="self" href="#285">self</a>.<a href="#401">fmt_successor_labels</a>();
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(successor_count, labels.len());
+
+        <span class="kw">match </span><a href="#287">successor_count</a> {
+            <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(()),
+
+            <span class="number">1 </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#285">fmt</a>, <span class="string">&quot; -&gt; {:?}&quot;</span>, <span class="self">self</span>.successors().next().unwrap()),
+
+            <span class="kw">_ </span>=&gt; {
+                <span class="macro">write!</span>(fmt, <span class="string">&quot; -&gt; [&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">for </span>(i, target) <span class="kw">in </span><span class="self">self</span>.successors().enumerate() {
+                    <span class="kw">if </span>i &gt; <span class="number">0 </span>{
+                        <span class="macro">write!</span>(fmt, <span class="string">&quot;, &quot;</span>)<span class="question-mark">?</span>;
+                    }
+                    <span class="macro">write!</span>(fmt, <span class="string">&quot;{}: {:?}&quot;</span>, labels[i], target)<span class="question-mark">?</span>;
+                }
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#285">fmt</a>, <span class="string">&quot;]&quot;</span>)
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Writes the &quot;head&quot; part of the terminator; that is, its name and the data it uses to pick the
+    /// successor basic block, if any. The only information not included is the list of possible
+    /// successors, which may be rendered differently between the text and the graphviz format.
+    </span><span class="kw">pub fn </span>fmt_head&lt;W: <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Write.html">Write</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, fmt: <span class="kw-2">&amp;mut </span>W) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="syntax.rs.html#492"><span class="self">self</span>::TerminatorKind</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="self"><a href="#314">self</a> </span>{
+            <a href="syntax.rs.html#494">Goto</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;goto&quot;</span>),
+            <a href="syntax.rs.html#504">SwitchInt</a> { discr, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;switchInt({:?})&quot;</span>, discr),
+            <a href="syntax.rs.html#541">Return</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;return&quot;</span>),
+            <a href="syntax.rs.html#682">GeneratorDrop</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;generator_drop&quot;</span>),
+            <a href="syntax.rs.html#522">Resume</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;resume&quot;</span>),
+            <a href="syntax.rs.html#528">Abort</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;abort&quot;</span>),
+            <a href="syntax.rs.html#661">Yield</a> { value, resume_arg, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;{:?} = yield({:?})&quot;</span>, resume_arg, value),
+            <a href="syntax.rs.html#546">Unreachable</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;unreachable&quot;</span>),
+            <a href="syntax.rs.html#564">Drop</a> { place, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;drop({:?})&quot;</span>, place),
+            <a href="syntax.rs.html#596">DropAndReplace</a> { place, value, .. } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;replace({:?} &lt;- {:?})&quot;</span>, place, value)
+            }
+            <a href="syntax.rs.html#613">Call</a> { func, args, destination, .. } =&gt; {
+                <span class="macro">write!</span>(fmt, <span class="string">&quot;{:?} = &quot;</span>, destination)<span class="question-mark">?</span>;
+                <span class="macro">write!</span>(fmt, <span class="string">&quot;{:?}(&quot;</span>, func)<span class="question-mark">?</span>;
+                <span class="kw">for </span>(index, arg) <span class="kw">in </span>args.iter().enumerate() {
+                    <span class="kw">if </span>index &gt; <span class="number">0 </span>{
+                        <span class="macro">write!</span>(fmt, <span class="string">&quot;, &quot;</span>)<span class="question-mark">?</span>;
+                    }
+                    <span class="macro">write!</span>(fmt, <span class="string">&quot;{:?}&quot;</span>, arg)<span class="question-mark">?</span>;
+                }
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;)&quot;</span>)
+            }
+            <a href="syntax.rs.html#641">Assert</a> { cond, expected, msg, .. } =&gt; {
+                <span class="macro">write!</span>(fmt, <span class="string">&quot;assert(&quot;</span>)<span class="question-mark">?</span>;
+                <span class="kw">if </span>!expected {
+                    <span class="macro">write!</span>(fmt, <span class="string">&quot;!&quot;</span>)<span class="question-mark">?</span>;
+                }
+                <span class="macro">write!</span>(fmt, <span class="string">&quot;{:?}, &quot;</span>, cond)<span class="question-mark">?</span>;
+                msg.fmt_assert_args(fmt)<span class="question-mark">?</span>;
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;)&quot;</span>)
+            }
+            <a href="syntax.rs.html#690">FalseEdge</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;falseEdge&quot;</span>),
+            <a href="syntax.rs.html#705">FalseUnwind</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;falseUnwind&quot;</span>),
+            <a href="syntax.rs.html#719">InlineAsm</a> { template, <span class="kw-2">ref </span>operands, options, .. } =&gt; {
+                <span class="macro">write!</span>(fmt, <span class="string">&quot;asm!(\&quot;{}\&quot;&quot;</span>, InlineAsmTemplatePiece::to_string(template))<span class="question-mark">?</span>;
+                <span class="kw">for </span>op <span class="kw">in </span>operands {
+                    <span class="macro">write!</span>(fmt, <span class="string">&quot;, &quot;</span>)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>print_late = |<span class="kw-2">&amp;</span>late| <span class="kw">if </span>late { <span class="string">&quot;late&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;&quot; </span>};
+                    <span class="kw">match </span>op {
+                        InlineAsmOperand::In { reg, value } =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;in({}) {:?}&quot;</span>, reg, value)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::Out { reg, late, place: <span class="prelude-val">Some</span>(place) } =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;{}out({}) {:?}&quot;</span>, print_late(late), reg, place)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::Out { reg, late, place: <span class="prelude-val">None </span>} =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;{}out({}) _&quot;</span>, print_late(late), reg)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::InOut {
+                            reg,
+                            late,
+                            in_value,
+                            out_place: <span class="prelude-val">Some</span>(out_place),
+                        } =&gt; {
+                            <span class="macro">write!</span>(
+                                fmt,
+                                <span class="string">&quot;in{}out({}) {:?} =&gt; {:?}&quot;</span>,
+                                print_late(late),
+                                reg,
+                                in_value,
+                                out_place
+                            )<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::InOut { reg, late, in_value, out_place: <span class="prelude-val">None </span>} =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;in{}out({}) {:?} =&gt; _&quot;</span>, print_late(late), reg, in_value)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::Const { value } =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;const {:?}&quot;</span>, value)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::SymFn { value } =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;sym_fn {:?}&quot;</span>, value)<span class="question-mark">?</span>;
+                        }
+                        InlineAsmOperand::SymStatic { def_id } =&gt; {
+                            <span class="macro">write!</span>(fmt, <span class="string">&quot;sym_static {:?}&quot;</span>, def_id)<span class="question-mark">?</span>;
+                        }
+                    }
+                }
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#314">fmt</a>, <span class="string">&quot;, options({:?}))&quot;</span>, options)
+            }
+        }
+    }
+
+    <span class="doccomment">/// Returns the list of labels for the edges to the successor basic blocks.
+    </span><span class="kw">pub fn </span>fmt_successor_labels(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;Cow&lt;<span class="lifetime">&#39;static</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;&gt; {
+        <span class="kw">use </span><a href="syntax.rs.html#492"><span class="self">self</span>::TerminatorKind</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#401">self</a> </span>{
+            <a href="syntax.rs.html#541">Return</a> | <a href="syntax.rs.html#522">Resume</a> | <a href="syntax.rs.html#528">Abort</a> | <a href="syntax.rs.html#546">Unreachable</a> | <a href="syntax.rs.html#682">GeneratorDrop</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            <a href="syntax.rs.html#494">Goto</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;&quot;</span>.into()],
+            <a href="syntax.rs.html#504">SwitchInt</a> { <span class="kw-2">ref </span>targets, switch_ty, .. } =&gt; <a href="../ty/context.rs.html#1981-1983">ty::tls::with</a>(|tcx| {
+                <span class="kw">let </span>param_env = ty::ParamEnv::empty();
+                <span class="kw">let </span>switch_ty = <a href="#406">tcx</a>.<a href="../ty/context.rs.html#1222">lift</a>(<a href="#406">switch_ty</a>).unwrap();
+                <span class="kw">let </span>size = <a href="#406">tcx</a>.<a href="../ty/query.rs.html#337">layout_of</a>(<a href="#407">param_env</a>.<a href="../ty/mod.rs.html#1660">and</a>(<a href="#408">switch_ty</a>)).unwrap().size;
+                <a href="#406">targets</a>
+                    .values
+                    .iter()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>u| {
+                        mir::ConstantKind::from_scalar(<a href="#406">tcx</a>, Scalar::from_uint(<a href="#413">u</a>, <a href="#409">size</a>), <a href="#408">switch_ty</a>)
+                            .<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+                            .<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+                    })
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="https://doc.rust-lang.org/nightly/core/iter/sources/once/fn.once.html">iter::once</a>(<span class="string">&quot;otherwise&quot;</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()))
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+            }),
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(<span class="kw">_</span>), cleanup: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into(), <span class="string">&quot;unwind&quot;</span>.into()]
+            }
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">Some</span>(<span class="kw">_</span>), cleanup: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into()],
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;unwind&quot;</span>.into()],
+            <a href="syntax.rs.html#613">Call</a> { target: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+            <a href="syntax.rs.html#661">Yield</a> { drop: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;resume&quot;</span>.into(), <span class="string">&quot;drop&quot;</span>.into()],
+            <a href="syntax.rs.html#661">Yield</a> { drop: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;resume&quot;</span>.into()],
+            <a href="syntax.rs.html#596">DropAndReplace</a> { unwind: <span class="prelude-val">None</span>, .. } | <a href="syntax.rs.html#564">Drop</a> { unwind: <span class="prelude-val">None</span>, .. } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into()]
+            }
+            <a href="syntax.rs.html#596">DropAndReplace</a> { unwind: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } | <a href="syntax.rs.html#564">Drop</a> { unwind: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into(), <span class="string">&quot;unwind&quot;</span>.into()]
+            }
+            <a href="syntax.rs.html#641">Assert</a> { cleanup: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;&quot;</span>.into()],
+            <a href="syntax.rs.html#641">Assert</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;success&quot;</span>.into(), <span class="string">&quot;unwind&quot;</span>.into()],
+            <a href="syntax.rs.html#690">FalseEdge</a> { .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;real&quot;</span>.into(), <span class="string">&quot;imaginary&quot;</span>.into()],
+            <a href="syntax.rs.html#705">FalseUnwind</a> { unwind: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;real&quot;</span>.into(), <span class="string">&quot;cleanup&quot;</span>.into()],
+            <a href="syntax.rs.html#705">FalseUnwind</a> { unwind: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;real&quot;</span>.into()],
+            <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(<span class="kw">_</span>), cleanup: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into(), <span class="string">&quot;unwind&quot;</span>.into()]
+            }
+            <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">Some</span>(<span class="kw">_</span>), cleanup: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;return&quot;</span>.into()],
+            <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">Some</span>(<span class="kw">_</span>), .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="string">&quot;unwind&quot;</span>.into()],
+            <a href="syntax.rs.html#719">InlineAsm</a> { destination: <span class="prelude-val">None</span>, cleanup: <span class="prelude-val">None</span>, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

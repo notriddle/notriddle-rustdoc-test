@@ -1,0 +1,2004 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/helpers.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>helpers.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../miri/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+</pre><pre class="rust"><code><span class="kw">pub mod </span><a href="helpers/convert.rs.html#1-49">convert</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/mem/index.html">std::mem</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/num/nonzero/struct.NonZeroUsize.html">std::num::NonZeroUsize</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/time/struct.Duration.html">std::time::Duration</a>;
+
+<span class="kw">use </span><a href="https://docs.rs/log/0.4.14/log/macro.trace.html">log::trace</a>;
+
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../rustc_span/def_id/constant.CRATE_DEF_INDEX.html">CRATE_DEF_INDEX</a>};
+<span class="kw">use </span><a href="../../rustc_middle/mir/index.html">rustc_middle::mir</a>;
+<span class="kw">use </span>rustc_middle::ty::{
+    <a class="self" href="../../rustc_middle/ty/index.html">self</a>,
+    layout::{<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">LayoutOf</a>, <a href="../../rustc_middle/ty/layout/type.TyAndLayout.html">TyAndLayout</a>},
+    <a href="../../rustc_middle/ty/list/struct.List.html">List</a>, <a href="../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>,
+};
+<span class="kw">use </span>rustc_span::{<a href="../../rustc_span/def_id/struct.CrateNum.html">def_id::CrateNum</a>, <a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_target::abi::{<a href="../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../rustc_target/abi/enum.FieldsShape.html">FieldsShape</a>, <a href="../../rustc_target/abi/struct.Size.html">Size</a>, <a href="../../rustc_target/abi/enum.Variants.html">Variants</a>};
+<span class="kw">use </span><a href="../../rustc_target/spec/abi/enum.Abi.html">rustc_target::spec::abi::Abi</a>;
+
+<span class="kw">use </span><a href="https://rust-random.github.io/rand/rand_core/trait.RngCore.html">rand::RngCore</a>;
+
+<span class="kw">use crate</span>::<span class="kw-2">*</span>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw">crate</span>::MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {}
+
+<span class="comment">// This mapping should match `decode_error_kind` in
+// &lt;https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/mod.rs&gt;.
+</span><span class="kw">const </span>UNIX_IO_ERROR_TABLE: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, <a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>)] = {
+    <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>::<span class="kw-2">*</span>;
+    <span class="kw-2">&amp;</span>[
+        (<span class="string">&quot;E2BIG&quot;</span>, ArgumentListTooLong),
+        (<span class="string">&quot;EADDRINUSE&quot;</span>, AddrInUse),
+        (<span class="string">&quot;EADDRNOTAVAIL&quot;</span>, AddrNotAvailable),
+        (<span class="string">&quot;EBUSY&quot;</span>, ResourceBusy),
+        (<span class="string">&quot;ECONNABORTED&quot;</span>, ConnectionAborted),
+        (<span class="string">&quot;ECONNREFUSED&quot;</span>, ConnectionRefused),
+        (<span class="string">&quot;ECONNRESET&quot;</span>, ConnectionReset),
+        (<span class="string">&quot;EDEADLK&quot;</span>, Deadlock),
+        (<span class="string">&quot;EDQUOT&quot;</span>, FilesystemQuotaExceeded),
+        (<span class="string">&quot;EEXIST&quot;</span>, AlreadyExists),
+        (<span class="string">&quot;EFBIG&quot;</span>, FileTooLarge),
+        (<span class="string">&quot;EHOSTUNREACH&quot;</span>, HostUnreachable),
+        (<span class="string">&quot;EINTR&quot;</span>, Interrupted),
+        (<span class="string">&quot;EINVAL&quot;</span>, InvalidInput),
+        (<span class="string">&quot;EISDIR&quot;</span>, IsADirectory),
+        (<span class="string">&quot;ELOOP&quot;</span>, FilesystemLoop),
+        (<span class="string">&quot;ENOENT&quot;</span>, NotFound),
+        (<span class="string">&quot;ENOMEM&quot;</span>, OutOfMemory),
+        (<span class="string">&quot;ENOSPC&quot;</span>, StorageFull),
+        (<span class="string">&quot;ENOSYS&quot;</span>, Unsupported),
+        (<span class="string">&quot;EMLINK&quot;</span>, TooManyLinks),
+        (<span class="string">&quot;ENAMETOOLONG&quot;</span>, InvalidFilename),
+        (<span class="string">&quot;ENETDOWN&quot;</span>, NetworkDown),
+        (<span class="string">&quot;ENETUNREACH&quot;</span>, NetworkUnreachable),
+        (<span class="string">&quot;ENOTCONN&quot;</span>, NotConnected),
+        (<span class="string">&quot;ENOTDIR&quot;</span>, NotADirectory),
+        (<span class="string">&quot;ENOTEMPTY&quot;</span>, DirectoryNotEmpty),
+        (<span class="string">&quot;EPIPE&quot;</span>, BrokenPipe),
+        (<span class="string">&quot;EROFS&quot;</span>, ReadOnlyFilesystem),
+        (<span class="string">&quot;ESPIPE&quot;</span>, NotSeekable),
+        (<span class="string">&quot;ESTALE&quot;</span>, StaleNetworkFileHandle),
+        (<span class="string">&quot;ETIMEDOUT&quot;</span>, TimedOut),
+        (<span class="string">&quot;ETXTBSY&quot;</span>, ExecutableFileBusy),
+        (<span class="string">&quot;EXDEV&quot;</span>, CrossesDevices),
+        <span class="comment">// The following have two valid options. We have both for the forwards mapping; only the
+        // first one will be used for the backwards mapping.
+        </span>(<span class="string">&quot;EPERM&quot;</span>, PermissionDenied),
+        (<span class="string">&quot;EACCES&quot;</span>, PermissionDenied),
+        (<span class="string">&quot;EWOULDBLOCK&quot;</span>, WouldBlock),
+        (<span class="string">&quot;EAGAIN&quot;</span>, WouldBlock),
+    ]
+};
+
+<span class="doccomment">/// Gets an instance for a path.
+</span><span class="kw">fn </span>try_resolve_did&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, path: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>]) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; {
+    <a href="#75">tcx</a>.crates(()).iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|&amp;&amp;krate| <a href="#75">tcx</a>.crate_name(<a href="#76">krate</a>).as_str() == <a href="#75">path</a>[<span class="number">0</span>]).and_then(
+        |krate| {
+            <span class="kw">let </span>krate = <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a> { krate: <span class="kw-2">*</span><a href="#77">krate</a>, index: <a href="../../rustc_span/def_id/constant.CRATE_DEF_INDEX.html">CRATE_DEF_INDEX</a> };
+            <span class="kw">let </span><span class="kw-2">mut </span>items = <a href="#75">tcx</a>.module_children(<a href="#78">krate</a>);
+            <span class="kw">let </span><span class="kw-2">mut </span>path_it = <a href="#75">path</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">skip</a>(<span class="number">1</span>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">peekable</a>();
+
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(segment) = path_it.next() {
+                <span class="kw">for </span>item <span class="kw">in </span>mem::take(<span class="kw-2">&amp;mut </span>items).iter() {
+                    <span class="kw">if </span>item.ident.name.as_str() == <span class="kw-2">*</span>segment {
+                        <span class="kw">if </span>path_it.peek().is_none() {
+                            <span class="kw">return </span><span class="prelude-val">Some</span>(item.res.def_id());
+                        }
+
+                        items = tcx.module_children(item.res.def_id());
+                        <span class="kw">break</span>;
+                    }
+                }
+            }
+            <span class="prelude-val">None
+        </span>},
+    )
+}
+
+<span class="kw">pub trait </span>EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt;: <span class="kw">crate</span>::MiriEvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Gets an instance for a path; fails gracefully if the path does not exist.
+    </span><span class="kw">fn </span>try_resolve_path(<span class="kw-2">&amp;</span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>]) -&gt; <span class="prelude-ty">Option</span>&lt;ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>did = try_resolve_did(<span class="self">self</span>.eval_context_ref().tcx.tcx, path)<span class="question-mark">?</span>;
+        <span class="prelude-val">Some</span>(ty::Instance::mono(<a class="self" href="#101">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>().tcx.tcx, <a href="#102">did</a>))
+    }
+
+    <span class="doccomment">/// Gets an instance for a path.
+    </span><span class="kw">fn </span>resolve_path(<span class="kw-2">&amp;</span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>]) -&gt; ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#107">self</a>.<a href="#101">try_resolve_path</a>(<a href="#107">path</a>)
+            .unwrap_or_else(|| <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;failed to find required Rust item: {:?}&quot;</span>, path))
+    }
+
+    <span class="doccomment">/// Evaluates the scalar at the specified path. Returns Some(val)
+    /// if the path could be resolved, and None otherwise
+    </span><span class="kw">fn </span>eval_path_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>]) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#114">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>instance = <a href="#115">this</a>.<a href="#107">resolve_path</a>(<a href="#114">path</a>);
+        <span class="kw">let </span>cid = <a href="../../miri/struct.GlobalId.html">GlobalId</a> { <a href="#116">instance</a>, promoted: <span class="prelude-val">None </span>};
+        <span class="kw">let </span>const_val = this.eval_to_allocation(cid)<span class="question-mark">?</span>;
+        <a href="#115">this</a>.read_scalar(<span class="kw-2">&amp;</span><a href="#118">const_val</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+    }
+
+    <span class="doccomment">/// Helper function to get a `libc` constant as a `Scalar`.
+    </span><span class="kw">fn </span>eval_libc(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <a class="self" href="#123">self</a>.<a href="#114">eval_path_scalar</a>(<span class="kw-2">&amp;</span>[<span class="string">&quot;libc&quot;</span>, <a href="#123">name</a>])
+    }
+
+    <span class="doccomment">/// Helper function to get a `libc` constant as an `i32`.
+    </span><span class="kw">fn </span>eval_libc_i32(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.i32.html">i32</a>&gt; {
+        <span class="comment">// TODO: Cache the result.
+        </span><span class="self">self</span>.eval_libc(name)<span class="question-mark">?</span>.to_i32()
+    }
+
+    <span class="doccomment">/// Helper function to get a `windows` constant as a `Scalar`.
+    </span><span class="kw">fn </span>eval_windows(<span class="kw-2">&amp;</span><span class="self">self</span>, module: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <a class="self" href="#134">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>().<a href="#114">eval_path_scalar</a>(<span class="kw-2">&amp;</span>[<span class="string">&quot;std&quot;</span>, <span class="string">&quot;sys&quot;</span>, <span class="string">&quot;windows&quot;</span>, <a href="#134">module</a>, <a href="#134">name</a>])
+    }
+
+    <span class="doccomment">/// Helper function to get a `windows` constant as a `u64`.
+    </span><span class="kw">fn </span>eval_windows_u64(<span class="kw-2">&amp;</span><span class="self">self</span>, module: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt; {
+        <span class="comment">// TODO: Cache the result.
+        </span><span class="self">self</span>.eval_windows(module, name)<span class="question-mark">?</span>.to_u64()
+    }
+
+    <span class="doccomment">/// Helper function to get the `TyAndLayout` of a `libc` type
+    </span><span class="kw">fn </span>libc_ty_layout(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#145">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>ty = <a href="#146">this</a>.<a href="#107">resolve_path</a>(<span class="kw-2">&amp;</span>[<span class="string">&quot;libc&quot;</span>, <a href="#145">name</a>]).ty(<span class="kw-2">*</span><a href="#146">this</a>.tcx, ty::ParamEnv::reveal_all());
+        <a href="#146">this</a>.<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#147">ty</a>)
+    }
+
+    <span class="doccomment">/// Helper function to get the `TyAndLayout` of a `windows` type
+    </span><span class="kw">fn </span>windows_ty_layout(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#152">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>ty = <a href="#153">this</a>
+            .<a href="#107">resolve_path</a>(<span class="kw-2">&amp;</span>[<span class="string">&quot;std&quot;</span>, <span class="string">&quot;sys&quot;</span>, <span class="string">&quot;windows&quot;</span>, <span class="string">&quot;c&quot;</span>, <a href="#152">name</a>])
+            .ty(<span class="kw-2">*</span><a href="#153">this</a>.tcx, ty::ParamEnv::reveal_all());
+        <a href="#153">this</a>.<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#154">ty</a>)
+    }
+
+    <span class="doccomment">/// Project to the given *named* field of the mplace (which must be a struct or union type).
+    </span><span class="kw">fn </span>mplace_field_named(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#162">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>adt = <a href="#163">mplace</a>.layout.ty.ty_adt_def().unwrap();
+        <span class="kw">for </span>(idx, field) <span class="kw">in </span>adt.non_enum_variant().fields.iter().enumerate() {
+            <span class="kw">if </span>field.name.as_str() == name {
+                <span class="kw">return </span>this.mplace_field(mplace, idx);
+            }
+        }
+        <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;No field named {} in type {}&quot;</span>, name, mplace.layout.ty);
+    }
+
+    <span class="doccomment">/// Write an int of the appropriate size to `dest`. The target type may be signed or unsigned,
+    /// we try to do the right thing anyway. `i128` can fit all integer types except for `u128` so
+    /// this method is fine for almost all integer types.
+    </span><span class="kw">fn </span>write_int(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        i: <span class="kw">impl </span>Into&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.i128.html">i128</a>&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(dest.layout.abi.is_scalar(), <span class="string">&quot;write_int on non-scalar type {}&quot;</span>, dest.layout.ty);
+        <span class="kw">let </span>val = <span class="kw">if </span>dest.layout.abi.is_signed() {
+            Scalar::from_int(<a href="#181">i</a>, <a href="#182">dest</a>.layout.size)
+        } <span class="kw">else </span>{
+            Scalar::from_uint(u64::try_from(<a href="#181">i</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()).unwrap(), <a href="#182">dest</a>.layout.size)
+        };
+        <a class="self" href="#180">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>().write_scalar(<a href="#185">val</a>, <a href="#182">dest</a>)
+    }
+
+    <span class="doccomment">/// Write the first N fields of the given place.
+    </span><span class="kw">fn </span>write_int_fields(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        values: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.i128.html">i128</a>],
+        dest: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#195">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">for </span>(idx, <span class="kw-2">&amp;</span>val) <span class="kw">in </span>values.iter().enumerate() {
+            <span class="kw">let </span>field = this.mplace_field(dest, idx)<span class="question-mark">?</span>;
+            this.write_int(val, <span class="kw-2">&amp;</span>field.into())<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Write the given fields of the given place.
+    </span><span class="kw">fn </span>write_int_fields_named(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        values: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.i128.html">i128</a>)],
+        dest: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#209">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">for </span><span class="kw-2">&amp;</span>(name, val) <span class="kw">in </span>values.iter() {
+            <span class="kw">let </span>field = this.mplace_field_named(dest, name)<span class="question-mark">?</span>;
+            this.write_int(val, <span class="kw-2">&amp;</span>field.into())<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Write a 0 of the appropriate size to `dest`.
+    </span><span class="kw">fn </span>write_null(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#222">self</a>.<a href="#179-183">write_int</a>(<span class="number">0</span>, <a href="#222">dest</a>)
+    }
+
+    <span class="doccomment">/// Test if this pointer equals 0.
+    </span><span class="kw">fn </span>ptr_is_null(<span class="kw-2">&amp;</span><span class="self">self</span>, ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt; {
+        <span class="prelude-val">Ok</span>(<a href="#227">ptr</a>.addr().bytes() == <span class="number">0</span>)
+    }
+
+    <span class="doccomment">/// Get the `Place` for a local
+    </span><span class="kw">fn </span>local_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <a href="../../rustc_middle/mir/struct.Local.html">mir::Local</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#232">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>place = <a href="../../rustc_middle/mir/syntax/struct.Place.html">mir::Place</a> { <a href="#232">local</a>, projection: List::empty() };
+        <a href="#233">this</a>.eval_place(<a href="#234">place</a>)
+    }
+
+    <span class="doccomment">/// Generate some random bytes, and write them to `dest`.
+    </span><span class="kw">fn </span>gen_random(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;, len: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Some programs pass in a null pointer and a length of 0
+        // to their platform&#39;s random-generation function (e.g. getrandom())
+        // on Linux. For compatibility with these programs, we don&#39;t perform
+        // any additional checks - it&#39;s okay if the pointer is invalid,
+        // since we wouldn&#39;t actually be writing to it.
+        </span><span class="kw">if </span>len == <span class="number">0 </span>{
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+        <span class="kw">let </span>this = <a class="self" href="#239">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>data = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[<span class="number">0</span>; usize::try_from(len).unwrap()];
+
+        <span class="kw">if </span>this.machine.communicate() {
+            <span class="comment">// Fill the buffer using the host&#39;s rng.
+            </span>getrandom::getrandom(<span class="kw-2">&amp;mut </span>data)
+                .map_err(|err| <span class="macro">err_unsup_format!</span>(<span class="string">&quot;host getrandom failed: {}&quot;</span>, err))<span class="question-mark">?</span>;
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>rng = <a href="#248">this</a>.machine.rng.get_mut();
+            <a href="#257">rng</a>.<a href="https://rust-random.github.io/rand/rand_core/trait.RngCore.html">fill_bytes</a>(<span class="kw-2">&amp;mut </span><a href="#250">data</a>);
+        }
+
+        <a href="#248">this</a>.write_bytes_ptr(<a href="#239">ptr</a>, <a href="#250">data</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+    }
+
+    <span class="doccomment">/// Call a function: Push the stack frame and pass the arguments.
+    /// For now, arguments must be scalars (so that the caller does not have to know the layout).
+    ///
+    /// If you do not provie a return place, a dangling zero-sized place will be created
+    /// for your convenience.
+    </span><span class="kw">fn </span>call_function(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        f: ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        caller_abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        args: <span class="kw-2">&amp;</span>[Immediate&lt;<a href="machine.rs.html#130">Provenance</a>&gt;],
+        dest: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt;,
+        stack_pop: <a href="../../miri/enum.StackPopCleanup.html">StackPopCleanup</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#270">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>param_env = ty::ParamEnv::reveal_all(); <span class="comment">// in Miri this is always the param_env we use... and this.param_env is private.
+        </span><span class="kw">let </span>callee_abi = <a href="#271">f</a>.ty(<span class="kw-2">*</span><a href="#277">this</a>.tcx, <a href="#278">param_env</a>).fn_sig(<span class="kw-2">*</span><a href="#277">this</a>.tcx).abi();
+        <span class="kw">if </span>this.machine.enforce_abi &amp;&amp; callee_abi != caller_abi {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(
+                <span class="string">&quot;calling a function with ABI {} using caller ABI {}&quot;</span>,
+                callee_abi.name(),
+                caller_abi.name()
+            )
+        }
+
+        <span class="comment">// Push frame.
+        </span><span class="kw">let </span>mir = this.load_mir(f.def, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>dest = <span class="kw">match </span><a href="#274">dest</a> {
+            <span class="prelude-val">Some</span>(dest) =&gt; <a href="#291">dest</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+            <span class="prelude-val">None </span>=&gt; MPlaceTy::fake_alloc_zst(this.layout_of(mir.return_ty())<span class="question-mark">?</span>).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+        };
+        this.push_stack_frame(f, mir, <span class="kw-2">&amp;</span>dest, stack_pop)<span class="question-mark">?</span>;
+
+        <span class="comment">// Initialize arguments.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>callee_args = <a href="#277">this</a>.frame().body.args_iter();
+        <span class="kw">for </span>arg <span class="kw">in </span>args {
+            <span class="kw">let </span>callee_arg = this.local_place(
+                callee_args
+                    .next()
+                    .ok_or_else(|| <span class="macro">err_ub_format!</span>(<span class="string">&quot;callee has fewer arguments than expected&quot;</span>))<span class="question-mark">?</span>,
+            )<span class="question-mark">?</span>;
+            this.write_immediate(<span class="kw-2">*</span>arg, <span class="kw-2">&amp;</span>callee_arg)<span class="question-mark">?</span>;
+        }
+        <span class="kw">if </span>callee_args.next().is_some() {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;callee has more arguments than expected&quot;</span>);
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Visits the memory covered by `place`, sensitive to freezing: the 2nd parameter
+    /// of `action` will be true if this is frozen, false if this is in an `UnsafeCell`.
+    /// The range is relative to `place`.
+    </span><span class="kw">fn </span>visit_freeze_sensitive(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        size: <a href="../../rustc_target/abi/struct.Size.html">Size</a>,
+        <span class="kw-2">mut </span>action: <span class="kw">impl </span>FnMut(<a href="../../miri/struct.AllocRange.html">AllocRange</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#317">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;visit_frozen(place={:?}, size={:?})&quot;</span>, <span class="kw-2">*</span>place, size);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(
+            size,
+            this.size_and_align_of_mplace(place)<span class="question-mark">?
+                </span>.map(|(size, <span class="kw">_</span>)| size)
+                .unwrap_or_else(|| place.layout.size)
+        );
+        <span class="comment">// Store how far we proceeded into the place so far. Everything to the left of
+        // this offset has already been handled, in the sense that the frozen parts
+        // have had `action` called on them.
+        </span><span class="kw">let </span>start_addr = <a href="#318">place</a>.ptr.addr();
+        <span class="kw">let </span><span class="kw-2">mut </span>cur_addr = <a href="#333">start_addr</a>;
+        <span class="comment">// Called when we detected an `UnsafeCell` at the given offset and size.
+        // Calls `action` and advances `cur_ptr`.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>unsafe_cell_action = |unsafe_cell_ptr: <span class="kw-2">&amp;</span>Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;,
+                                      unsafe_cell_size: <a href="../../rustc_target/abi/struct.Size.html">Size</a>| {
+            <span class="comment">// We assume that we are given the fields in increasing offset order,
+            // and nothing else changes.
+            </span><span class="kw">let </span>unsafe_cell_addr = <a href="#337">unsafe_cell_ptr</a>.addr();
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(unsafe_cell_addr &gt;= cur_addr);
+            <span class="kw">let </span>frozen_size = <a href="#341">unsafe_cell_addr</a> - <a href="#334">cur_addr</a>;
+            <span class="comment">// Everything between the cur_ptr and this `UnsafeCell` is frozen.
+            </span><span class="kw">if </span>frozen_size != Size::ZERO {
+                action(alloc_range(cur_addr - start_addr, frozen_size), <span class="comment">/*frozen*/ </span><span class="bool-val">true</span>)<span class="question-mark">?</span>;
+            }
+            <a href="#334">cur_addr</a> += <a href="#343">frozen_size</a>;
+            <span class="comment">// This `UnsafeCell` is NOT frozen.
+            </span><span class="kw">if </span>unsafe_cell_size != Size::ZERO {
+                action(
+                    alloc_range(cur_addr - start_addr, unsafe_cell_size),
+                    <span class="comment">/*frozen*/ </span><span class="bool-val">false</span>,
+                )<span class="question-mark">?</span>;
+            }
+            <a href="#334">cur_addr</a> += <a href="#338">unsafe_cell_size</a>;
+            <span class="comment">// Done
+            </span><span class="prelude-val">Ok</span>(())
+        };
+        <span class="comment">// Run a visitor
+        </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#390">UnsafeCellVisitor</a> {
+                ecx: <a href="#322">this</a>,
+                unsafe_cell_action: |place| {
+                    <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;unsafe_cell_action on {:?}&quot;</span>, place.ptr);
+                    <span class="comment">// We need a size to go on.
+                    </span><span class="kw">let </span>unsafe_cell_size = this
+                        .size_and_align_of_mplace(place)<span class="question-mark">?
+                        </span>.map(|(size, <span class="kw">_</span>)| <a href="#369">size</a>)
+                        <span class="comment">// for extern types, just cover what we can
+                        </span>.unwrap_or_else(|| <a href="#364">place</a>.layout.size);
+                    <span class="comment">// Now handle this `UnsafeCell`, unless it is empty.
+                    </span><span class="kw">if </span>unsafe_cell_size != Size::ZERO {
+                        <a href="#337">unsafe_cell_action</a>(<span class="kw-2">&amp;</span><a href="#364">place</a>.ptr, <a href="#367">unsafe_cell_size</a>)
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">Ok</span>(())
+                    }
+                },
+            };
+            visitor.visit_value(place)<span class="question-mark">?</span>;
+        }
+        <span class="comment">// The part between the end_ptr and the end of the place is also frozen.
+        // So pretend there is a 0-sized `UnsafeCell` at the end.
+        </span>unsafe_cell_action(<span class="kw-2">&amp;</span>place.ptr.offset(size, this)<span class="question-mark">?</span>, Size::ZERO)<span class="question-mark">?</span>;
+        <span class="comment">// Done!
+        </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+
+        <span class="doccomment">/// Visiting the memory covered by a `MemPlace`, being aware of
+        /// whether we are inside an `UnsafeCell` or not.
+        </span><span class="kw">struct </span>UnsafeCellVisitor&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, F&gt;
+        <span class="kw">where
+            </span>F: FnMut(<span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        {
+            ecx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+            unsafe_cell_action: F,
+        }
+
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, F&gt; ValueVisitor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, Evaluator&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;
+            <span class="kw">for </span>UnsafeCellVisitor&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, F&gt;
+        <span class="kw">where
+            </span>F: FnMut(<span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        {
+            <span class="kw">type </span>V = MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;;
+
+            <span class="attribute">#[inline(always)]
+            </span><span class="kw">fn </span>ecx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+                <a class="self" href="#406">self</a>.ecx
+            }
+
+            <span class="comment">// Hook to detect `UnsafeCell`.
+            </span><span class="kw">fn </span>visit_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, v: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;UnsafeCellVisitor: {:?} {:?}&quot;</span>, <span class="kw-2">*</span>v, v.layout.ty);
+                <span class="kw">let </span>is_unsafe_cell = <span class="kw">match </span><a href="#411">v</a>.layout.ty.kind() {
+                    ty::Adt(adt, <span class="kw">_</span>) =&gt;
+                        <span class="prelude-val">Some</span>(<a href="#414">adt</a>.did()) == <a class="self" href="#411">self</a>.ecx.tcx.lang_items().unsafe_cell_type(),
+                    <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+                };
+                <span class="kw">if </span>is_unsafe_cell {
+                    <span class="comment">// We do not have to recurse further, this is an `UnsafeCell`.
+                    </span>(<a class="self" href="#411">self</a>.unsafe_cell_action)(<a href="#411">v</a>)
+                } <span class="kw">else if </span><span class="self">self</span>.ecx.type_is_freeze(v.layout.ty) {
+                    <span class="comment">// This is `Freeze`, there cannot be an `UnsafeCell`
+                    </span><span class="prelude-val">Ok</span>(())
+                } <span class="kw">else if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(v.layout.fields, FieldsShape::Union(..)) {
+                    <span class="comment">// A (non-frozen) union. We fall back to whatever the type says.
+                    </span>(<a class="self" href="#411">self</a>.unsafe_cell_action)(<a href="#411">v</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// We want to not actually read from memory for this visit. So, before
+                    // walking this value, we have to make sure it is not a
+                    // `Variants::Multiple`.
+                    </span><span class="kw">match </span><a href="#411">v</a>.layout.variants {
+                        <a href="../../rustc_target/abi/enum.Variants.html">Variants::Multiple</a> { .. } =&gt; {
+                            <span class="comment">// A multi-variant enum, or generator, or so.
+                            // Treat this like a union: without reading from memory,
+                            // we cannot determine the variant we are in. Reading from
+                            // memory would be subject to Stacked Borrows rules, leading
+                            // to all sorts of &quot;funny&quot; recursion.
+                            // We only end up here if the type is *not* freeze, so we just call the
+                            // `UnsafeCell` action.
+                            </span>(<a class="self" href="#411">self</a>.unsafe_cell_action)(<a href="#411">v</a>)
+                        }
+                        <a href="../../rustc_target/abi/enum.Variants.html">Variants::Single</a> { .. } =&gt; {
+                            <span class="comment">// Proceed further, try to find where exactly that `UnsafeCell`
+                            // is hiding.
+                            </span><a class="self" href="#411">self</a>.<a href="../../miri/trait.ValueVisitor.html">walk_value</a>(<a href="#411">v</a>)
+                        }
+                    }
+                }
+            }
+
+            <span class="comment">// Make sure we visit aggregrates in increasing offset order.
+            </span><span class="kw">fn </span>visit_aggregate(
+                <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+                place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+                fields: <span class="kw">impl </span>Iterator&lt;Item = InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt;&gt;,
+            ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <span class="kw">match </span><a href="#454">place</a>.layout.fields {
+                    <a href="../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Array</a> { .. } =&gt; {
+                        <span class="comment">// For the array layout, we know the iterator will yield sorted elements so
+                        // we can avoid the allocation.
+                        </span><a class="self" href="#453">self</a>.<a href="../../miri/trait.ValueVisitor.html">walk_aggregate</a>(<a href="#454">place</a>, <a href="#455">fields</a>)
+                    }
+                    <a href="../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Arbitrary</a> { .. } =&gt; {
+                        <span class="comment">// Gather the subplaces and sort them before visiting.
+                        </span><span class="kw">let </span><span class="kw-2">mut </span>places = fields
+                            .collect::&lt;InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Vec&lt;MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Provenance&gt;&gt;&gt;&gt;()<span class="question-mark">?</span>;
+                        <span class="comment">// we just compare offsets, the abs. value never matters
+                        </span><a href="#465">places</a>.sort_by_key(|place| <a href="#468">place</a>.ptr.addr());
+                        <a class="self" href="#453">self</a>.<a href="../../miri/trait.ValueVisitor.html">walk_aggregate</a>(<a href="#454">place</a>, <a href="#465">places</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="prelude-val">Ok</span>))
+                    }
+                    <a href="../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Union</a> { .. } | FieldsShape::Primitive =&gt; {
+                        <span class="comment">// Uh, what?
+                        </span><a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unions/primitives are not aggregates we should ever visit&quot;</span>)
+                    }
+                }
+            }
+
+            <span class="kw">fn </span>visit_union(
+                <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+                _v: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+                _fields: <a href="https://doc.rust-lang.org/nightly/core/num/nonzero/struct.NonZeroUsize.html">NonZeroUsize</a>,
+            ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;we should have already handled unions in `visit_value`&quot;</span>)
+            }
+        }
+    }
+
+    <span class="doccomment">/// Helper function used inside the shims of foreign functions to check that isolation is
+    /// disabled. It returns an error using the `name` of the foreign function if this is not the
+    /// case.
+    </span><span class="kw">fn </span>check_no_isolation(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span>!<span class="self">self</span>.eval_context_ref().machine.communicate() {
+            <span class="self">self</span>.reject_in_isolation(name, RejectOpWith::Abort)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Helper function used inside the shims of foreign functions which reject the op
+    /// when isolation is enabled. It is used to print a warning/backtrace about the rejection.
+    </span><span class="kw">fn </span>reject_in_isolation(<span class="kw-2">&amp;</span><span class="self">self</span>, op_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, reject_with: <a href="eval.rs.html#35">RejectOpWith</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#500">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">match </span><a href="#500">reject_with</a> {
+            <a href="eval.rs.html#37">RejectOpWith::Abort</a> =&gt; <a href="#971">isolation_abort_error</a>(<a href="#500">op_name</a>),
+            <a href="eval.rs.html#48">RejectOpWith::WarningWithoutBacktrace</a> =&gt; {
+                <a href="#501">this</a>.tcx
+                    .sess
+                    .warn(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{} was made to return an error due to isolation&quot;</span>, op_name));
+                <span class="prelude-val">Ok</span>(())
+            }
+            <a href="eval.rs.html#45">RejectOpWith::Warning</a> =&gt; {
+                <a href="diagnostics.rs.html#378">register_diagnostic</a>(<a href="diagnostics.rs.html#72">NonHaltingDiagnostic::RejectedIsolatedOp</a>(<a href="#500">op_name</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()));
+                <span class="prelude-val">Ok</span>(())
+            }
+            <a href="eval.rs.html#42">RejectOpWith::NoWarning</a> =&gt; <span class="prelude-val">Ok</span>(()), <span class="comment">// no warning
+        </span>}
+    }
+
+    <span class="doccomment">/// Helper function used inside the shims of foreign functions to assert that the target OS
+    /// is `target_os`. It panics showing a message with the `name` of the foreign function
+    /// if this is not the case.
+    </span><span class="kw">fn </span>assert_target_os(<span class="kw-2">&amp;</span><span class="self">self</span>, target_os: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+            <span class="self">self</span>.eval_context_ref().tcx.sess.target.os,
+            target_os,
+            <span class="string">&quot;`{}` is only available on the `{}` target OS&quot;</span>,
+            name,
+            target_os,
+        )
+    }
+
+    <span class="doccomment">/// Helper function used inside the shims of foreign functions to assert that the target OS
+    /// is part of the UNIX family. It panics showing a message with the `name` of the foreign function
+    /// if this is not the case.
+    </span><span class="kw">fn </span>assert_target_os_is_unix(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+            target_os_is_unix(<span class="self">self</span>.eval_context_ref().tcx.sess.target.os.as_ref()),
+            <span class="string">&quot;`{}` is only available for supported UNIX family targets&quot;</span>,
+            name,
+        );
+    }
+
+    <span class="doccomment">/// Get last error variable as a place, lazily allocating thread-local storage for it if
+    /// necessary.
+    </span><span class="kw">fn </span>last_error_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#544">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(errno_place) = <a href="#545">this</a>.<a href="concurrency/thread.rs.html#759">active_thread_ref</a>().last_error {
+            <span class="prelude-val">Ok</span>(<a href="#546">errno_place</a>)
+        } <span class="kw">else </span>{
+            <span class="comment">// Allocate new place, set initial value to 0.
+            </span><span class="kw">let </span>errno_layout = <a href="#545">this</a>.machine.layouts.u32;
+            <span class="kw">let </span>errno_place = this.allocate(errno_layout, MiriMemoryKind::Machine.into())<span class="question-mark">?</span>;
+            this.write_scalar(Scalar::from_u32(<span class="number">0</span>), <span class="kw-2">&amp;</span>errno_place.into())<span class="question-mark">?</span>;
+            <a href="#545">this</a>.<a href="concurrency/thread.rs.html#753">active_thread_mut</a>().last_error = <span class="prelude-val">Some</span>(<a href="#551">errno_place</a>);
+            <span class="prelude-val">Ok</span>(<a href="#551">errno_place</a>)
+        }
+    }
+
+    <span class="doccomment">/// Sets the last error variable.
+    </span><span class="kw">fn </span>set_last_error(<span class="kw-2">&amp;mut </span><span class="self">self</span>, scalar: Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#559">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>errno_place = this.last_error_place()<span class="question-mark">?</span>;
+        <a href="#560">this</a>.write_scalar(<a href="#559">scalar</a>, <span class="kw-2">&amp;</span><a href="#561">errno_place</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+    }
+
+    <span class="doccomment">/// Gets the last error variable.
+    </span><span class="kw">fn </span>get_last_error(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#566">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>errno_place = this.last_error_place()<span class="question-mark">?</span>;
+        <a href="#567">this</a>.read_scalar(<span class="kw-2">&amp;</span><a href="#568">errno_place</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+    }
+
+    <span class="doccomment">/// This function tries to produce the most similar OS error from the `std::io::ErrorKind`
+    /// as a platform-specific errnum.
+    </span><span class="kw">fn </span>io_error_to_errnum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        err_kind: <a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#575">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>target = <span class="kw-2">&amp;</span><a href="#578">this</a>.tcx.sess.target;
+        <span class="kw">if </span>target.families.iter().any(|f| f == <span class="string">&quot;unix&quot;</span>) {
+            <span class="kw">for </span><span class="kw-2">&amp;</span>(name, kind) <span class="kw">in </span>UNIX_IO_ERROR_TABLE {
+                <span class="kw">if </span>err_kind == kind {
+                    <span class="kw">return </span>this.eval_libc(name);
+                }
+            }
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;io error {:?} cannot be translated into a raw os error&quot;</span>, err_kind)
+        } <span class="kw">else if </span>target.families.iter().any(|f| f == <span class="string">&quot;windows&quot;</span>) {
+            <span class="comment">// FIXME: we have to finish implementing the Windows equivalent of this.
+            </span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>::<span class="kw-2">*</span>;
+            <a href="#578">this</a>.<a href="#134">eval_windows</a>(
+                <span class="string">&quot;c&quot;</span>,
+                <span class="kw">match </span><a href="#576">err_kind</a> {
+                    NotFound =&gt; <span class="string">&quot;ERROR_FILE_NOT_FOUND&quot;</span>,
+                    PermissionDenied =&gt; <span class="string">&quot;ERROR_ACCESS_DENIED&quot;</span>,
+                    <span class="kw">_ </span>=&gt;
+                        <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(
+                            <span class="string">&quot;io error {:?} cannot be translated into a raw os error&quot;</span>,
+                            err_kind
+                        ),
+                },
+            )
+        } <span class="kw">else </span>{
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(
+                <span class="string">&quot;converting io::Error into errnum is unsupported for OS {}&quot;</span>,
+                target.os
+            )
+        }
+    }
+
+    <span class="doccomment">/// The inverse of `io_error_to_errnum`.
+    </span><span class="attribute">#[allow(clippy::needless_return)]
+    </span><span class="kw">fn </span>try_errnum_to_io_error(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        errnum: Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#613">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>target = <span class="kw-2">&amp;</span><a href="#616">this</a>.tcx.sess.target;
+        <span class="kw">if </span>target.families.iter().any(|f| f == <span class="string">&quot;unix&quot;</span>) {
+            <span class="kw">let </span>errnum = errnum.to_i32()<span class="question-mark">?</span>;
+            <span class="kw">for </span><span class="kw-2">&amp;</span>(name, kind) <span class="kw">in </span>UNIX_IO_ERROR_TABLE {
+                <span class="kw">if </span>errnum == this.eval_libc_i32(name)<span class="question-mark">? </span>{
+                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(kind));
+                }
+            }
+            <span class="comment">// Our table is as complete as the mapping in std, so we are okay with saying &quot;that&#39;s a
+            // strange one&quot; here.
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+        } <span class="kw">else </span>{
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(
+                <span class="string">&quot;converting errnum into io::Error is unsupported for OS {}&quot;</span>,
+                target.os
+            )
+        }
+    }
+
+    <span class="doccomment">/// Sets the last OS error using a `std::io::ErrorKind`.
+    </span><span class="kw">fn </span>set_last_error_from_io_error(<span class="kw-2">&amp;mut </span><span class="self">self</span>, err_kind: <a href="https://doc.rust-lang.org/nightly/std/io/error/enum.ErrorKind.html">std::io::ErrorKind</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#637">self</a>.<a href="#559">set_last_error</a>(<span class="self">self</span>.io_error_to_errnum(err_kind)<span class="question-mark">?</span>)
+    }
+
+    <span class="doccomment">/// Helper function that consumes an `std::io::Result&lt;T&gt;` and returns an
+    /// `InterpResult&lt;&#39;tcx,T&gt;::Ok` instead. In case the result is an error, this function returns
+    /// `Ok(-1)` and sets the last OS error accordingly.
+    ///
+    /// This function uses `T: From&lt;i32&gt;` instead of `i32` directly because some IO related
+    /// functions return different integer types (like `read`, that returns an `i64`).
+    </span><span class="kw">fn </span>try_unwrap_io_result&lt;T: From&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.i32.html">i32</a>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        result: std::io::Result&lt;T&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <span class="kw">match </span><a href="#649">result</a> {
+            <span class="prelude-val">Ok</span>(ok) =&gt; <span class="prelude-val">Ok</span>(<a href="#652">ok</a>),
+            <span class="prelude-val">Err</span>(e) =&gt; {
+                <span class="self">self</span>.eval_context_mut().set_last_error_from_io_error(e.kind())<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>((-<span class="number">1</span>).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+            }
+        }
+    }
+
+    <span class="doccomment">/// Calculates the MPlaceTy given the offset and layout of an access on an operand
+    </span><span class="kw">fn </span>deref_operand_and_offset(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        offset: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#662">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>op_place = this.deref_operand(op)<span class="question-mark">?</span>;
+        <span class="kw">let </span>offset = Size::from_bytes(<a href="#664">offset</a>);
+
+        <span class="comment">// Ensure that the access is within bounds.
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(op_place.layout.size &gt;= offset + layout.size);
+        <span class="kw">let </span>value_place = op_place.offset(offset, layout, this)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="#673">value_place</a>)
+    }
+
+    <span class="kw">fn </span>read_scalar_at_offset(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        offset: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#678">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>value_place = this.deref_operand_and_offset(op, offset, layout)<span class="question-mark">?</span>;
+        <a href="#683">this</a>.read_scalar(<span class="kw-2">&amp;</span><a href="#684">value_place</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+    }
+
+    <span class="kw">fn </span>write_immediate_at_offset(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        offset: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+        value: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#689">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>value_place = this.deref_operand_and_offset(op, offset, value.layout)<span class="question-mark">?</span>;
+        <a href="#694">this</a>.write_immediate(<span class="kw-2">**</span><a href="#692">value</a>, <span class="kw-2">&amp;</span><a href="#695">value_place</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+    }
+
+    <span class="kw">fn </span>write_scalar_at_offset(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+        offset: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+        value: <span class="kw">impl </span>Into&lt;Scalar&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <a class="self" href="#700">self</a>.<a href="#688-693">write_immediate_at_offset</a>(<a href="#701">op</a>, <a href="#702">offset</a>, <span class="kw-2">&amp;</span>ImmTy::from_scalar(<a href="#703">value</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#704">layout</a>))
+    }
+
+    <span class="doccomment">/// Parse a `timespec` struct and return it as a `std::time::Duration`. It returns `None`
+    /// if the value in the `timespec` struct is invalid. Some libc functions will return
+    /// `EINVAL` in this case.
+    </span><span class="kw">fn </span>read_timespec(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        tp: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/core/time/struct.Duration.html">Duration</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#713">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>seconds_place = this.mplace_field(tp, <span class="number">0</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>seconds_scalar = this.read_scalar(<span class="kw-2">&amp;</span>seconds_place.into())<span class="question-mark">?</span>;
+        <span class="kw">let </span>seconds = seconds_scalar.to_machine_isize(this)<span class="question-mark">?</span>;
+        <span class="kw">let </span>nanoseconds_place = this.mplace_field(tp, <span class="number">1</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>nanoseconds_scalar = this.read_scalar(<span class="kw-2">&amp;</span>nanoseconds_place.into())<span class="question-mark">?</span>;
+        <span class="kw">let </span>nanoseconds = nanoseconds_scalar.to_machine_isize(this)<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(<span class="kw">try </span>{
+            <span class="comment">// tv_sec must be non-negative.
+            </span><span class="kw">let </span>seconds: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> = seconds.try_into().ok()<span class="question-mark">?</span>;
+            <span class="comment">// tv_nsec must be non-negative.
+            </span><span class="kw">let </span>nanoseconds: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = nanoseconds.try_into().ok()<span class="question-mark">?</span>;
+            <span class="kw">if </span>nanoseconds &gt;= <span class="number">1_000_000_000 </span>{
+                <span class="comment">// tv_nsec must not be greater than 999,999,999.
+                </span><span class="prelude-val">None</span><span class="question-mark">?
+            </span>}
+            Duration::new(seconds, nanoseconds)
+        })
+    }
+
+    <span class="kw">fn </span>read_c_str&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>]&gt;
+    <span class="kw">where
+        </span><span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;a</span>,
+        <span class="lifetime">&#39;mir</span>: <span class="lifetime">&#39;a</span>,
+    {
+        <span class="kw">let </span>this = <a class="self" href="#737">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>size1 = Size::from_bytes(<span class="number">1</span>);
+
+        <span class="comment">// Step 1: determine the length.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>len = Size::ZERO;
+        <span class="kw">loop </span>{
+            <span class="comment">// FIXME: We are re-getting the allocation each time around the loop.
+            // Would be nice if we could somehow &quot;extend&quot; an existing AllocRange.
+            </span><span class="kw">let </span>alloc = this.get_ptr_alloc(ptr.offset(len, this)<span class="question-mark">?</span>, size1, Align::ONE)<span class="question-mark">?</span>.unwrap(); <span class="comment">// not a ZST, so we will get a result
+            </span><span class="kw">let </span>byte = alloc.read_integer(alloc_range(Size::ZERO, size1))<span class="question-mark">?</span>.to_u8()<span class="question-mark">?</span>;
+            <span class="kw">if </span>byte == <span class="number">0 </span>{
+                <span class="kw">break</span>;
+            } <span class="kw">else </span>{
+                <a href="#746">len</a> += <a href="#743">size1</a>;
+            }
+        }
+
+        <span class="comment">// Step 2: get the bytes.
+        </span><a href="#742">this</a>.read_bytes_ptr_strip_provenance(<a href="#737">ptr</a>, <a href="#746">len</a>)
+    }
+
+    <span class="kw">fn </span>read_wide_str(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Vec&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u16.html">u16</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#763">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>size2 = Size::from_bytes(<span class="number">2</span>);
+        <span class="kw">let </span>align2 = Align::from_bytes(<span class="number">2</span>).unwrap();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>wchars = Vec::new();
+        <span class="kw">loop </span>{
+            <span class="comment">// FIXME: We are re-getting the allocation each time around the loop.
+            // Would be nice if we could somehow &quot;extend&quot; an existing AllocRange.
+            </span><span class="kw">let </span>alloc = this.get_ptr_alloc(ptr, size2, align2)<span class="question-mark">?</span>.unwrap(); <span class="comment">// not a ZST, so we will get a result
+            </span><span class="kw">let </span>wchar = alloc.read_integer(alloc_range(Size::ZERO, size2))<span class="question-mark">?</span>.to_u16()<span class="question-mark">?</span>;
+            <span class="kw">if </span>wchar == <span class="number">0 </span>{
+                <span class="kw">break</span>;
+            } <span class="kw">else </span>{
+                <a href="#768">wchars</a>.push(<a href="#773">wchar</a>);
+                <a href="#763">ptr</a> = ptr.offset(size2, this)<span class="question-mark">?</span>;
+            }
+        }
+
+        <span class="prelude-val">Ok</span>(<a href="#768">wchars</a>)
+    }
+
+    <span class="doccomment">/// Check that the ABI is what we expect.
+    </span><span class="kw">fn </span>check_abi&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>, exp_abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;a</span>, ()&gt; {
+        <span class="kw">if </span><span class="self">self</span>.eval_context_ref().machine.enforce_abi &amp;&amp; abi != exp_abi {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(
+                <span class="string">&quot;calling a function with ABI {} using caller ABI {}&quot;</span>,
+                exp_abi.name(),
+                abi.name()
+            )
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>frame_in_std(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>this = <a class="self" href="#797">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span><span class="prelude-val">Some</span>(start_fn) = <a href="#798">this</a>.tcx.lang_items().start_fn() <span class="kw">else </span>{
+            <span class="comment">// no_std situations
+            </span><span class="kw">return </span><span class="bool-val">false</span>;
+        };
+        <span class="kw">let </span>frame = <a href="#798">this</a>.frame();
+        <span class="comment">// Make an attempt to get at the instance of the function this is inlined from.
+        </span><span class="kw">let </span>instance: <span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt; = <span class="kw">try </span>{
+            <span class="kw">let </span>scope = frame.current_source_info()<span class="question-mark">?</span>.scope;
+            <span class="kw">let </span>inlined_parent = frame.body.source_scopes[scope].inlined_parent_scope<span class="question-mark">?</span>;
+            <span class="kw">let </span>source = <span class="kw-2">&amp;</span><a href="#803">frame</a>.body.source_scopes[<a href="#807">inlined_parent</a>];
+            source.inlined.expect(<span class="string">&quot;inlined_parent_scope points to scope without inline info&quot;</span>).<span class="number">0
+        </span>};
+        <span class="comment">// Fall back to the instance of the function itself.
+        </span><span class="kw">let </span>instance = <a href="#805">instance</a>.unwrap_or(<a href="#803">frame</a>.instance);
+        <span class="comment">// Now check if this is in the same crate as start_fn.
+        // As a special exception we also allow unit tests from
+        // &lt;https://github.com/rust-lang/miri-test-libstd/tree/master/std_miri_test&gt; to call these
+        // shims.
+        </span><span class="kw">let </span>frame_crate = <a href="#798">this</a>.tcx.def_path(<a href="#812">instance</a>.def_id()).krate;
+        <a href="#817">frame_crate</a> == <a href="#798">this</a>.tcx.def_path(<a href="#799">start_fn</a>).krate
+            || <a href="#798">this</a>.tcx.crate_name(<a href="#817">frame_crate</a>).as_str() == <span class="string">&quot;std_miri_test&quot;
+    </span>}
+
+    <span class="doccomment">/// Handler that should be called when unsupported functionality is encountered.
+    /// This function will either panic within the context of the emulated application
+    /// or return an error in the Miri process context
+    ///
+    /// Return value of `Ok(bool)` indicates whether execution should continue.
+    </span><span class="kw">fn </span>handle_unsupported&lt;S: AsRef&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, error_msg: S) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#827">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">if </span>this.machine.panic_on_unsupported {
+            <span class="comment">// message is slightly different here to make automated analysis easier
+            </span><span class="kw">let </span>error_msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;unsupported Miri functionality: {}&quot;</span>, error_msg.as_ref());
+            this.start_panic(error_msg.as_ref(), StackPopUnwind::Skip)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(())
+        } <span class="kw">else </span>{
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;{}&quot;</span>, error_msg.as_ref());
+        }
+    }
+
+    <span class="kw">fn </span>check_abi_and_shim_symbol_clash(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        exp_abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <span class="self">self</span>.check_abi(abi, exp_abi)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((body, <span class="kw">_</span>)) = <span class="self">self</span>.eval_context_mut().lookup_exported_symbol(link_name)<span class="question-mark">? </span>{
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_machine_stop.html">throw_machine_stop!</a>(TerminationInfo::SymbolShimClashing {
+                link_name,
+                span: body.span.data(),
+            })
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>check_shim&lt;<span class="lifetime">&#39;a</span>, <span class="kw">const </span>N: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        exp_abi: <a href="../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        args: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;],
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;; <a href="#855">N</a>]&gt;
+    <span class="kw">where
+        </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;; <a href="#855">N</a>]: TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;]&gt;,
+    {
+        <span class="self">self</span>.check_abi_and_shim_symbol_clash(abi, exp_abi, link_name)<span class="question-mark">?</span>;
+        <a href="#959-963">check_arg_count</a>(<a href="#860">args</a>)
+    }
+
+    <span class="doccomment">/// Mark a machine allocation that was just created as immutable.
+    </span><span class="kw">fn </span>mark_immutable(<span class="kw-2">&amp;mut </span><span class="self">self</span>, mplace: <span class="kw-2">&amp;</span>MemPlace&lt;<a href="machine.rs.html#130">Provenance</a>&gt;) {
+        <span class="kw">let </span>this = <a class="self" href="#870">self</a>.<a href="machine.rs.html#578">eval_context_mut</a>();
+        <span class="comment">// This got just allocated, so there definitely is a pointer here.
+        </span><span class="kw">let </span>provenance = <a href="#870">mplace</a>.ptr.into_pointer_or_addr().unwrap().provenance;
+        <a href="#871">this</a>.alloc_mark_immutable(<a href="#873">provenance</a>.<a href="../../miri/trait.Provenance.html">get_alloc_id</a>().unwrap()).unwrap();
+    }
+
+    <span class="kw">fn </span>item_link_name(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a> {
+        <span class="kw">let </span>tcx = <a class="self" href="#877">self</a>.<a href="machine.rs.html#577">eval_context_ref</a>().tcx;
+        <span class="kw">match </span><a href="#878">tcx</a>.get_attrs(<a href="#877">def_id</a>, sym::link_name).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|a| <a href="#879">a</a>.value_str()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>() {
+            <span class="prelude-val">Some</span>(name) =&gt; <a href="#880">name</a>,
+            <span class="prelude-val">None </span>=&gt; <a href="#878">tcx</a>.item_name(<a href="#877">def_id</a>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; Evaluator&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>current_span(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; CurrentSpan&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#897">CurrentSpan</a> { current_frame_idx: <span class="prelude-val">None</span>, machine: <a class="self" href="#887">self</a>, <a href="#887">tcx</a> }
+    }
+}
+
+<span class="doccomment">/// A `CurrentSpan` should be created infrequently (ideally once) per interpreter step. It does
+/// nothing on creation, but when `CurrentSpan::get` is called, searches the current stack for the
+/// topmost frame which corresponds to a local crate, and returns the current span in that frame.
+/// The result of that search is cached so that later calls are approximately free.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>CurrentSpan&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    current_frame_idx: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;,
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    machine: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Evaluator&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;mir</span>: <span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;a </span>+ <span class="lifetime">&#39;mir</span>&gt; CurrentSpan&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Get the current span, skipping non-local frames.
+    /// This function is backed by a cache, and can be assumed to be very fast.
+    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <span class="kw">let </span>idx = <a class="self" href="#906">self</a>.<a href="#928">current_frame_idx</a>();
+        <span class="self">Self</span>::frame_span(<a class="self" href="#906">self</a>.machine, <a href="#907">idx</a>)
+    }
+
+    <span class="doccomment">/// Similar to `CurrentSpan::get`, but retrieves the parent frame of the first non-local frame.
+    /// This is useful when we are processing something which occurs on function-entry and we want
+    /// to point at the call to the function, not the function definition generally.
+    </span><span class="kw">pub fn </span>get_parent(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <span class="kw">let </span>idx = <a class="self" href="#914">self</a>.<a href="#928">current_frame_idx</a>();
+        <span class="self">Self</span>::frame_span(<a class="self" href="#914">self</a>.machine, <a href="#915">idx</a>.wrapping_sub(<span class="number">1</span>))
+    }
+
+    <span class="kw">fn </span>frame_span(machine: <span class="kw-2">&amp;</span>Evaluator&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;, idx: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <a href="#919">machine</a>
+            .threads
+            .<a href="concurrency/thread.rs.html#281">active_thread_stack</a>()
+            .get(<a href="#919">idx</a>)
+            .map(Frame::current_span)
+            .unwrap_or(<a href="../../rustc_span/span_encoding/constant.DUMMY_SP.html">rustc_span::DUMMY_SP</a>)
+    }
+
+    <span class="kw">fn </span>current_frame_idx(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <span class="kw-2">*</span><span class="self"><a href="#928">self</a>
+            </span>.current_frame_idx
+            .get_or_insert_with(|| <span class="self">Self</span>::compute_current_frame_index(<a class="self" href="#928">self</a>.tcx, <a class="self" href="#928">self</a>.machine))
+    }
+
+    <span class="comment">// Find the position of the inner-most frame which is part of the crate being
+    // compiled/executed, part of the Cargo workspace, and is also not #[track_caller].
+    </span><span class="attribute">#[inline(never)]
+    </span><span class="kw">fn </span>compute_current_frame_index(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, machine: <span class="kw-2">&amp;</span>Evaluator&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a href="#937">machine</a>
+            .threads
+            .<a href="concurrency/thread.rs.html#281">active_thread_stack</a>()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find_map</a>(|(idx, frame)| {
+                <span class="kw">let </span>def_id = <a href="#944">frame</a>.instance.def_id();
+                <span class="kw">if </span>(def_id.is_local() || machine.local_crates.contains(<span class="kw-2">&amp;</span>def_id.krate))
+                    &amp;&amp; !frame.instance.def.requires_caller_location(tcx)
+                {
+                    <span class="prelude-val">Some</span>(<a href="#944">idx</a>)
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            })
+            .unwrap_or(<span class="number">0</span>)
+    }
+}
+
+<span class="doccomment">/// Check that the number of args is what we expect.
+</span><span class="kw">pub fn </span>check_arg_count&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, <span class="kw">const </span>N: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;(
+    args: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;],
+) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;; <a href="#959">N</a>]&gt;
+<span class="kw">where
+    </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;; <a href="#959">N</a>]: TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="machine.rs.html#130">Provenance</a>&gt;]&gt;,
+{
+    <span class="kw">if let </span><span class="prelude-val">Ok</span>(ops) = <a href="#960">args</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>() {
+        <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#965">ops</a>);
+    }
+    <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;incorrect number of arguments: got {}, expected {}&quot;</span>, args.len(), N)
+}
+
+<span class="kw">pub fn </span>isolation_abort_error&lt;<span class="lifetime">&#39;tcx</span>&gt;(name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_machine_stop.html">throw_machine_stop!</a>(TerminationInfo::UnsupportedInIsolation(<span class="macro">format!</span>(
+        <span class="string">&quot;{} not available when isolation is enabled&quot;</span>,
+        name,
+    )))
+}
+
+<span class="doccomment">/// Retrieve the list of local crates that should have been passed by cargo-miri in
+/// MIRI_LOCAL_CRATES and turn them into `CrateNum`s.
+</span><span class="kw">pub fn </span>get_local_crates(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; Vec&lt;<a href="../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>&gt; {
+    <span class="comment">// Convert the local crate names from the passed-in config into CrateNums so that they can
+    // be looked up quickly during execution
+    </span><span class="kw">let </span>local_crate_names = std::env::var(<span class="string">&quot;MIRI_LOCAL_CRATES&quot;</span>)
+        .map(|crates| <a href="#984">crates</a>.split(<span class="string">&#39;,&#39;</span>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|krate| <a href="#984">krate</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;())
+        .unwrap_or_default();
+    <span class="kw">let </span><span class="kw-2">mut </span>local_crates = Vec::new();
+    <span class="kw">for </span><span class="kw-2">&amp;</span>crate_num <span class="kw">in </span>tcx.crates(()) {
+        <span class="kw">let </span>name = tcx.crate_name(crate_num);
+        <span class="kw">let </span>name = name.as_str();
+        <span class="kw">if </span>local_crate_names.iter().any(|local_name| local_name == name) {
+            local_crates.push(crate_num);
+        }
+    }
+    <a href="#986">local_crates</a>
+}
+
+<span class="doccomment">/// Helper function used inside the shims of foreign functions to check that
+/// `target_os` is a supported UNIX OS.
+</span><span class="kw">pub fn </span>target_os_is_unix(target_os: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(target_os, <span class="string">&quot;linux&quot; </span>| <span class="string">&quot;macos&quot; </span>| <span class="string">&quot;freebsd&quot; </span>| <span class="string">&quot;android&quot;</span>)
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

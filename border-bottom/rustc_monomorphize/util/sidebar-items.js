@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["dump_closure_profile","For a given closure, writes out the data for the profiling the impact of RFC 2229 on closure size into a CSV."]]};

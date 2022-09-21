@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["SmallStr","Like SmallVec but for strings."]]};

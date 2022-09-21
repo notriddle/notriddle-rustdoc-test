@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["FreeRegionMap",""],["RegionRelations","Combines a `FreeRegionMap` and a `TyCtxt`."]]};

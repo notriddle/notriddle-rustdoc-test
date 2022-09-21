@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["from",""],["try_from",""]],"struct":[["CharTryFromScalarInt","Error returned when a conversion from ScalarInt to char fails."],["ConstInt","A type for representing any integer. Only used for printing."],["ScalarInt","The raw bytes of a simple value."]]};

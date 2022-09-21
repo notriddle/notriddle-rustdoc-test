@@ -1,0 +1,790 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/shims/tls.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>tls.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../miri/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Implement thread-local storage.
+
+</span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/entry/enum.Entry.html">std::collections::btree_map::Entry</a> <span class="kw">as </span>BTreeEntry;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/collections/hash/map/enum.Entry.html">std::collections::hash_map::Entry</a> <span class="kw">as </span>HashMapEntry;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">std::collections::BTreeMap</a>;
+
+<span class="kw">use </span><a href="https://docs.rs/log/0.4.14/log/macro.trace.html">log::trace</a>;
+
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span><a href="../../../rustc_middle/ty/index.html">rustc_middle::ty</a>;
+<span class="kw">use </span>rustc_target::abi::{<a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>, <a href="../../../rustc_target/abi/struct.Size.html">Size</a>};
+<span class="kw">use </span><a href="../../../rustc_target/spec/abi/enum.Abi.html">rustc_target::spec::abi::Abi</a>;
+
+<span class="kw">use crate</span>::<span class="kw-2">*</span>;
+
+<span class="kw">pub type </span>TlsKey = <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>;
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>TlsEntry&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The data for this key. None is used to represent NULL.
+    /// (We normalize this early to avoid having to do a NULL-ptr-test each time we access the data.)
+    </span>data: BTreeMap&lt;<a href="../concurrency/thread.rs.html#40">ThreadId</a>, Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;&gt;,
+    dtor: <span class="prelude-ty">Option</span>&lt;ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>RunningDtorsState {
+    <span class="doccomment">/// The last TlsKey used to retrieve a TLS destructor. `None` means that we
+    /// have not tried to retrieve a TLS destructor yet or that we already tried
+    /// all keys.
+    </span>last_dtor_key: <span class="prelude-ty">Option</span>&lt;<a href="#16">TlsKey</a>&gt;,
+}
+
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>TlsData&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The Key to use for the next thread-local allocation.
+    </span>next_key: <a href="#16">TlsKey</a>,
+
+    <span class="doccomment">/// pthreads-style thread-local storage.
+    </span>keys: BTreeMap&lt;<a href="#16">TlsKey</a>, TlsEntry&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    <span class="doccomment">/// A single per thread destructor of the thread local storage (that&#39;s how
+    /// things work on macOS) with a data argument.
+    </span>macos_thread_dtors: BTreeMap&lt;<a href="../concurrency/thread.rs.html#40">ThreadId</a>, (ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;, Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;)&gt;,
+
+    <span class="doccomment">/// State for currently running TLS dtors. If this map contains a key for a
+    /// specific thread, it means that we are in the &quot;destruct&quot; phase, during
+    /// which some operations are UB.
+    </span>dtors_running: FxHashMap&lt;<a href="../concurrency/thread.rs.html#40">ThreadId</a>, <a href="#27">RunningDtorsState</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default</a> <span class="kw">for </span>TlsData&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <a href="#35">TlsData</a> {
+            next_key: <span class="number">1</span>, <span class="comment">// start with 1 as we must not use 0 on Windows
+            </span>keys: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            macos_thread_dtors: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            dtors_running: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TlsData&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Generate a new TLS key with the given destructor.
+    /// `max_size` determines the integer size the key has to fit in.
+    </span><span class="attribute">#[allow(clippy::integer_arithmetic)]
+    </span><span class="kw">pub fn </span>create_tls_key(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        dtor: <span class="prelude-ty">Option</span>&lt;ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        max_size: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="#16">TlsKey</a>&gt; {
+        <span class="kw">let </span>new_key = <a class="self" href="#68">self</a>.next_key;
+        <a class="self" href="#68">self</a>.next_key += <span class="number">1</span>;
+        <a class="self" href="#68">self</a>.keys.try_insert(<a href="#72">new_key</a>, <a href="#19">TlsEntry</a> { data: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(), <a href="#69">dtor</a> }).unwrap();
+        <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;New TLS key allocated: {} with dtor {:?}&quot;</span>, new_key, dtor);
+
+        <span class="kw">if </span>max_size.bits() &lt; <span class="number">128 </span>&amp;&amp; new_key &gt;= (<span class="number">1u128 </span>&lt;&lt; max_size.bits()) {
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;we ran out of TLS key space&quot;</span>);
+        }
+        <span class="prelude-val">Ok</span>(<a href="#72">new_key</a>)
+    }
+
+    <span class="kw">pub fn </span>delete_tls_key(<span class="kw-2">&amp;mut </span><span class="self">self</span>, key: <a href="#16">TlsKey</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a class="self" href="#83">self</a>.keys.remove(<span class="kw-2">&amp;</span><a href="#83">key</a>) {
+            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
+                <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;TLS key {} removed&quot;</span>, key);
+                <span class="prelude-val">Ok</span>(())
+            }
+            <span class="prelude-val">None </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;removing a non-existig TLS key: {}&quot;</span>, key),
+        }
+    }
+
+    <span class="kw">pub fn </span>load_tls(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        key: <a href="#16">TlsKey</a>,
+        thread_id: <a href="../concurrency/thread.rs.html#40">ThreadId</a>,
+        cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">match </span><a class="self" href="#94">self</a>.keys.get(<span class="kw-2">&amp;</span><a href="#95">key</a>) {
+            <span class="prelude-val">Some</span>(<a href="#19">TlsEntry</a> { data, .. }) =&gt; {
+                <span class="kw">let </span>value = <a href="#100">data</a>.get(<span class="kw-2">&amp;</span><a href="#96">thread_id</a>).copied();
+                <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;TLS key {} for thread {:?} loaded: {:?}&quot;</span>, key, thread_id, value);
+                <span class="prelude-val">Ok</span>(<a href="#101">value</a>.unwrap_or_else(|| Scalar::null_ptr(<a href="#97">cx</a>)))
+            }
+            <span class="prelude-val">None </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;loading from a non-existing TLS key: {}&quot;</span>, key),
+        }
+    }
+
+    <span class="kw">pub fn </span>store_tls(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        key: <a href="#16">TlsKey</a>,
+        thread_id: <a href="../concurrency/thread.rs.html#40">ThreadId</a>,
+        new_data: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a class="self" href="#110">self</a>.keys.get_mut(<span class="kw-2">&amp;</span><a href="#111">key</a>) {
+            <span class="prelude-val">Some</span>(<a href="#19">TlsEntry</a> { data, .. }) =&gt; {
+                <span class="kw">if </span>new_data.to_machine_usize(cx)<span class="question-mark">? </span>!= <span class="number">0 </span>{
+                    <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;TLS key {} for thread {:?} stored: {:?}&quot;</span>, key, thread_id, new_data);
+                    <a href="#117">data</a>.insert(<a href="#112">thread_id</a>, <a href="#113">new_data</a>);
+                } <span class="kw">else </span>{
+                    <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;TLS key {} for thread {:?} removed&quot;</span>, key, thread_id);
+                    <a href="#117">data</a>.remove(<span class="kw-2">&amp;</span><a href="#112">thread_id</a>);
+                }
+                <span class="prelude-val">Ok</span>(())
+            }
+            <span class="prelude-val">None </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;storing to a non-existing TLS key: {}&quot;</span>, key),
+        }
+    }
+
+    <span class="doccomment">/// Set the thread wide destructor of the thread local storage for the given
+    /// thread. This function is used to implement `_tlv_atexit` shim on MacOS.
+    ///
+    /// Thread wide dtors are available only on MacOS. There is one destructor
+    /// per thread as can be guessed from the following comment in the
+    /// [`_tlv_atexit`
+    /// implementation](https://github.com/opensource-apple/dyld/blob/195030646877261f0c8c7ad8b001f52d6a26f514/src/threadLocalVariables.c#L389):
+    ///
+    /// NOTE: this does not need locks because it only operates on current thread data
+    </span><span class="kw">pub fn </span>set_macos_thread_dtor(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        thread: <a href="../concurrency/thread.rs.html#40">ThreadId</a>,
+        dtor: ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        data: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span><span class="self">self</span>.dtors_running.contains_key(<span class="kw-2">&amp;</span>thread) {
+            <span class="comment">// UB, according to libstd docs.
+            </span><a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(
+                <span class="string">&quot;setting thread&#39;s local storage destructor while destructors are already running&quot;
+            </span>);
+        }
+        <span class="kw">if </span><span class="self">self</span>.macos_thread_dtors.insert(thread, (dtor, data)).is_some() {
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(
+                <span class="string">&quot;setting more than one thread local storage destructor for the same thread is not supported&quot;
+            </span>);
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Returns a dtor, its argument and its index, if one is supposed to run.
+    /// `key` is the last dtors that was run; we return the *next* one after that.
+    ///
+    /// An optional destructor function may be associated with each key value.
+    /// At thread exit, if a key value has a non-NULL destructor pointer,
+    /// and the thread has a non-NULL value associated with that key,
+    /// the value of the key is set to NULL, and then the function pointed
+    /// to is called with the previously associated value as its sole argument.
+    /// **The order of destructor calls is unspecified if more than one destructor
+    /// exists for a thread when it exits.**
+    ///
+    /// If, after all the destructors have been called for all non-NULL values
+    /// with associated destructors, there are still some non-NULL values with
+    /// associated destructors, then the process is repeated.
+    /// If, after at least {PTHREAD_DESTRUCTOR_ITERATIONS} iterations of destructor
+    /// calls for outstanding non-NULL values, there are still some non-NULL values
+    /// with associated destructors, implementations may stop calling destructors,
+    /// or they may continue calling destructors until no non-NULL values with
+    /// associated destructors exist, even though this might result in an infinite loop.
+    </span><span class="kw">fn </span>fetch_tls_dtor(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        key: <span class="prelude-ty">Option</span>&lt;<a href="#16">TlsKey</a>&gt;,
+        thread_id: <a href="../concurrency/thread.rs.html#40">ThreadId</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;(ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;, Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;, <a href="#16">TlsKey</a>)&gt; {
+        <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/range/enum.Bound.html">std::ops::Bound</a>::<span class="kw-2">*</span>;
+
+        <span class="kw">let </span>thread_local = <span class="kw-2">&amp;mut </span><a class="self" href="#180">self</a>.keys;
+        <span class="kw">let </span>start = <span class="kw">match </span><a href="#181">key</a> {
+            <span class="prelude-val">Some</span>(key) =&gt; Excluded(<a href="#188">key</a>),
+            <span class="prelude-val">None </span>=&gt; Unbounded,
+        };
+        <span class="comment">// We interpret the documentaion above (taken from POSIX) as saying that we need to iterate
+        // over all keys and run each destructor at least once before running any destructor a 2nd
+        // time. That&#39;s why we have `key` to indicate how far we got in the current iteration. If we
+        // return `None`, `schedule_next_pthread_tls_dtor` will re-try with `ket` set to `None` to
+        // start the next round.
+        // TODO: In the future, we might consider randomizing destructor order, but we still have to
+        // uphold this requirement.
+        </span><span class="kw">for </span>(<span class="kw-2">&amp;</span>key, TlsEntry { data, dtor }) <span class="kw">in </span>thread_local.range_mut((start, Unbounded)) {
+            <span class="kw">match </span>data.entry(thread_id) {
+                BTreeEntry::Occupied(entry) =&gt; {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(dtor) = dtor {
+                        <span class="comment">// Set TLS data to NULL, and call dtor with old value.
+                        </span><span class="kw">let </span>data_scalar = entry.remove();
+                        <span class="kw">let </span>ret = <span class="prelude-val">Some</span>((<span class="kw-2">*</span>dtor, data_scalar, key));
+                        <span class="kw">return </span>ret;
+                    }
+                }
+                BTreeEntry::Vacant(<span class="kw">_</span>) =&gt; {}
+            }
+        }
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="doccomment">/// Set that dtors are running for `thread`. It is guaranteed not to change
+    /// the existing values stored in `dtors_running` for this thread. Returns
+    /// `true` if dtors for `thread` are already running.
+    </span><span class="kw">fn </span>set_dtors_running_for_thread(<span class="kw-2">&amp;mut </span><span class="self">self</span>, thread: <a href="../concurrency/thread.rs.html#40">ThreadId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a class="self" href="#217">self</a>.dtors_running.entry(<a href="#217">thread</a>) {
+            HashMapEntry::Occupied(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            HashMapEntry::Vacant(entry) =&gt; {
+                <span class="comment">// We cannot just do `self.dtors_running.insert` because that
+                // would overwrite `last_dtor_key` with `None`.
+                </span><a href="#220">entry</a>.insert(<a href="#27">RunningDtorsState</a> { last_dtor_key: <span class="prelude-val">None </span>});
+                <span class="bool-val">false
+            </span>}
+        }
+    }
+
+    <span class="doccomment">/// Delete all TLS entries for the given thread. This function should be
+    /// called after all TLS destructors have already finished.
+    </span><span class="kw">fn </span>delete_all_thread_tls(<span class="kw-2">&amp;mut </span><span class="self">self</span>, thread_id: <a href="../concurrency/thread.rs.html#40">ThreadId</a>) {
+        <span class="kw">for </span>TlsEntry { data, .. } <span class="kw">in </span><span class="self">self</span>.keys.values_mut() {
+            data.remove(<span class="kw-2">&amp;</span>thread_id);
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; EvalContextPrivExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw">crate</span>::MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {}
+<span class="kw">trait </span>EvalContextPrivExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt;: <span class="kw">crate</span>::MiriEvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Schedule TLS destructors for Windows.
+    /// On windows, TLS destructors are managed by std.
+    </span><span class="kw">fn </span>schedule_windows_tls_dtors(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#242">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>active_thread = <a href="#243">this</a>.<a href="../concurrency/thread.rs.html#747">get_active_thread</a>();
+
+        <span class="comment">// Windows has a special magic linker section that is run on certain events.
+        // Instead of searching for that section and supporting arbitrary hooks in there
+        // (that would be basically https://github.com/rust-lang/miri/issues/450),
+        // we specifically look up the static in libstd that we know is placed
+        // in that section.
+        </span><span class="kw">let </span>thread_callback =
+            this.eval_windows(<span class="string">&quot;thread_local_key&quot;</span>, <span class="string">&quot;p_thread_callback&quot;</span>)<span class="question-mark">?</span>.to_pointer(this)<span class="question-mark">?</span>;
+        <span class="kw">let </span>thread_callback = this.get_ptr_fn(thread_callback)<span class="question-mark">?</span>.as_instance()<span class="question-mark">?</span>;
+
+        <span class="comment">// FIXME: Technically, the reason should be `DLL_PROCESS_DETACH` when the main thread exits
+        // but std treats both the same.
+        </span><span class="kw">let </span>reason = this.eval_windows(<span class="string">&quot;c&quot;</span>, <span class="string">&quot;DLL_THREAD_DETACH&quot;</span>)<span class="question-mark">?</span>;
+
+        <span class="comment">// The signature of this function is `unsafe extern &quot;system&quot; fn(h: c::LPVOID, dwReason: c::DWORD, pv: c::LPVOID)`.
+        // FIXME: `h` should be a handle to the current module and what `pv` should be is unknown
+        // but both are ignored by std
+        </span>this.call_function(
+            thread_callback,
+            Abi::System { unwind: <span class="bool-val">false </span>},
+            <span class="kw-2">&amp;</span>[Scalar::null_ptr(this).into(), reason.into(), Scalar::null_ptr(this).into()],
+            <span class="prelude-val">None</span>,
+            StackPopCleanup::Root { cleanup: <span class="bool-val">true </span>},
+        )<span class="question-mark">?</span>;
+
+        <a href="#243">this</a>.<a href="../concurrency/thread.rs.html#783">enable_thread</a>(<a href="#244">active_thread</a>);
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Schedule the MacOS thread destructor of the thread local storage to be
+    /// executed. Returns `true` if scheduled.
+    ///
+    /// Note: It is safe to call this function also on other Unixes.
+    </span><span class="kw">fn </span>schedule_macos_tls_dtor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#278">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>thread_id = <a href="#279">this</a>.<a href="../concurrency/thread.rs.html#747">get_active_thread</a>();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((instance, data)) = <a href="#279">this</a>.machine.tls.macos_thread_dtors.remove(<span class="kw-2">&amp;</span><a href="#280">thread_id</a>) {
+            <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;Running macos dtor {:?} on {:?} at {:?}&quot;</span>, instance, data, thread_id);
+
+            this.call_function(
+                instance,
+                Abi::C { unwind: <span class="bool-val">false </span>},
+                <span class="kw-2">&amp;</span>[data.into()],
+                <span class="prelude-val">None</span>,
+                StackPopCleanup::Root { cleanup: <span class="bool-val">true </span>},
+            )<span class="question-mark">?</span>;
+
+            <span class="comment">// Enable the thread so that it steps through the destructor which
+            // we just scheduled. Since we deleted the destructor, it is
+            // guaranteed that we will schedule it again. The `dtors_running`
+            // flag will prevent the code from adding the destructor again.
+            </span><a href="#279">this</a>.<a href="../concurrency/thread.rs.html#783">enable_thread</a>(<a href="#280">thread_id</a>);
+            <span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="bool-val">false</span>)
+        }
+    }
+
+    <span class="doccomment">/// Schedule a pthread TLS destructor. Returns `true` if found
+    /// a destructor to schedule, and `false` otherwise.
+    </span><span class="kw">fn </span>schedule_next_pthread_tls_dtor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#305">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>active_thread = <a href="#306">this</a>.<a href="../concurrency/thread.rs.html#747">get_active_thread</a>();
+
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(this.has_terminated(active_thread), <span class="string">&quot;running TLS dtors for non-terminated thread&quot;</span>);
+        <span class="comment">// Fetch next dtor after `key`.
+        </span><span class="kw">let </span>last_key = <a href="#306">this</a>.machine.tls.dtors_running[<span class="kw-2">&amp;</span><a href="#307">active_thread</a>].last_dtor_key;
+        <span class="kw">let </span>dtor = <span class="kw">match </span><a href="#306">this</a>.machine.tls.<a href="#179-183">fetch_tls_dtor</a>(<a href="#311">last_key</a>, <a href="#307">active_thread</a>) {
+            dtor @ <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <a href="#313">dtor</a>,
+            <span class="comment">// We ran each dtor once, start over from the beginning.
+            </span><span class="prelude-val">None </span>=&gt; <a href="#306">this</a>.machine.tls.<a href="#179-183">fetch_tls_dtor</a>(<span class="prelude-val">None</span>, <a href="#307">active_thread</a>),
+        };
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((instance, ptr, key)) = <a href="#312">dtor</a> {
+            <a href="#306">this</a>.machine.tls.dtors_running.get_mut(<span class="kw-2">&amp;</span><a href="#307">active_thread</a>).unwrap().last_dtor_key =
+                <span class="prelude-val">Some</span>(<a href="#317">key</a>);
+            <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;Running TLS dtor {:?} on {:?} at {:?}&quot;</span>, instance, ptr, active_thread);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                !ptr.to_machine_usize(this).unwrap() != <span class="number">0</span>,
+                <span class="string">&quot;data can&#39;t be NULL when dtor is called!&quot;
+            </span>);
+
+            this.call_function(
+                instance,
+                Abi::C { unwind: <span class="bool-val">false </span>},
+                <span class="kw-2">&amp;</span>[ptr.into()],
+                <span class="prelude-val">None</span>,
+                StackPopCleanup::Root { cleanup: <span class="bool-val">true </span>},
+            )<span class="question-mark">?</span>;
+
+            <a href="#306">this</a>.<a href="../concurrency/thread.rs.html#783">enable_thread</a>(<a href="#307">active_thread</a>);
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">true</span>);
+        }
+        <a href="#306">this</a>.machine.tls.dtors_running.get_mut(<span class="kw-2">&amp;</span><a href="#307">active_thread</a>).unwrap().last_dtor_key = <span class="prelude-val">None</span>;
+
+        <span class="prelude-val">Ok</span>(<span class="bool-val">false</span>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw">crate</span>::MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {}
+<span class="kw">pub trait </span>EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt;: <span class="kw">crate</span>::MiriEvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Schedule an active thread&#39;s TLS destructor to run on the active thread.
+    /// Note that this function does not run the destructors itself, it just
+    /// schedules them one by one each time it is called and reenables the
+    /// thread so that it can be executed normally by the main execution loop.
+    ///
+    /// Note: we consistently run TLS destructors for all threads, including the
+    /// main thread. However, it is not clear that we should run the TLS
+    /// destructors for the main thread. See issue:
+    /// &lt;https://github.com/rust-lang/rust/issues/28129&gt;.
+    </span><span class="kw">fn </span>schedule_next_tls_dtor_for_active_thread(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#354">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>active_thread = <a href="#355">this</a>.<a href="../concurrency/thread.rs.html#747">get_active_thread</a>();
+        <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;schedule_next_tls_dtor_for_active_thread on thread {:?}&quot;</span>, active_thread);
+
+        <span class="kw">if </span>!this.machine.tls.set_dtors_running_for_thread(active_thread) {
+            <span class="comment">// This is the first time we got asked to schedule a destructor. The
+            // Windows schedule destructor function must be called exactly once,
+            // this is why it is in this block.
+            </span><span class="kw">if </span>this.tcx.sess.target.os == <span class="string">&quot;windows&quot; </span>{
+                <span class="comment">// On Windows, we signal that the thread quit by starting the
+                // relevant function, reenabling the thread, and going back to
+                // the scheduler.
+                </span>this.schedule_windows_tls_dtors()<span class="question-mark">?</span>;
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+            }
+        }
+        <span class="comment">// The remaining dtors make some progress each time around the scheduler loop,
+        // until they return `false` to indicate that they are done.
+
+        // The macOS thread wide destructor runs &quot;before any TLS slots get
+        // freed&quot;, so do that first.
+        </span><span class="kw">if </span>this.schedule_macos_tls_dtor()<span class="question-mark">? </span>{
+            <span class="comment">// We have scheduled a MacOS dtor to run on the thread. Execute it
+            // to completion and come back here. Scheduling a destructor
+            // destroys it, so we will not enter this branch again.
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+        <span class="kw">if </span>this.schedule_next_pthread_tls_dtor()<span class="question-mark">? </span>{
+            <span class="comment">// We have scheduled a pthread destructor and removed it from the
+            // destructors list. Run it to completion and come back here.
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="comment">// All dtors done!
+        </span><a href="#355">this</a>.machine.tls.<a href="#231">delete_all_thread_tls</a>(<a href="#356">active_thread</a>);
+        this.thread_terminated()<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

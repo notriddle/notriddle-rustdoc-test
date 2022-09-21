@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["required","Returns `true` if the specified `lang_item` must be present for this compilation."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["NOOP_METHOD_CALL","The `noop_method_call` lint detects specific calls to noop methods such as a calling `<&T as Clone>::clone` where `T: !Clone`."]],"struct":[["NoopMethodCall",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["helpers",""],["pp","This pretty-printer is a direct reimplementation of Philip Karlton’s Mesa pretty-printer, as described in the appendix to Derek C. Oppen, “Pretty Printing” (1979), Stanford Computer Science Department STAN-CS-79-770, http://i.stanford.edu/pub/cstr/reports/cs/tr/79/770/CS-TR-79-770.pdf."],["pprust",""]]};

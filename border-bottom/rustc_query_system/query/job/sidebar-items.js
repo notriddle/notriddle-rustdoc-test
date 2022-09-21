@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["print_query_stack",""],["report_cycle",""]],"struct":[["QueryInfo","Represents a span and a query key."],["QueryJob","Represents an active query job."],["QueryJobId","A value uniquely identifying an active query job."],["QueryJobInfo",""]],"type":[["QueryMap",""]]};

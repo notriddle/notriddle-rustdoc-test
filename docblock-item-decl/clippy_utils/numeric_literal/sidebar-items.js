@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Radix",""]],"fn":[["format","A helper method to format numeric literals with digit grouping. `lit` must be a valid numeric literal without suffix."],["lit_suffix_length",""],["split_suffix",""]],"struct":[["NumericLiteral",""]]};

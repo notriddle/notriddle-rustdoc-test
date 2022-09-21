@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_query_system/src/cache.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>cache.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_query_system/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Cache for candidate selection.
+
+</span><span class="kw">use </span><span class="kw">crate</span>::dep_graph::{<a href="dep_graph/mod.rs.html#22">DepContext</a>, <a href="dep_graph/graph.rs.html#39-41">DepNodeIndex</a>};
+
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span><a href="../../rustc_data_structures/sync/struct.Lock.html">rustc_data_structures::sync::Lock</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/hash/macros/derive.Hash.html">std::hash::Hash</a>;
+
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>Cache&lt;Key, Value&gt; {
+    hashmap: Lock&lt;FxHashMap&lt;Key, WithDepNode&lt;Value&gt;&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;Key, Value&gt; <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default</a> <span class="kw">for </span>Cache&lt;Key, Value&gt; {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ hashmap: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>() }
+    }
+}
+
+<span class="kw">impl</span>&lt;Key, Value&gt; Cache&lt;Key, Value&gt; {
+    <span class="doccomment">/// Actually frees the underlying memory in contrast to what stdlib containers do on `clear`
+    </span><span class="kw">pub fn </span>clear(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+        <span class="kw-2">*</span><a class="self" href="#23">self</a>.hashmap.borrow_mut() = <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>();
+    }
+}
+
+<span class="kw">impl</span>&lt;Key: <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a> + <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a>, Value: <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a>&gt; Cache&lt;Key, Value&gt; {
+    <span class="kw">pub fn </span>get&lt;CTX: <a href="dep_graph/mod.rs.html#22">DepContext</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>Key, tcx: CTX) -&gt; <span class="prelude-ty">Option</span>&lt;Value&gt; {
+        <span class="prelude-val">Some</span>(<span class="self">self</span>.hashmap.borrow().get(key)<span class="question-mark">?</span>.<a href="#49">get</a>(<a href="#29">tcx</a>))
+    }
+
+    <span class="kw">pub fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>, key: Key, dep_node: <a href="dep_graph/graph.rs.html#39-41">DepNodeIndex</a>, value: Value) {
+        <a class="self" href="#33">self</a>.hashmap.borrow_mut().insert(<a href="#33">key</a>, WithDepNode::new(<a href="#33">dep_node</a>, <a href="#33">value</a>));
+    }
+}
+
+<span class="attribute">#[derive(Clone, Eq, PartialEq)]
+</span><span class="kw">pub struct </span>WithDepNode&lt;T&gt; {
+    dep_node: <a href="dep_graph/graph.rs.html#39-41">DepNodeIndex</a>,
+    cached_value: T,
+}
+
+<span class="kw">impl</span>&lt;T: <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a>&gt; WithDepNode&lt;T&gt; {
+    <span class="kw">pub fn </span>new(dep_node: <a href="dep_graph/graph.rs.html#39-41">DepNodeIndex</a>, cached_value: T) -&gt; <span class="self">Self </span>{
+        <a href="#39">WithDepNode</a> { <a href="#45">dep_node</a>, <a href="#45">cached_value</a> }
+    }
+
+    <span class="kw">pub fn </span>get&lt;CTX: <a href="dep_graph/mod.rs.html#22">DepContext</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: CTX) -&gt; T {
+        <a href="#49">tcx</a>.<a href="dep_graph/mod.rs.html#29">dep_graph</a>().<a href="dep_graph/graph.rs.html#443">read_index</a>(<a class="self" href="#49">self</a>.dep_node);
+        <a class="self" href="#49">self</a>.cached_value.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_query_system" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

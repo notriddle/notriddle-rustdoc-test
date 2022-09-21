@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["make_item_keywords",""]],"struct":[["Context","Major driving force in all rustdoc rendering. This contains information about where in the tree-like hierarchy rendering is occurring and controls how the current page is being rendered."],["SharedContext","Shared mutable state used in [`Context`] and elsewhere."]]};

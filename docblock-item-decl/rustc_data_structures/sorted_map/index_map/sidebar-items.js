@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["SortedIndexMultiMap","An indexed multi-map that preserves insertion order while permitting both O(log n) lookup of an item by key and O(1) lookup by index."]]};

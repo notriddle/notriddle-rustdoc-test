@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["custom_coerce_unsize_info",""],["provide",""]],"mod":[["collector","Mono Item Collection"],["errors",""],["partitioning","Partitioning Codegen Units for Incremental Compilation"],["polymorphize","Polymorphization Analysis"],["util",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Declaration","A declaration is an abstraction of [hir::Local] and [hir::Let]."],["GatherLocalsVisitor",""]]};

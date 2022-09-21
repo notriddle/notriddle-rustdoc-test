@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["first_method_call",""],["in_macro",""],["lint_cstring_as_ptr",""]],"static":[["TEMPORARY_CSTRING_AS_PTR","The `temporary_cstring_as_ptr` lint detects getting the inner pointer of a temporary `CString`."]],"struct":[["TemporaryCStringAsPtr",""]]};

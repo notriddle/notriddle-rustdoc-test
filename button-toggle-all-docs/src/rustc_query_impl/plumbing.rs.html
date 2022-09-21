@@ -1,0 +1,1244 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_query_impl/src/plumbing.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>plumbing.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_query_impl/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_query_impl/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_query_impl/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+</pre><pre class="rust"><code><span class="doccomment">//! The implementation of the query system itself. This defines the macros that
+//! generate the actual methods on tcx which find and execute the provider,
+//! manage the caches, and so forth.
+
+</span><span class="kw">use </span><a href="keys.rs.html#16"><span class="kw">crate</span>::keys::Key</a>;
+<span class="kw">use </span><a href="on_disk_cache.rs.html#466"><span class="kw">crate</span>::on_disk_cache::CacheDecoder</a>;
+<span class="kw">use crate</span>::{<a href="lib.rs.html#40">on_disk_cache</a>, <a href="lib.rs.html#54">Queries</a>};
+<span class="kw">use </span>rustc_data_structures::stable_hasher::{<a href="../../rustc_data_structures/stable_hasher/trait.HashStable.html">HashStable</a>, <a href="../../rustc_data_structures/stable_hasher/struct.StableHasher.html">StableHasher</a>};
+<span class="kw">use </span>rustc_data_structures::sync::{<a href="../../rustc_data_structures/sync/type.AtomicU64.html">AtomicU64</a>, <a href="../../rustc_data_structures/sync/struct.Lock.html">Lock</a>};
+<span class="kw">use </span>rustc_errors::{<a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, <a href="../../rustc_errors/struct.Handler.html">Handler</a>};
+<span class="kw">use </span>rustc_middle::dep_graph::{
+    <a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/struct.DepKindStruct.html">DepKindStruct</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>, <a href="../../rustc_query_system/dep_graph/graph/struct.DepNodeIndex.html">DepNodeIndex</a>, <a href="../../rustc_query_system/dep_graph/serialized/struct.SerializedDepNodeIndex.html">SerializedDepNodeIndex</a>,
+};
+<span class="kw">use </span>rustc_middle::ty::tls::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/tls/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/tls/struct.ImplicitCtxt.html">ImplicitCtxt</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_query_system::dep_graph::{<a href="../../rustc_query_system/dep_graph/dep_node/trait.DepNodeParams.html">DepNodeParams</a>, <a href="../../rustc_query_system/dep_graph/trait.HasDepContext.html">HasDepContext</a>};
+<span class="kw">use </span><a href="../../rustc_query_system/ich/hcx/struct.StableHashingContext.html">rustc_query_system::ich::StableHashingContext</a>;
+<span class="kw">use </span>rustc_query_system::query::{
+    <a href="../../rustc_query_system/query/plumbing/fn.force_query.html">force_query</a>, <a href="../../rustc_query_impl/trait.QueryConfig.html">QueryConfig</a>, <a href="../../rustc_query_system/query/trait.QueryContext.html">QueryContext</a>, <a href="../../rustc_query_system/query/config/trait.QueryDescription.html">QueryDescription</a>, QueryJobId, <a href="../../rustc_query_system/query/job/type.QueryMap.html">QueryMap</a>,
+    <a href="../../rustc_query_system/query/struct.QuerySideEffects.html">QuerySideEffects</a>, <a href="../../rustc_query_system/query/struct.QueryStackFrame.html">QueryStackFrame</a>,
+};
+<span class="kw">use </span><a href="../../rustc_query_system/values/trait.Value.html">rustc_query_system::Value</a>;
+<span class="kw">use </span><a href="../../rustc_serialize/serialize/trait.Decodable.html">rustc_serialize::Decodable</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">std::any::Any</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/num/nonzero/struct.NonZeroU64.html">std::num::NonZeroU64</a>;
+<span class="kw">use </span><a href="https://docs.rs/thin-vec/0.2.8/thin_vec/struct.ThinVec.html">thin_vec::ThinVec</a>;
+
+<span class="attribute">#[derive(Copy, Clone)]
+</span><span class="kw">pub struct </span>QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>queries: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Queries&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html">std::ops::Deref</a> <span class="kw">for </span>QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>Target = TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
+        <span class="kw-2">&amp;</span><a class="self" href="#38">self</a>.tcx
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="../../rustc_query_system/dep_graph/trait.HasDepContext.html">HasDepContext</a> <span class="kw">for </span>QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>DepKind = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">rustc_middle::dep_graph::DepKind</a>;
+    <span class="kw">type </span>DepContext = TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>dep_context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::DepContext {
+        <span class="kw-2">&amp;</span><a class="self" href="#48">self</a>.tcx
+    }
+}
+
+<span class="kw">impl </span><a href="../../rustc_query_system/query/trait.QueryContext.html">QueryContext</a> <span class="kw">for </span>QueryCtxt&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>next_job_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../rustc_query_system/query/job/struct.QueryJobId.html">QueryJobId</a> {
+        QueryJobId(
+            NonZeroU64::new(
+                <a class="self" href="#54">self</a>.queries.jobs.fetch_add(<span class="number">1</span>, rustc_data_structures::sync::Ordering::Relaxed),
+            )
+            .unwrap(),
+        )
+    }
+
+    <span class="kw">fn </span>current_query_job(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_query_system/query/job/struct.QueryJobId.html">QueryJobId</a>&gt; {
+        tls::with_related_context(<span class="kw-2">**</span><a class="self" href="#63">self</a>, |icx| <a href="#64">icx</a>.query)
+    }
+
+    <span class="kw">fn </span>try_collect_active_jobs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_query_system/query/job/type.QueryMap.html">QueryMap</a>&gt; {
+        <a class="self" href="#67">self</a>.queries.<a href="lib.rs.html#54">try_collect_active_jobs</a>(<span class="kw-2">**</span><a class="self" href="#67">self</a>)
+    }
+
+    <span class="comment">// Interactions with on_disk_cache
+    </span><span class="kw">fn </span>load_side_effects(<span class="kw-2">&amp;</span><span class="self">self</span>, prev_dep_node_index: <a href="../../rustc_query_system/dep_graph/serialized/struct.SerializedDepNodeIndex.html">SerializedDepNodeIndex</a>) -&gt; <a href="../../rustc_query_system/query/struct.QuerySideEffects.html">QuerySideEffects</a> {
+        <a class="self" href="#72">self</a>.queries
+            .on_disk_cache
+            .as_ref()
+            .map(|c| <a href="#76">c</a>.<a href="on_disk_cache.rs.html#369-373">load_side_effects</a>(<span class="kw-2">**</span><a class="self" href="#72">self</a>, <a href="#72">prev_dep_node_index</a>))
+            .unwrap_or_default()
+    }
+
+    <span class="kw">fn </span>store_side_effects(<span class="kw-2">&amp;</span><span class="self">self</span>, dep_node_index: <a href="../../rustc_query_system/dep_graph/graph/struct.DepNodeIndex.html">DepNodeIndex</a>, side_effects: <a href="../../rustc_query_system/query/struct.QuerySideEffects.html">QuerySideEffects</a>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = <a class="self" href="#80">self</a>.queries.on_disk_cache.as_ref() {
+            <a href="#81">c</a>.<a href="on_disk_cache.rs.html#385">store_side_effects</a>(<a href="#80">dep_node_index</a>, <a href="#80">side_effects</a>)
+        }
+    }
+
+    <span class="kw">fn </span>store_side_effects_for_anon_node(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        dep_node_index: <a href="../../rustc_query_system/dep_graph/graph/struct.DepNodeIndex.html">DepNodeIndex</a>,
+        side_effects: <a href="../../rustc_query_system/query/struct.QuerySideEffects.html">QuerySideEffects</a>,
+    ) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = <a class="self" href="#87">self</a>.queries.on_disk_cache.as_ref() {
+            <a href="#91">c</a>.<a href="on_disk_cache.rs.html#410-414">store_side_effects_for_anon_node</a>(<a href="#88">dep_node_index</a>, <a href="#89">side_effects</a>)
+        }
+    }
+
+    <span class="doccomment">/// Executes a job by changing the `ImplicitCtxt` to point to the
+    /// new query job while it executes. It returns the diagnostics
+    /// captured during execution and the actual result.
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>start_query&lt;R&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        token: <a href="../../rustc_query_system/query/job/struct.QueryJobId.html">QueryJobId</a>,
+        depth_limit: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        diagnostics: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Lock&lt;ThinVec&lt;<a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>&gt;&gt;&gt;,
+        compute: <span class="kw">impl </span>FnOnce() -&gt; R,
+    ) -&gt; R {
+        <span class="comment">// The `TyCtxt` stored in TLS has the same global interner lifetime
+        // as `self`, so we use `with_related_context` to relate the &#39;tcx lifetimes
+        // when accessing the `ImplicitCtxt`.
+        </span>tls::with_related_context(<span class="kw-2">**</span><a class="self" href="#101">self</a>, <span class="kw">move </span>|current_icx| {
+            <span class="kw">if </span>depth_limit &amp;&amp; !<span class="self">self</span>.recursion_limit().value_within_limit(current_icx.query_depth) {
+                <a class="self" href="#101">self</a>.<a href="../../rustc_query_system/query/trait.QueryContext.html">depth_limit_error</a>();
+            }
+
+            <span class="comment">// Update the `ImplicitCtxt` to point to our new query job.
+            </span><span class="kw">let </span>new_icx = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/tls/struct.ImplicitCtxt.html">ImplicitCtxt</a> {
+                tcx: <span class="kw-2">**</span><a class="self" href="#101">self</a>,
+                query: <span class="prelude-val">Some</span>(<a href="#102">token</a>),
+                <a href="#104">diagnostics</a>,
+                query_depth: <a href="#110">current_icx</a>.query_depth + <a href="#103">depth_limit</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+                task_deps: <a href="#110">current_icx</a>.task_deps,
+            };
+
+            <span class="comment">// Use the `ImplicitCtxt` while we execute the query.
+            </span>tls::enter_context(<span class="kw-2">&amp;</span><a href="#116">new_icx</a>, |<span class="kw">_</span>| {
+                rustc_data_structures::stack::ensure_sufficient_stack(<a href="#105">compute</a>)
+            })
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>from_tcx(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>queries = <a href="#134">tcx</a>.queries.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/trait.QueryEngine.html">as_any</a>();
+        <span class="kw">let </span>queries = <span class="kw">unsafe </span>{
+            <span class="kw">let </span>queries = std::mem::transmute::&lt;<span class="kw-2">&amp;</span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>, <span class="kw-2">&amp;</span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt;(<a href="#135">queries</a>);
+            <span class="kw">let </span>queries = <a href="#137">queries</a>.downcast_ref().unwrap();
+            <span class="kw">let </span>queries = std::mem::transmute::&lt;<span class="kw-2">&amp;</span>Queries&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw-2">&amp;</span>Queries&lt;<span class="lifetime">&#39;_</span>&gt;&gt;(<a href="#138">queries</a>);
+            <a href="#139">queries</a>
+        };
+        <a href="#29">QueryCtxt</a> { <a href="#134">tcx</a>, <a href="#136">queries</a> }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>on_disk_cache(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>on_disk_cache::OnDiskCache&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="self" href="#145">self</a>.queries.on_disk_cache.as_ref()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>encode_query_results(
+        <span class="self">self</span>,
+        encoder: <span class="kw-2">&amp;mut </span>on_disk_cache::CacheEncoder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        query_result_index: <span class="kw-2">&amp;mut </span><a href="on_disk_cache.rs.html#115">on_disk_cache::EncodedDepNodeIndex</a>,
+    ) {
+        <span class="macro">macro_rules! </span>expand_if_cached {
+            ([] <span class="macro-nonterminal">$encode</span>:expr) =&gt; {};
+            ([(cache) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>] <span class="macro-nonterminal">$encode</span>:expr) =&gt; {
+                <span class="macro-nonterminal">$encode
+            </span>};
+            ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>] <span class="macro-nonterminal">$encode</span>:expr) =&gt; {
+                <span class="macro">expand_if_cached!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>] <span class="macro-nonterminal">$encode</span>)
+            };
+        }
+
+        <span class="macro">macro_rules! </span>encode_queries {
+            (
+            $($(<span class="attribute">#[<span class="macro-nonterminal">$attr</span>:meta]</span>)*
+                [$(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>] <span class="kw">fn </span><span class="macro-nonterminal">$query</span>:ident($(<span class="macro-nonterminal">$K</span>:tt)<span class="kw-2">*</span>) -&gt; <span class="macro-nonterminal">$V</span>:ty,)<span class="kw-2">*</span>) =&gt; {
+                $(
+                    <span class="macro">expand_if_cached!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>] on_disk_cache::encode_query_results::&lt;<span class="kw">_</span>, <span class="kw">super</span>::queries::<span class="macro-nonterminal">$query</span>&lt;<span class="lifetime">&#39;_</span>&gt;&gt;(
+                        <span class="self">self</span>,
+                        encoder,
+                        query_result_index
+                    ));
+                )*
+            }
+        }
+
+        <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.rustc_query_append.html">rustc_query_append!</a>(<span class="macro">encode_queries!</span>);
+    }
+
+    <span class="kw">pub fn </span>try_print_query_stack(
+        <span class="self">self</span>,
+        query: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_query_system/query/job/struct.QueryJobId.html">QueryJobId</a>&gt;,
+        handler: <span class="kw-2">&amp;</span><a href="../../rustc_errors/struct.Handler.html">Handler</a>,
+        num_frames: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        rustc_query_system::query::print_query_stack(<a class="self" href="#182">self</a>, <a href="#183">query</a>, <a href="#184">handler</a>, <a href="#185">num_frames</a>)
+    }
+}
+
+<span class="macro">macro_rules! </span>handle_cycle_error {
+    ([]) =&gt; {{
+        rustc_query_system::HandleCycleError::Error
+    }};
+    ([(fatal_cycle) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        rustc_query_system::HandleCycleError::Fatal
+    }};
+    ([(cycle_delay_bug) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        rustc_query_system::HandleCycleError::DelayBug
+    }};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">handle_cycle_error!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>is_anon {
+    ([]) =&gt; {{
+        <span class="bool-val">false
+    </span>}};
+    ([(anon) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        <span class="bool-val">true
+    </span>}};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">is_anon!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>is_eval_always {
+    ([]) =&gt; {{
+        <span class="bool-val">false
+    </span>}};
+    ([(eval_always) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        <span class="bool-val">true
+    </span>}};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">is_eval_always!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>depth_limit {
+    ([]) =&gt; {{
+        <span class="bool-val">false
+    </span>}};
+    ([(depth_limit) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        <span class="bool-val">true
+    </span>}};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">depth_limit!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>hash_result {
+    ([]) =&gt; {{
+        <span class="prelude-val">Some</span>(dep_graph::hash_result)
+    }};
+    ([(no_hash) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        <span class="prelude-val">None
+    </span>}};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">hash_result!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>get_provider {
+    ([][<span class="macro-nonterminal">$tcx</span>:expr, <span class="macro-nonterminal">$name</span>:ident, <span class="macro-nonterminal">$key</span>:expr]) =&gt; {{
+        <span class="macro-nonterminal">$tcx</span>.queries.local_providers.<span class="macro-nonterminal">$name
+    </span>}};
+    ([(separate_provide_extern) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>][<span class="macro-nonterminal">$tcx</span>:expr, <span class="macro-nonterminal">$name</span>:ident, <span class="macro-nonterminal">$key</span>:expr]) =&gt; {{
+        <span class="kw">if </span><span class="macro-nonterminal">$key</span>.query_crate_is_local() {
+            <span class="macro-nonterminal">$tcx</span>.queries.local_providers.<span class="macro-nonterminal">$name
+        </span>} <span class="kw">else </span>{
+            <span class="macro-nonterminal">$tcx</span>.queries.extern_providers.<span class="macro-nonterminal">$name
+        </span>}
+    }};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>][$(<span class="macro-nonterminal">$args</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">get_provider!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>][$(<span class="macro-nonterminal">$args</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="macro">macro_rules! </span>should_ever_cache_on_disk {
+    ([]) =&gt; {{
+        <span class="prelude-val">None
+    </span>}};
+    ([(cache) $(<span class="macro-nonterminal">$rest</span>:tt)<span class="kw-2">*</span>]) =&gt; {{
+        <span class="prelude-val">Some</span>(<span class="macro-nonterminal">$crate::plumbing::try_load_from_disk</span>::&lt;<span class="self">Self</span>::Value&gt;)
+    }};
+    ([<span class="macro-nonterminal">$other</span>:tt $(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>]) =&gt; {
+        <span class="macro">should_ever_cache_on_disk!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>])
+    };
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>create_query_frame&lt;
+    <span class="lifetime">&#39;tcx</span>,
+    K: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> + <a href="keys.rs.html#16">Key</a> + <span class="kw">for</span>&lt;<span class="lifetime">&#39;a</span>&gt; HashStable&lt;StableHashingContext&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+&gt;(
+    tcx: QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    do_describe: <span class="kw">fn</span>(QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, K) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    key: K,
+    kind: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>,
+    name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) -&gt; <a href="../../rustc_query_system/query/struct.QueryStackFrame.html">QueryStackFrame</a> {
+    <span class="comment">// Disable visible paths printing for performance reasons.
+    // Showing visible path instead of any path is not that important in production.
+    </span><span class="kw">let </span>description = <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/print/pretty/macro.with_no_visible_paths.html">ty::print::with_no_visible_paths!</a>(
+        <span class="comment">// Force filename-line mode to avoid invoking `type_of` query.
+        </span><span class="macro">ty::print::with_forced_impl_filename_line!</span>(do_describe(tcx, key))
+    );
+    <span class="kw">let </span>description =
+        <span class="kw">if </span>tcx.sess.verbose() { <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{} [{}]&quot;</span>, description, name) } <span class="kw">else </span>{ <a href="#294">description</a> };
+    <span class="kw">let </span>span = <span class="kw">if </span>kind == dep_graph::DepKind::def_span {
+        <span class="comment">// The `def_span` query is used to calculate `default_span`,
+        // so exit to avoid infinite recursion.
+        </span><span class="prelude-val">None
+    </span>} <span class="kw">else </span>{
+        <span class="prelude-val">Some</span>(<a href="#288">key</a>.<a href="keys.rs.html#23">default_span</a>(<span class="kw-2">*</span><a href="#286">tcx</a>))
+    };
+    <span class="kw">let </span>def_kind = <span class="kw">if </span>kind == dep_graph::DepKind::opt_def_kind {
+        <span class="comment">// Try to avoid infinite recursion.
+        </span><span class="prelude-val">None
+    </span>} <span class="kw">else </span>{
+        <a href="#288">key</a>.<a href="keys.rs.html#27">key_as_def_id</a>()
+            .and_then(|def_id| <a href="#312">def_id</a>.as_local())
+            .and_then(|def_id| <a href="#286">tcx</a>.opt_def_kind(<a href="#313">def_id</a>))
+    };
+    <span class="kw">let </span>hash = || {
+        <a href="#286">tcx</a>.with_stable_hashing_context(|<span class="kw-2">mut </span>hcx| {
+            <span class="kw">let </span><span class="kw-2">mut </span>hasher = StableHasher::new();
+            std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#289">kind</a>).<a href="../../rustc_data_structures/stable_hasher/trait.HashStable.html">hash_stable</a>(<span class="kw-2">&amp;mut </span><a href="#316">hcx</a>, <span class="kw-2">&amp;mut </span><a href="#317">hasher</a>);
+            <a href="#288">key</a>.<a href="../../rustc_data_structures/stable_hasher/trait.HashStable.html">hash_stable</a>(<span class="kw-2">&amp;mut </span><a href="#316">hcx</a>, <span class="kw-2">&amp;mut </span><a href="#317">hasher</a>);
+            <a href="#317">hasher</a>.finish::&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt;()
+        })
+    };
+
+    QueryStackFrame::new(<a href="#290">name</a>, <a href="#298">description</a>, <a href="#300">span</a>, <a href="#307">def_kind</a>, <a href="#315">hash</a>)
+}
+
+<span class="kw">fn </span>try_load_from_on_disk_cache&lt;<span class="lifetime">&#39;tcx</span>, Q&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, dep_node: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>)
+<span class="kw">where
+    </span>Q: QueryDescription&lt;QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    Q::Key: DepNodeParams&lt;TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+{
+    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert.html">debug_assert!</a>(tcx.dep_graph.is_green(<span class="kw-2">&amp;</span>dep_node));
+
+    <span class="kw">let </span>key = Q::Key::recover(<a href="#327">tcx</a>, <span class="kw-2">&amp;</span><a href="#327">dep_node</a>).unwrap_or_else(|| {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;Failed to recover key for {:?} with hash {}&quot;</span>, dep_node, dep_node.hash)
+    });
+    <span class="kw">if </span>Q::cache_on_disk(tcx, <span class="kw-2">&amp;</span>key) {
+        <span class="kw">let _ </span>= Q::execute_query(<a href="#327">tcx</a>, <a href="#334">key</a>);
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>try_load_from_disk&lt;<span class="lifetime">&#39;tcx</span>, V&gt;(
+    tcx: QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    id: <a href="../../rustc_query_system/dep_graph/serialized/struct.SerializedDepNodeIndex.html">SerializedDepNodeIndex</a>,
+) -&gt; <span class="prelude-ty">Option</span>&lt;V&gt;
+<span class="kw">where
+    </span>V: <span class="kw">for</span>&lt;<span class="lifetime">&#39;a</span>&gt; Decodable&lt;CacheDecoder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;,
+{
+    tcx.on_disk_cache().as_ref()<span class="question-mark">?</span>.<a href="on_disk_cache.rs.html#393-399">try_load_query_result</a>(<span class="kw-2">*</span><a href="#343">tcx</a>, <a href="#344">id</a>)
+}
+
+<span class="kw">fn </span>force_from_dep_node&lt;<span class="lifetime">&#39;tcx</span>, Q&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, dep_node: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>
+<span class="kw">where
+    </span>Q: QueryDescription&lt;QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    Q::Key: DepNodeParams&lt;TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    Q::Value: Value&lt;TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+{
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(key) = Q::Key::recover(<a href="#352">tcx</a>, <span class="kw-2">&amp;</span><a href="#352">dep_node</a>) {
+        <span class="attribute">#[cfg(debug_assertions)]
+        </span><span class="kw">let </span>_guard = <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.span.html">tracing::span!</a>(tracing::Level::TRACE, <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>), <span class="question-mark">?</span>key).entered();
+        <span class="kw">let </span>tcx = QueryCtxt::from_tcx(<a href="#352">tcx</a>);
+        force_query::&lt;Q, <span class="kw">_</span>&gt;(<a href="#361">tcx</a>, <a href="#358">key</a>, <a href="#352">dep_node</a>);
+        <span class="bool-val">true
+    </span>} <span class="kw">else </span>{
+        <span class="bool-val">false
+    </span>}
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>query_callback&lt;<span class="lifetime">&#39;tcx</span>, Q: <a href="../../rustc_query_impl/trait.QueryConfig.html">QueryConfig</a>&gt;(
+    is_anon: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    is_eval_always: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt;
+<span class="kw">where
+    </span>Q: QueryDescription&lt;QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    Q::Key: DepNodeParams&lt;TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+{
+    <span class="kw">let </span>fingerprint_style = Q::Key::fingerprint_style();
+
+    <span class="kw">if </span>is_anon || !fingerprint_style.reconstructible() {
+        <span class="kw">return </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/struct.DepKindStruct.html">DepKindStruct</a> {
+            <a href="#370">is_anon</a>,
+            <a href="#371">is_eval_always</a>,
+            <a href="#377">fingerprint_style</a>,
+            force_from_dep_node: <span class="prelude-val">None</span>,
+            try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+        };
+    }
+
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/struct.DepKindStruct.html">DepKindStruct</a> {
+        <a href="#370">is_anon</a>,
+        <a href="#371">is_eval_always</a>,
+        <a href="#377">fingerprint_style</a>,
+        force_from_dep_node: <span class="prelude-val">Some</span>(force_from_dep_node::&lt;Q&gt;),
+        try_load_from_on_disk_cache: <span class="prelude-val">Some</span>(try_load_from_on_disk_cache::&lt;Q&gt;),
+    }
+}
+
+<span class="comment">// NOTE: `$V` isn&#39;t used here, but we still need to match on it so it can be passed to other macros
+// invoked by `rustc_query_append`.
+</span><span class="macro">macro_rules! </span>define_queries {
+    (
+     $($(<span class="attribute">#[<span class="macro-nonterminal">$attr</span>:meta]</span>)*
+        [$(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>] <span class="kw">fn </span><span class="macro-nonterminal">$name</span>:ident($(<span class="macro-nonterminal">$K</span>:tt)<span class="kw-2">*</span>) -&gt; <span class="macro-nonterminal">$V</span>:ty,)<span class="kw-2">*</span>) =&gt; {
+        <span class="macro">define_queries_struct! </span>{
+            input: ($(([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>] [$(<span class="macro-nonterminal">$attr</span>)<span class="kw-2">*</span>] [<span class="macro-nonterminal">$name</span>]))<span class="kw-2">*</span>)
+        }
+
+        <span class="attribute">#[allow(nonstandard_style)]
+        </span><span class="kw">mod </span>queries {
+            <span class="kw">use </span>std::marker::PhantomData;
+
+            $(<span class="kw">pub struct </span><span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                data: PhantomData&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>()&gt;
+            })*
+        }
+
+        $(<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; QueryConfig <span class="kw">for </span>queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">type </span>Key = query_keys::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+            <span class="kw">type </span>Value = query_values::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+            <span class="kw">type </span>Stored = query_stored::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+            <span class="kw">const </span>NAME: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span>str = <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>);
+        }
+
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; QueryDescription&lt;QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="macro">rustc_query_description! </span>{ <span class="macro-nonterminal">$name </span>}
+
+            <span class="kw">type </span>Cache = query_storage::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+            <span class="attribute">#[inline(always)]
+            </span><span class="kw">fn </span>query_state&lt;<span class="lifetime">&#39;a</span>&gt;(tcx: QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>QueryState&lt;<span class="self">Self</span>::Key&gt;
+                <span class="kw">where </span>QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;: <span class="lifetime">&#39;a
+            </span>{
+                <span class="kw-2">&amp;</span>tcx.queries.<span class="macro-nonterminal">$name
+            </span>}
+
+            <span class="attribute">#[inline(always)]
+            </span><span class="kw">fn </span>query_cache&lt;<span class="lifetime">&#39;a</span>&gt;(tcx: QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">Self</span>::Cache
+                <span class="kw">where </span><span class="lifetime">&#39;tcx</span>:<span class="lifetime">&#39;a
+            </span>{
+                <span class="kw-2">&amp;</span>tcx.query_caches.<span class="macro-nonterminal">$name
+            </span>}
+
+            <span class="attribute">#[inline]
+            </span><span class="kw">fn </span>make_vtable(tcx: QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, key: <span class="kw-2">&amp;</span><span class="self">Self</span>::Key) -&gt;
+                QueryVTable&lt;QueryCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Key, <span class="self">Self</span>::Value&gt;
+            {
+                <span class="kw">let </span>compute = <span class="macro">get_provider!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>][tcx, <span class="macro-nonterminal">$name</span>, key]);
+                <span class="kw">let </span>cache_on_disk = <span class="self">Self</span>::cache_on_disk(tcx.tcx, key);
+                QueryVTable {
+                    anon: <span class="macro">is_anon!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    eval_always: <span class="macro">is_eval_always!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    depth_limit: <span class="macro">depth_limit!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    dep_kind: dep_graph::DepKind::<span class="macro-nonterminal">$name</span>,
+                    hash_result: <span class="macro">hash_result!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    handle_cycle_error: <span class="macro">handle_cycle_error!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    compute,
+                    try_load_from_disk: <span class="kw">if </span>cache_on_disk { <span class="macro">should_ever_cache_on_disk!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]) } <span class="kw">else </span>{ <span class="prelude-val">None </span>},
+                }
+            }
+
+            <span class="kw">fn </span>execute_query(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, k: <span class="self">Self</span>::Key) -&gt; <span class="self">Self</span>::Stored {
+                tcx.<span class="macro-nonterminal">$name</span>(k)
+            }
+        })*
+
+        <span class="attribute">#[allow(nonstandard_style)]
+        </span><span class="kw">mod </span>query_callbacks {
+            <span class="kw">use super</span>::<span class="kw-2">*</span>;
+            <span class="kw">use </span>rustc_query_system::dep_graph::FingerprintStyle;
+
+            <span class="comment">// We use this for most things when incr. comp. is turned off.
+            </span><span class="kw">pub fn </span>Null&lt;<span class="lifetime">&#39;tcx</span>&gt;() -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                DepKindStruct {
+                    is_anon: <span class="bool-val">false</span>,
+                    is_eval_always: <span class="bool-val">false</span>,
+                    fingerprint_style: FingerprintStyle::Unit,
+                    force_from_dep_node: <span class="prelude-val">Some</span>(|<span class="kw">_</span>, dep_node| <span class="macro">bug!</span>(<span class="string">&quot;force_from_dep_node: encountered {:?}&quot;</span>, dep_node)),
+                    try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+                }
+            }
+
+            <span class="comment">// We use this for the forever-red node.
+            </span><span class="kw">pub fn </span>Red&lt;<span class="lifetime">&#39;tcx</span>&gt;() -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                DepKindStruct {
+                    is_anon: <span class="bool-val">false</span>,
+                    is_eval_always: <span class="bool-val">false</span>,
+                    fingerprint_style: FingerprintStyle::Unit,
+                    force_from_dep_node: <span class="prelude-val">Some</span>(|<span class="kw">_</span>, dep_node| <span class="macro">bug!</span>(<span class="string">&quot;force_from_dep_node: encountered {:?}&quot;</span>, dep_node)),
+                    try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+                }
+            }
+
+            <span class="kw">pub fn </span>TraitSelect&lt;<span class="lifetime">&#39;tcx</span>&gt;() -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                DepKindStruct {
+                    is_anon: <span class="bool-val">true</span>,
+                    is_eval_always: <span class="bool-val">false</span>,
+                    fingerprint_style: FingerprintStyle::Unit,
+                    force_from_dep_node: <span class="prelude-val">None</span>,
+                    try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+                }
+            }
+
+            <span class="kw">pub fn </span>CompileCodegenUnit&lt;<span class="lifetime">&#39;tcx</span>&gt;() -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                DepKindStruct {
+                    is_anon: <span class="bool-val">false</span>,
+                    is_eval_always: <span class="bool-val">false</span>,
+                    fingerprint_style: FingerprintStyle::Opaque,
+                    force_from_dep_node: <span class="prelude-val">None</span>,
+                    try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+                }
+            }
+
+            <span class="kw">pub fn </span>CompileMonoItem&lt;<span class="lifetime">&#39;tcx</span>&gt;() -&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                DepKindStruct {
+                    is_anon: <span class="bool-val">false</span>,
+                    is_eval_always: <span class="bool-val">false</span>,
+                    fingerprint_style: FingerprintStyle::Opaque,
+                    force_from_dep_node: <span class="prelude-val">None</span>,
+                    try_load_from_on_disk_cache: <span class="prelude-val">None</span>,
+                }
+            }
+
+            $(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span><span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;()-&gt; DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <span class="macro-nonterminal">$crate::plumbing::query_callback</span>::&lt;queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+                    <span class="macro">is_anon!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                    <span class="macro">is_eval_always!</span>([$(<span class="macro-nonterminal">$modifiers</span>)<span class="kw-2">*</span>]),
+                )
+            })*
+        }
+
+        <span class="kw">pub fn </span>query_callbacks&lt;<span class="lifetime">&#39;tcx</span>&gt;(arena: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Arena&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>[DepKindStruct&lt;<span class="lifetime">&#39;tcx</span>&gt;] {
+            arena.alloc_from_iter(<span class="macro">make_dep_kind_array!</span>(query_callbacks))
+        }
+    }
+}
+
+<span class="kw">use crate</span>::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.ExternProviders.html">ExternProviders</a>, <a href="on_disk_cache.rs.html#51">OnDiskCache</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>};
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(
+        local_providers: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>,
+        extern_providers: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.ExternProviders.html">ExternProviders</a>,
+        on_disk_cache: <span class="prelude-ty">Option</span>&lt;OnDiskCache&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <a href="lib.rs.html#54">Queries</a> {
+            local_providers: Box::new(<a href="#541">local_providers</a>),
+            extern_providers: Box::new(<a href="#542">extern_providers</a>),
+            <a href="#543">on_disk_cache</a>,
+            jobs: AtomicU64::new(<span class="number">1</span>),
+            ..Queries::default()
+        }
+    }
+}
+
+<span class="macro">macro_rules! </span>define_queries_struct {
+    (
+     input: ($(([$(<span class="macro-nonterminal">$modifiers</span>:tt)<span class="kw-2">*</span>] [$(<span class="macro-nonterminal">$attr</span>:tt)<span class="kw-2">*</span>] [<span class="macro-nonterminal">$name</span>:ident]))<span class="kw-2">*</span>)) =&gt; {
+        <span class="attribute">#[derive(Default)]
+        </span><span class="kw">pub struct </span>Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            local_providers: Box&lt;Providers&gt;,
+            extern_providers: Box&lt;ExternProviders&gt;,
+
+            <span class="kw">pub </span>on_disk_cache: <span class="prelude-ty">Option</span>&lt;OnDiskCache&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+            jobs: AtomicU64,
+
+            $($(<span class="attribute">#[<span class="macro-nonterminal">$attr</span>]</span>)*  <span class="macro-nonterminal">$name</span>: QueryState&lt;&lt;queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">as </span>QueryConfig&gt;::Key&gt;,)*
+        }
+
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>try_collect_active_jobs(
+                <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>,
+                tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+            ) -&gt; <span class="prelude-ty">Option</span>&lt;QueryMap&gt; {
+                <span class="kw">let </span>tcx = QueryCtxt { tcx, queries: <span class="self">self </span>};
+                <span class="kw">let </span><span class="kw-2">mut </span>jobs = QueryMap::default();
+
+                $(
+                    <span class="kw">let </span>make_query = |tcx, key| {
+                        <span class="kw">let </span>kind = dep_graph::DepKind::<span class="macro-nonterminal">$name</span>;
+                        <span class="kw">let </span>name = <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>);
+                        <span class="macro-nonterminal">$crate::plumbing::create_query_frame</span>(tcx, queries::<span class="macro-nonterminal">$name::describe</span>, key, kind, name)
+                    };
+                    <span class="self">self</span>.<span class="macro-nonterminal">$name</span>.try_collect_active_jobs(
+                        tcx,
+                        make_query,
+                        <span class="kw-2">&amp;mut </span>jobs,
+                    )<span class="question-mark">?</span>;
+                )*
+
+                <span class="prelude-val">Some</span>(jobs)
+            }
+        }
+
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; QueryEngine&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">fn </span>as_any(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="kw">dyn </span>std::any::Any {
+                <span class="kw">let </span>this = <span class="kw">unsafe </span>{ std::mem::transmute::&lt;<span class="kw-2">&amp;</span>Queries&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw-2">&amp;</span>Queries&lt;<span class="lifetime">&#39;_</span>&gt;&gt;(<span class="self">self</span>) };
+                this <span class="kw">as _
+            </span>}
+
+            <span class="kw">fn </span>try_mark_green(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, dep_node: <span class="kw-2">&amp;</span>dep_graph::DepNode) -&gt; bool {
+                <span class="kw">let </span>qcx = QueryCtxt { tcx, queries: <span class="self">self </span>};
+                tcx.dep_graph.try_mark_green(qcx, dep_node).is_some()
+            }
+
+            $($(<span class="attribute">#[<span class="macro-nonterminal">$attr</span>]</span>)*
+            <span class="attribute">#[inline(always)]
+            #[tracing::instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>, tcx), ret)]
+            </span><span class="kw">fn </span><span class="macro-nonterminal">$name</span>(
+                <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>,
+                tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+                span: Span,
+                key: &lt;queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">as </span>QueryConfig&gt;::Key,
+                mode: QueryMode,
+            ) -&gt; <span class="prelude-ty">Option</span>&lt;query_stored::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+                <span class="kw">let </span>qcx = QueryCtxt { tcx, queries: <span class="self">self </span>};
+                get_query::&lt;queries::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw">_</span>&gt;(qcx, span, key, mode)
+            })*
+        }
+    };
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_query_impl" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

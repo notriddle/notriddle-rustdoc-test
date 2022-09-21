@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["find_param_with_region",""]],"struct":[["AnonymousParamInfo","Information about the anonymous region we are searching for."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ParserError",""]],"struct":[["Directory",""],["Parser","A parser for Rust source code."],["ParserBuilder","A builder for the `Parser`."]],"type":[["DirectoryOwnership",""],["ModError",""],["ModulePathSuccess",""]]};

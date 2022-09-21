@@ -1,0 +1,138 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_query_system/src/dep_graph/query.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>query.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_query_system/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span>rustc_data_structures::graph::implementation::{<a href="../../../rustc_data_structures/graph/implementation/struct.Direction.html">Direction</a>, <a href="../../../rustc_data_structures/graph/implementation/struct.Graph.html">Graph</a>, NodeIndex, <a href="../../../rustc_data_structures/graph/implementation/constant.INCOMING.html">INCOMING</a>};
+<span class="kw">use </span><a href="../../../rustc_index/vec/struct.IndexVec.html">rustc_index::vec::IndexVec</a>;
+
+<span class="kw">use super</span>::{<a href="mod.rs.html#91">DepKind</a>, <a href="dep_node.rs.html#54">DepNode</a>, <a href="graph.rs.html#39-41">DepNodeIndex</a>};
+
+<span class="kw">pub struct </span>DepGraphQuery&lt;K&gt; {
+    <span class="kw">pub </span>graph: Graph&lt;DepNode&lt;K&gt;, ()&gt;,
+    <span class="kw">pub </span>indices: FxHashMap&lt;DepNode&lt;K&gt;, <a href="../../../rustc_data_structures/graph/implementation/struct.NodeIndex.html">NodeIndex</a>&gt;,
+    <span class="kw">pub </span>dep_index_to_index: IndexVec&lt;<a href="graph.rs.html#39-41">DepNodeIndex</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_data_structures/graph/implementation/struct.NodeIndex.html">NodeIndex</a>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;K: <a href="mod.rs.html#91">DepKind</a>&gt; DepGraphQuery&lt;K&gt; {
+    <span class="kw">pub fn </span>new(prev_node_count: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; DepGraphQuery&lt;K&gt; {
+        <span class="kw">let </span>node_count = <a href="#14">prev_node_count</a> + <a href="#14">prev_node_count</a> / <span class="number">4</span>;
+        <span class="kw">let </span>edge_count = <span class="number">6 </span>* <a href="#15">node_count</a>;
+
+        <span class="kw">let </span>graph = Graph::with_capacity(<a href="#15">node_count</a>, <a href="#16">edge_count</a>);
+        <span class="kw">let </span>indices = FxHashMap::default();
+        <span class="kw">let </span>dep_index_to_index = IndexVec::new();
+
+        <a href="#7">DepGraphQuery</a> { <a href="#18">graph</a>, <a href="#19">indices</a>, <a href="#20">dep_index_to_index</a> }
+    }
+
+    <span class="kw">pub fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: <a href="graph.rs.html#39-41">DepNodeIndex</a>, node: DepNode&lt;K&gt;, edges: <span class="kw-2">&amp;</span>[<a href="graph.rs.html#39-41">DepNodeIndex</a>]) {
+        <span class="kw">let </span>source = <a class="self" href="#25">self</a>.graph.add_node(<a href="#25">node</a>);
+        <span class="kw">if </span>index.index() &gt;= <span class="self">self</span>.dep_index_to_index.len() {
+            <a class="self" href="#25">self</a>.dep_index_to_index.resize(<a href="#25">index</a>.<a href="graph.rs.html#39-41">index</a>() + <span class="number">1</span>, <span class="prelude-val">None</span>);
+        }
+        <a class="self" href="#25">self</a>.dep_index_to_index[<a href="#25">index</a>] = <span class="prelude-val">Some</span>(<a href="#26">source</a>);
+        <a class="self" href="#25">self</a>.indices.insert(<a href="#25">node</a>, <a href="#26">source</a>);
+
+        <span class="kw">for </span><span class="kw-2">&amp;</span>target <span class="kw">in </span>edges.iter() {
+            <span class="kw">let </span>target = <span class="self">self</span>.dep_index_to_index[target];
+            <span class="comment">// We may miss the edges that are pushed while the `DepGraphQuery` is being accessed.
+            // Skip them to issues.
+            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(target) = target {
+                <span class="self">self</span>.graph.add_edge(source, target, ());
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>nodes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;<span class="kw-2">&amp;</span>DepNode&lt;K&gt;&gt; {
+        <a class="self" href="#43">self</a>.graph.all_nodes().iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|n| <span class="kw-2">&amp;</span><a href="#44">n</a>.data).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+
+    <span class="kw">pub fn </span>edges(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;(<span class="kw-2">&amp;</span>DepNode&lt;K&gt;, <span class="kw-2">&amp;</span>DepNode&lt;K&gt;)&gt; {
+        <a class="self" href="#47">self</a>.graph
+            .all_edges()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|edge| (<a href="#51">edge</a>.source(), <a href="#51">edge</a>.target()))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(s, t)| (<a class="self" href="#47">self</a>.graph.node_data(<a href="#52">s</a>), <a class="self" href="#47">self</a>.graph.node_data(<a href="#52">t</a>)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+
+    <span class="kw">fn </span>reachable_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <span class="kw-2">&amp;</span>DepNode&lt;K&gt;, direction: <a href="../../../rustc_data_structures/graph/implementation/struct.Direction.html">Direction</a>) -&gt; Vec&lt;<span class="kw-2">&amp;</span>DepNode&lt;K&gt;&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>index) = <a class="self" href="#56">self</a>.indices.get(<a href="#56">node</a>) {
+            <a class="self" href="#56">self</a>.graph.depth_traverse(<a href="#57">index</a>, <a href="#56">direction</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|s| <a class="self" href="#56">self</a>.graph.node_data(<a href="#58">s</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[]
+        }
+    }
+
+    <span class="doccomment">/// All nodes that can reach `node`.
+    </span><span class="kw">pub fn </span>transitive_predecessors(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <span class="kw-2">&amp;</span>DepNode&lt;K&gt;) -&gt; Vec&lt;<span class="kw-2">&amp;</span>DepNode&lt;K&gt;&gt; {
+        <a class="self" href="#65">self</a>.<a href="#56">reachable_nodes</a>(<a href="#65">node</a>, <a href="../../../rustc_data_structures/graph/implementation/constant.INCOMING.html">INCOMING</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_query_system" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

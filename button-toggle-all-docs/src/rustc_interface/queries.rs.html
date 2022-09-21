@@ -1,0 +1,798 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_interface/src/queries.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>queries.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_interface/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_interface/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_interface/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::errors::{<a href="errors.rs.html#86">FailedWritingFile</a>, <a href="errors.rs.html#72">RustcErrorFatal</a>, <a href="errors.rs.html#79">RustcErrorUnexpectedAnnotation</a>};
+<span class="kw">use </span><span class="kw">crate</span>::interface::{<a href="interface.rs.html#32">Compiler</a>, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span><span class="kw">crate</span>::passes::{<a class="self" href="lib.rs.html#17">self</a>, <a href="passes.rs.html#87">BoxedResolver</a>, <a href="passes.rs.html#760">QueryContext</a>};
+
+<span class="kw">use </span><a href="../../rustc_ast/index.html">rustc_ast</a> <span class="kw">as </span>ast;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/backend/trait.CodegenBackend.html">rustc_codegen_ssa::traits::CodegenBackend</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/struct.CodegenResults.html">rustc_codegen_ssa::CodegenResults</a>;
+<span class="kw">use </span><a href="../../rustc_data_structures/svh/struct.Svh.html">rustc_data_structures::svh::Svh</a>;
+<span class="kw">use </span>rustc_data_structures::sync::{<a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">Lrc</a>, <a href="https://doc.rust-lang.org/nightly/core/cell/once/struct.OnceCell.html">OnceCell</a>, <a href="../../rustc_data_structures/sync/struct.WorkerLocal.html">WorkerLocal</a>};
+<span class="kw">use </span><a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">rustc_hir::def_id::LOCAL_CRATE</a>;
+<span class="kw">use </span><a href="../../rustc_incremental/persist/load/type.DepGraphFuture.html">rustc_incremental::DepGraphFuture</a>;
+<span class="kw">use </span><a href="../../rustc_lint/context/struct.LintStore.html">rustc_lint::LintStore</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/arena/struct.Arena.html">rustc_middle::arena::Arena</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraph.html">rustc_middle::dep_graph::DepGraph</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.GlobalCtxt.html">GlobalCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_query_impl/struct.Queries.html">rustc_query_impl::Queries</a> <span class="kw">as </span>TcxQueries;
+<span class="kw">use </span>rustc_session::config::{<a class="self" href="../../rustc_session/config/index.html">self</a>, <a href="../../rustc_session/config/struct.OutputFilenames.html">OutputFilenames</a>, <a href="../../rustc_session/config/enum.OutputType.html">OutputType</a>};
+<span class="kw">use </span>rustc_session::{<a href="../../rustc_session/output/fn.find_crate_name.html">output::find_crate_name</a>, <a href="../../rustc_session/session/struct.Session.html">Session</a>};
+<span class="kw">use </span><a href="../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">std::any::Any</a>;
+<span class="kw">use </span>std::cell::{<a href="https://doc.rust-lang.org/nightly/core/cell/struct.Ref.html">Ref</a>, <a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefCell.html">RefCell</a>, <a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefMut.html">RefMut</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">std::rc::Rc</a>;
+
+<span class="doccomment">/// Represent the result of a query.
+///
+/// This result can be stolen with the [`take`] method and generated with the [`compute`] method.
+///
+/// [`take`]: Self::take
+/// [`compute`]: Self::compute
+</span><span class="kw">pub struct </span>Query&lt;T&gt; {
+    result: RefCell&lt;<span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Result</span>&lt;T&gt;&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;T&gt; Query&lt;T&gt; {
+    <span class="kw">fn </span>compute&lt;F: FnOnce() -&gt; <span class="prelude-ty">Result</span>&lt;T&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, f: F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;T&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <a class="self" href="#35">self</a>.result.borrow_mut();
+        <span class="kw">if </span>result.is_none() {
+            <span class="kw-2">*</span><a href="#36">result</a> = <span class="prelude-val">Some</span>(<a href="#35">f</a>());
+        }
+        <a href="#36">result</a>.as_ref().unwrap().as_ref().map(|<span class="kw">_</span>| <a class="self" href="#35">self</a>).map_err(|err| <span class="kw-2">*</span><a href="#40">err</a>)
+    }
+
+    <span class="doccomment">/// Takes ownership of the query result. Further attempts to take or peek the query
+    /// result will panic unless it is generated by calling the `compute` method.
+    </span><span class="kw">pub fn </span>take(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; T {
+        <a class="self" href="#45">self</a>.result.borrow_mut().take().expect(<span class="string">&quot;missing query result&quot;</span>).unwrap()
+    }
+
+    <span class="doccomment">/// Borrows the query result using the RefCell. Panics if the result is stolen.
+    </span><span class="kw">pub fn </span>peek(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Ref&lt;<span class="lifetime">&#39;_</span>, T&gt; {
+        Ref::map(<a class="self" href="#50">self</a>.result.borrow(), |r| {
+            <a href="#51">r</a>.as_ref().unwrap().as_ref().expect(<span class="string">&quot;missing query result&quot;</span>)
+        })
+    }
+
+    <span class="doccomment">/// Mutably borrows the query result using the RefCell. Panics if the result is stolen.
+    </span><span class="kw">pub fn </span>peek_mut(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RefMut&lt;<span class="lifetime">&#39;_</span>, T&gt; {
+        RefMut::map(<a class="self" href="#57">self</a>.result.borrow_mut(), |r| {
+            <a href="#58">r</a>.as_mut().unwrap().as_mut().expect(<span class="string">&quot;missing query result&quot;</span>)
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;T&gt; <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default</a> <span class="kw">for </span>Query&lt;T&gt; {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <a href="#30">Query</a> { result: RefCell::new(<span class="prelude-val">None</span>) }
+    }
+}
+
+<span class="kw">pub struct </span>Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    compiler: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="interface.rs.html#32">Compiler</a>,
+    gcx: OnceCell&lt;GlobalCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    queries: OnceCell&lt;TcxQueries&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    arena: WorkerLocal&lt;Arena&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    hir_arena: WorkerLocal&lt;rustc_hir::Arena&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    dep_graph_future: Query&lt;<span class="prelude-ty">Option</span>&lt;<a href="../../rustc_incremental/persist/load/type.DepGraphFuture.html">DepGraphFuture</a>&gt;&gt;,
+    parse: Query&lt;<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>&gt;,
+    crate_name: Query&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    register_plugins: Query&lt;(<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>, Lrc&lt;<a href="../../rustc_lint/context/struct.LintStore.html">LintStore</a>&gt;)&gt;,
+    expansion: Query&lt;(Lrc&lt;<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>&gt;, Rc&lt;RefCell&lt;<a href="passes.rs.html#87">BoxedResolver</a>&gt;&gt;, Lrc&lt;<a href="../../rustc_lint/context/struct.LintStore.html">LintStore</a>&gt;)&gt;,
+    dep_graph: Query&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraph.html">DepGraph</a>&gt;,
+    prepare_outputs: Query&lt;<a href="../../rustc_session/config/struct.OutputFilenames.html">OutputFilenames</a>&gt;,
+    global_ctxt: Query&lt;QueryContext&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ongoing_codegen: Query&lt;Box&lt;<span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(compiler: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="interface.rs.html#32">Compiler</a>) -&gt; Queries&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#70">Queries</a> {
+            <a href="#90">compiler</a>,
+            gcx: OnceCell::new(),
+            queries: OnceCell::new(),
+            arena: WorkerLocal::new(|<span class="kw">_</span>| Arena::default()),
+            hir_arena: WorkerLocal::new(|<span class="kw">_</span>| rustc_hir::Arena::default()),
+            dep_graph_future: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            parse: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            crate_name: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            register_plugins: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            expansion: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            dep_graph: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            prepare_outputs: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            global_ctxt: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            ongoing_codegen: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        }
+    }
+
+    <span class="kw">fn </span>session(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Lrc&lt;<a href="../../rustc_session/session/struct.Session.html">Session</a>&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#109">self</a>.compiler.sess
+    }
+    <span class="kw">fn </span>codegen_backend(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Lrc&lt;Box&lt;<span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/backend/trait.CodegenBackend.html">CodegenBackend</a>&gt;&gt; {
+        <a class="self" href="#112">self</a>.compiler.<a href="interface.rs.html#49">codegen_backend</a>()
+    }
+
+    <span class="kw">fn </span>dep_graph_future(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;<span class="prelude-ty">Option</span>&lt;<a href="../../rustc_incremental/persist/load/type.DepGraphFuture.html">DepGraphFuture</a>&gt;&gt;&gt; {
+        <a class="self" href="#116">self</a>.dep_graph_future.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>sess = <a class="self" href="#116">self</a>.<a href="#109">session</a>();
+            <span class="prelude-val">Ok</span>(<a href="#118">sess</a>.opts.build_dep_graph().then(|| rustc_incremental::load_dep_graph(<a href="#118">sess</a>)))
+        })
+    }
+
+    <span class="kw">pub fn </span>parse(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>&gt;&gt; {
+        <a class="self" href="#123">self</a>.parse.<a href="#35">compute</a>(|| {
+            <a href="passes.rs.html#53">passes::parse</a>(<a class="self" href="#123">self</a>.<a href="#109">session</a>(), <span class="kw-2">&amp;</span><a class="self" href="#123">self</a>.compiler.input)
+                .map_err(|<span class="kw-2">mut </span>parse_error| <a href="#126">parse_error</a>.emit())
+        })
+    }
+
+    <span class="kw">pub fn </span>register_plugins(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;(<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>, Lrc&lt;<a href="../../rustc_lint/context/struct.LintStore.html">LintStore</a>&gt;)&gt;&gt; {
+        <a class="self" href="#130">self</a>.register_plugins.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>crate_name = <span class="self">self</span>.crate_name()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+            <span class="kw">let </span>krate = <span class="self">self</span>.parse()<span class="question-mark">?</span>.<a href="#45">take</a>();
+
+            <span class="kw">let </span>empty: <span class="kw-2">&amp;</span>(<span class="kw">dyn </span>Fn(<span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a>, <span class="kw-2">&amp;mut </span><a href="../../rustc_lint/context/struct.LintStore.html">LintStore</a>) + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html">Sync</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html">Send</a>) = <span class="kw-2">&amp;</span>|<span class="kw">_</span>, <span class="kw">_</span>| {};
+            <span class="kw">let </span>(krate, lint_store) = passes::register_plugins(
+                <span class="self">self</span>.session(),
+                <span class="kw-2">&amp;*</span><span class="self">self</span>.codegen_backend().metadata_loader(),
+                <span class="self">self</span>.compiler.register_lints.as_deref().unwrap_or_else(|| empty),
+                krate,
+                <span class="kw-2">&amp;</span>crate_name,
+            )<span class="question-mark">?</span>;
+
+            <span class="comment">// Compute the dependency graph (in the background). We want to do
+            // this as early as possible, to give the DepGraph maximum time to
+            // load before dep_graph() is called, but it also can&#39;t happen
+            // until after rustc_incremental::prepare_session_directory() is
+            // called, which happens within passes::register_plugins().
+            </span><a class="self" href="#130">self</a>.<a href="#116">dep_graph_future</a>().ok();
+
+            <span class="prelude-val">Ok</span>((<a href="#136">krate</a>, Lrc::new(<a href="#136">lint_store</a>)))
+        })
+    }
+
+    <span class="kw">pub fn </span>crate_name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;&gt; {
+        <a class="self" href="#155">self</a>.crate_name.<a href="#35">compute</a>(|| {
+            <span class="prelude-val">Ok</span>({
+                <span class="kw">let </span>parse_result = <span class="self">self</span>.parse()<span class="question-mark">?</span>;
+                <span class="kw">let </span>krate = <a href="#158">parse_result</a>.<a href="#50">peek</a>();
+                <span class="comment">// parse `#[crate_name]` even if `--crate-name` was passed, to make sure it matches.
+                </span><a href="../../rustc_session/output/fn.find_crate_name.html">find_crate_name</a>(<a class="self" href="#155">self</a>.<a href="#109">session</a>(), <span class="kw-2">&amp;</span><a href="#159">krate</a>.attrs, <span class="kw-2">&amp;</span><a class="self" href="#155">self</a>.compiler.input)
+            })
+        })
+    }
+
+    <span class="kw">pub fn </span>expansion(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;(Lrc&lt;<a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>&gt;, Rc&lt;RefCell&lt;<a href="passes.rs.html#87">BoxedResolver</a>&gt;&gt;, Lrc&lt;<a href="../../rustc_lint/context/struct.LintStore.html">LintStore</a>&gt;)&gt;&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;expansion&quot;</span>);
+        <a class="self" href="#167">self</a>.expansion.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>crate_name = <span class="self">self</span>.crate_name()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+            <span class="kw">let </span>(krate, lint_store) = <span class="self">self</span>.register_plugins()<span class="question-mark">?</span>.<a href="#45">take</a>();
+            <span class="kw">let </span>_timer = <a class="self" href="#167">self</a>.<a href="#109">session</a>().timer(<span class="string">&quot;configure_and_expand&quot;</span>);
+            <span class="kw">let </span>sess = <a class="self" href="#167">self</a>.<a href="#109">session</a>();
+            <span class="kw">let </span><span class="kw-2">mut </span>resolver = <a href="passes.rs.html#161-166">passes::create_resolver</a>(
+                <a href="#174">sess</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+                <a class="self" href="#167">self</a>.<a href="#112">codegen_backend</a>().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/backend/trait.CodegenBackend.html">metadata_loader</a>(),
+                <span class="kw-2">&amp;</span><a href="#172">krate</a>,
+                <span class="kw-2">&amp;</span><a href="#171">crate_name</a>,
+            );
+            <span class="kw">let </span>krate = resolver.access(|resolver| {
+                passes::configure_and_expand(sess, <span class="kw-2">&amp;</span>lint_store, krate, <span class="kw-2">&amp;</span>crate_name, resolver)
+            })<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((Lrc::new(<a href="#181">krate</a>), Rc::new(RefCell::new(<a href="#175">resolver</a>)), <a href="#172">lint_store</a>))
+        })
+    }
+
+    <span class="kw">fn </span>dep_graph(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraph.html">DepGraph</a>&gt;&gt; {
+        <a class="self" href="#188">self</a>.dep_graph.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>sess = <a class="self" href="#188">self</a>.<a href="#109">session</a>();
+            <span class="kw">let </span>future_opt = <span class="self">self</span>.dep_graph_future()<span class="question-mark">?</span>.<a href="#45">take</a>();
+            <span class="kw">let </span>dep_graph = <a href="#191">future_opt</a>
+                .and_then(|future| {
+                    <span class="kw">let </span>(prev_graph, prev_work_products) =
+                        <a href="#190">sess</a>.time(<span class="string">&quot;blocked_on_dep_graph_loading&quot;</span>, || <a href="#193">future</a>.open().open(<a href="#190">sess</a>));
+
+                    rustc_incremental::build_dep_graph(<a href="#190">sess</a>, <a href="#194">prev_graph</a>, <a href="#194">prev_work_products</a>)
+                })
+                .unwrap_or_else(DepGraph::new_disabled);
+            <span class="prelude-val">Ok</span>(<a href="#192">dep_graph</a>)
+        })
+    }
+
+    <span class="kw">pub fn </span>prepare_outputs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;<a href="../../rustc_session/config/struct.OutputFilenames.html">OutputFilenames</a>&gt;&gt; {
+        <a class="self" href="#204">self</a>.prepare_outputs.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>(krate, boxed_resolver, <span class="kw">_</span>) = <span class="kw-2">&amp;*</span><span class="self">self</span>.expansion()<span class="question-mark">?</span>.<a href="#50">peek</a>();
+            <span class="kw">let </span>crate_name = <span class="self">self</span>.crate_name()<span class="question-mark">?</span>.<a href="#50">peek</a>();
+            <a href="passes.rs.html#666-672">passes::prepare_outputs</a>(
+                <a class="self" href="#204">self</a>.<a href="#109">session</a>(),
+                <a class="self" href="#204">self</a>.compiler,
+                <a href="#206">krate</a>,
+                <span class="kw-2">&amp;*</span><a href="#206">boxed_resolver</a>,
+                <span class="kw-2">&amp;</span><a href="#207">crate_name</a>,
+            )
+        })
+    }
+
+    <span class="kw">pub fn </span>global_ctxt(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;QueryContext&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <a class="self" href="#218">self</a>.global_ctxt.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>crate_name = <span class="self">self</span>.crate_name()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+            <span class="kw">let </span>outputs = <span class="self">self</span>.prepare_outputs()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+            <span class="kw">let </span>dep_graph = <span class="self">self</span>.dep_graph()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+            <span class="kw">let </span>(krate, resolver, lint_store) = <span class="self">self</span>.expansion()<span class="question-mark">?</span>.<a href="#45">take</a>();
+            <span class="prelude-val">Ok</span>(<a href="passes.rs.html#774-786">passes::create_global_ctxt</a>(
+                <a class="self" href="#218">self</a>.compiler,
+                <a href="#223">lint_store</a>,
+                <a href="#223">krate</a>,
+                <a href="#222">dep_graph</a>,
+                <a href="#223">resolver</a>,
+                <a href="#221">outputs</a>,
+                <span class="kw-2">&amp;</span><a href="#220">crate_name</a>,
+                <span class="kw-2">&amp;</span><a class="self" href="#218">self</a>.queries,
+                <span class="kw-2">&amp;</span><a class="self" href="#218">self</a>.gcx,
+                <span class="kw-2">&amp;</span><a class="self" href="#218">self</a>.arena,
+                <span class="kw-2">&amp;</span><a class="self" href="#218">self</a>.hir_arena,
+            ))
+        })
+    }
+
+    <span class="kw">pub fn </span>ongoing_codegen(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>Query&lt;Box&lt;<span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt;&gt;&gt; {
+        <a class="self" href="#240">self</a>.ongoing_codegen.<a href="#35">compute</a>(|| {
+            <span class="kw">let </span>outputs = <span class="self">self</span>.prepare_outputs()<span class="question-mark">?</span>;
+            <span class="self">self</span>.global_ctxt()<span class="question-mark">?</span>.<a href="#57">peek_mut</a>().<a href="passes.rs.html#765-767">enter</a>(|tcx| {
+                <a href="#243">tcx</a>.analysis(()).ok();
+
+                <span class="comment">// Don&#39;t do code generation if there were any errors
+                </span><span class="self">self</span>.session().compile_status()<span class="question-mark">?</span>;
+
+                <span class="comment">// Hook for UI tests.
+                </span><span class="self">Self</span>::check_for_rustc_errors_attr(<a href="#243">tcx</a>);
+
+                <span class="prelude-val">Ok</span>(<a href="passes.rs.html#977-981">passes::start_codegen</a>(<span class="kw-2">&amp;***</span><a class="self" href="#240">self</a>.<a href="#112">codegen_backend</a>(), <a href="#243">tcx</a>, <span class="kw-2">&amp;*</span><a href="#242">outputs</a>.<a href="#50">peek</a>()))
+            })
+        })
+    }
+
+    <span class="doccomment">/// Check for the `#[rustc_error]` annotation, which forces an error in codegen. This is used
+    /// to write UI tests that actually test that compilation succeeds without reporting
+    /// an error.
+    </span><span class="kw">fn </span>check_for_rustc_errors_attr(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span><span class="prelude-val">Some</span>((def_id, <span class="kw">_</span>)) = <a href="#260">tcx</a>.entry_fn(()) <span class="kw">else </span>{ <span class="kw">return </span>};
+        <span class="kw">for </span>attr <span class="kw">in </span>tcx.get_attrs(def_id, sym::rustc_error) {
+            <span class="kw">match </span>attr.meta_item_list() {
+                <span class="comment">// Check if there is a `#[rustc_error(delay_span_bug_from_inside_query)]`.
+                </span><span class="prelude-val">Some</span>(list)
+                    <span class="kw">if </span>list.iter().any(|list_item| {
+                        <span class="macro">matches!</span>(
+                            list_item.ident().map(|i| i.name),
+                            <span class="prelude-val">Some</span>(sym::delay_span_bug_from_inside_query)
+                        )
+                    }) =&gt;
+                {
+                    tcx.ensure().trigger_delay_span_bug(def_id);
+                }
+
+                <span class="comment">// Bare `#[rustc_error]`.
+                </span><span class="prelude-val">None </span>=&gt; {
+                    tcx.sess.emit_fatal(RustcErrorFatal { span: tcx.def_span(def_id) });
+                }
+
+                <span class="comment">// Some other attribute.
+                </span><span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
+                    tcx.sess.emit_warning(RustcErrorUnexpectedAnnotation {
+                        span: tcx.def_span(def_id),
+                    });
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>linker(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="#312">Linker</a>&gt; {
+        <span class="kw">let </span>sess = <a class="self" href="#291">self</a>.<a href="#109">session</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+        <span class="kw">let </span>codegen_backend = <a class="self" href="#291">self</a>.<a href="#112">codegen_backend</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+
+        <span class="kw">let </span>dep_graph = <span class="self">self</span>.dep_graph()<span class="question-mark">?</span>.<a href="#50">peek</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+        <span class="kw">let </span>prepare_outputs = <span class="self">self</span>.prepare_outputs()<span class="question-mark">?</span>.<a href="#45">take</a>();
+        <span class="kw">let </span>crate_hash = <span class="self">self</span>.global_ctxt()<span class="question-mark">?</span>.<a href="#57">peek_mut</a>().<a href="passes.rs.html#765-767">enter</a>(|tcx| <a href="#297">tcx</a>.crate_hash(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>));
+        <span class="kw">let </span>ongoing_codegen = <span class="self">self</span>.ongoing_codegen()<span class="question-mark">?</span>.<a href="#45">take</a>();
+
+        <span class="prelude-val">Ok</span>(<a href="#312">Linker</a> {
+            <a href="#292">sess</a>,
+            <a href="#293">codegen_backend</a>,
+
+            <a href="#295">dep_graph</a>,
+            <a href="#296">prepare_outputs</a>,
+            <a href="#297">crate_hash</a>,
+            <a href="#298">ongoing_codegen</a>,
+        })
+    }
+}
+
+<span class="kw">pub struct </span>Linker {
+    <span class="comment">// compilation inputs
+    </span>sess: Lrc&lt;<a href="../../rustc_session/session/struct.Session.html">Session</a>&gt;,
+    codegen_backend: Lrc&lt;Box&lt;<span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/backend/trait.CodegenBackend.html">CodegenBackend</a>&gt;&gt;,
+
+    <span class="comment">// compilation outputs
+    </span>dep_graph: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraph.html">DepGraph</a>,
+    prepare_outputs: <a href="../../rustc_session/config/struct.OutputFilenames.html">OutputFilenames</a>,
+    crate_hash: <a href="../../rustc_data_structures/svh/struct.Svh.html">Svh</a>,
+    ongoing_codegen: Box&lt;<span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#312">Linker</a> {
+    <span class="kw">pub fn </span>link(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">let </span>(codegen_results, work_products) = <span class="self">self</span>.codegen_backend.join_codegen(
+            <span class="self">self</span>.ongoing_codegen,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.sess,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.prepare_outputs,
+        )<span class="question-mark">?</span>;
+
+        <span class="self">self</span>.sess.compile_status()<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>sess = <span class="kw-2">&amp;</span><a class="self" href="#325">self</a>.sess;
+        <span class="kw">let </span>dep_graph = <a class="self" href="#325">self</a>.dep_graph;
+        <a href="#334">sess</a>.time(<span class="string">&quot;serialize_work_products&quot;</span>, || {
+            rustc_incremental::save_work_product_index(<a href="#334">sess</a>, <span class="kw-2">&amp;</span><a href="#335">dep_graph</a>, <a href="#326">work_products</a>)
+        });
+
+        <span class="kw">let </span>prof = <a class="self" href="#325">self</a>.sess.prof.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+        <a href="#340">prof</a>.generic_activity(<span class="string">&quot;drop_dep_graph&quot;</span>).run(<span class="kw">move </span>|| <a href="https://doc.rust-lang.org/nightly/core/mem/fn.drop.html">drop</a>(<a href="#335">dep_graph</a>));
+
+        <span class="comment">// Now that we won&#39;t touch anything in the incremental compilation directory
+        // any more, we can finalize it (which involves renaming it)
+        </span>rustc_incremental::finalize_session_directory(<span class="kw-2">&amp;</span><a class="self" href="#325">self</a>.sess, <a class="self" href="#325">self</a>.crate_hash);
+
+        <span class="kw">if </span>!<span class="self">self
+            </span>.sess
+            .opts
+            .output_types
+            .keys()
+            .any(|<span class="kw-2">&amp;</span>i| i == OutputType::Exe || i == OutputType::Metadata)
+        {
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="kw">if </span>sess.opts.unstable_opts.no_link {
+            <span class="kw">let </span>encoded = CodegenResults::serialize_rlink(<span class="kw-2">&amp;</span><a href="#326">codegen_results</a>);
+            <span class="kw">let </span>rlink_file = <a class="self" href="#325">self</a>.prepare_outputs.with_extension(config::RLINK_EXT);
+            std::fs::write(<span class="kw-2">&amp;</span>rlink_file, encoded)
+                .map_err(|error| sess.emit_fatal(FailedWritingFile { path: <span class="kw-2">&amp;</span>rlink_file, error }))<span class="question-mark">?</span>;
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="kw">let </span>_timer = <a href="#334">sess</a>.prof.verbose_generic_activity(<span class="string">&quot;link_crate&quot;</span>);
+        <a class="self" href="#325">self</a>.codegen_backend.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/backend/trait.CodegenBackend.html">link</a>(<span class="kw-2">&amp;</span><a class="self" href="#325">self</a>.sess, <a href="#326">codegen_results</a>, <span class="kw-2">&amp;</span><a class="self" href="#325">self</a>.prepare_outputs)
+    }
+}
+
+<span class="kw">impl </span><a href="interface.rs.html#32">Compiler</a> {
+    <span class="kw">pub fn </span>enter&lt;F, T&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, f: F) -&gt; T
+    <span class="kw">where
+        </span>F: <span class="kw">for</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; FnOnce(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Queries&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; T,
+    {
+        <span class="kw">let </span><span class="kw-2">mut </span>_timer = <span class="prelude-val">None</span>;
+        <span class="kw">let </span>queries = Queries::new(<a class="self" href="#371">self</a>);
+        <span class="kw">let </span>ret = <a href="#371">f</a>(<span class="kw-2">&amp;</span><a href="#376">queries</a>);
+
+        <span class="comment">// NOTE: intentionally does not compute the global context if it hasn&#39;t been built yet,
+        // since that likely means there was a parse error.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(gcx)) = <span class="kw-2">&amp;mut *</span><a href="#376">queries</a>.global_ctxt.result.borrow_mut() {
+            <span class="comment">// We assume that no queries are run past here. If there are new queries
+            // after this point, they&#39;ll show up as &quot;&lt;unknown&gt;&quot; in self-profiling data.
+            </span>{
+                <span class="kw">let </span>_prof_timer =
+                    <a href="#376">queries</a>.<a href="#109">session</a>().prof.generic_activity(<span class="string">&quot;self_profile_alloc_query_strings&quot;</span>);
+                <a href="#381">gcx</a>.<a href="passes.rs.html#765-767">enter</a>(rustc_query_impl::alloc_self_profile_query_strings);
+            }
+
+            <a class="self" href="#371">self</a>.<a href="interface.rs.html#46">session</a>()
+                .time(<span class="string">&quot;serialize_dep_graph&quot;</span>, || <a href="#381">gcx</a>.<a href="passes.rs.html#765-767">enter</a>(rustc_incremental::save_dep_graph));
+        }
+
+        <a href="#375">_timer</a> = <span class="prelude-val">Some</span>(<a class="self" href="#371">self</a>.<a href="interface.rs.html#46">session</a>().timer(<span class="string">&quot;free_global_ctxt&quot;</span>));
+
+        <a href="#377">ret</a>
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_interface" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["find_anon_type","This function calls the `visit_ty` method for the parameters corresponding to the anonymous regions. The `nested_visitor.found_type` contains the anonymous type."]]};

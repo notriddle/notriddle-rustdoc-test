@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["annotation_type_for_level","Maps `Diagnostic::Level` to `snippet::AnnotationType`"],["source_string","Provides the source string for the given `line` of `file`"]],"struct":[["AnnotateSnippetEmitterWriter","Generates diagnostics using annotate-snippet"]]};

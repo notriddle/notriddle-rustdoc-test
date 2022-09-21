@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["compute_mir_scopes","Produces DIScope DIEs for each MIR Scope which has variables defined in it."],["make_mir_scope",""]]};

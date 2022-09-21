@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["direct_serialize_impls",""],["peel",""],["tuple",""]],"trait":[["Decodable","Trait for types that can be deserialized"],["Decoder",""],["Encodable","Trait for types that can be serialized"],["Encoder","A note about error handling."]]};

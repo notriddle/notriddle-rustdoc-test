@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Inherited","Closures defined within the function. For example:"],["InheritedBuilder","A temporary returned by `Inherited::build(...)`. This is necessary for multiple `InferCtxt` to share the same `in_progress_typeck_results` without using `Rc` or something similar."]]};

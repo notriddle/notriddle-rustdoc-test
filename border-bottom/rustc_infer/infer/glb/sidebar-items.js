@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Glb","“Greatest lower bound” (common subtype)"]]};

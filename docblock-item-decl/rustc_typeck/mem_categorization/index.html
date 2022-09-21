@@ -1,0 +1,43 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Categorization"><meta name="keywords" content="rust, rustlang, rust-lang, mem_categorization"><title>rustc_typeck::mem_categorization - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module mem_categorization</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li><li><a href="#types">Type Definitions</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_typeck/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../index.html">rustc_typeck</a>::<wbr><a class="mod" href="#">mem_categorization</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../src/rustc_typeck/mem_categorization.rs.html#1-786">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="categorization"><a href="#categorization">Categorization</a></h2>
+<p>The job of the categorization module is to analyze an expression to
+determine what kind of memory is used in evaluating it (for example,
+where dereferences occur and what kind of pointer is dereferenced;
+whether the memory is mutable, etc.).</p>
+<p>Categorization effectively transforms all of our expressions into
+expressions of the following forms (the actual enum has many more
+possibilities, naturally, but they are all variants of these base
+forms):</p>
+
+<div class="example-wrap ignore"><div class='tooltip'>ⓘ</div><pre class="rust rust-example-rendered"><code>E = rvalue    <span class="comment">// some computed rvalue
+  </span>| x         <span class="comment">// address of a local variable or argument
+  </span>| <span class="kw-2">*</span>E        <span class="comment">// deref of a ptr
+  </span>| E.comp    <span class="comment">// access to an interior component</span></code></pre></div>
+<p>Imagine a routine ToAddr(Expr) that evaluates an expression and returns an
+address where the result is to be found. If Expr is a place, then this
+is the address of the place. If <code>Expr</code> is an rvalue, this is the address of
+some temporary spot in memory where the result is stored.</p>
+<p>Now, <code>cat_expr()</code> classifies the expression <code>Expr</code> and the address <code>A = ToAddr(Expr)</code>
+as follows:</p>
+<ul>
+<li><code>cat</code>: what kind of expression was this? This is a subset of the
+full expression forms which only includes those that we care about
+for the purpose of the analysis.</li>
+<li><code>mutbl</code>: mutability of the address <code>A</code>.</li>
+<li><code>ty</code>: the type of data found at the address <code>A</code>.</li>
+</ul>
+<p>The resulting categorization tree differs somewhat from the expressions
+themselves. For example, auto-derefs are explicit. Also, an index <code>a[b]</code> is
+decomposed into two operations: a dereference to reach the array data and
+then an index to jump forward to the relevant item.</p>
+<h3 id="by-reference-upvars"><a href="#by-reference-upvars">By-reference upvars</a></h3>
+<p>One part of the codegen which may be non-obvious is that we translate
+closure upvars into the dereference of a borrowed pointer; this more closely
+resembles the runtime codegen. So, for example, if we had:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span><span class="kw-2">mut </span>x = <span class="number">3</span>;
+<span class="kw">let </span>y = <span class="number">5</span>;
+<span class="kw">let </span>inc = || x += y;</code></pre></div>
+<p>Then when we categorize <code>x</code> (<em>within</em> the closure) we would yield a
+result of <code>*x'</code>, effectively, where <code>x'</code> is a <code>Categorization::Upvar</code> reference
+tied to <code>x</code>. The type of <code>x'</code> will be a borrowed pointer.</p>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.MemCategorizationContext.html" title="rustc_typeck::mem_categorization::MemCategorizationContext struct">MemCategorizationContext</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="trait" href="trait.HirNode.html" title="rustc_typeck::mem_categorization::HirNode trait">HirNode</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="types" class="small-section-header"><a href="#types">Type Definitions</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="type" href="type.McResult.html" title="rustc_typeck::mem_categorization::McResult type">McResult</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

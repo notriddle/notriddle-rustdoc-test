@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/librustdoc/visit_lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>visit_lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustdoc/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustdoc/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustdoc/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_data_structures::fx::FxHashSet;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>};
+<span class="kw">use </span>rustc_middle::middle::privacy::{<a href="../../rustc_middle/middle/privacy/enum.AccessLevel.html">AccessLevel</a>, <a href="../../rustc_middle/middle/privacy/struct.AccessLevels.html">AccessLevels</a>};
+<span class="kw">use </span><a href="../../rustc_middle/ty/context/struct.TyCtxt.html">rustc_middle::ty::TyCtxt</a>;
+
+<span class="comment">// FIXME: this may not be exhaustive, but is sufficient for rustdocs current uses
+
+</span><span class="doccomment">/// Similar to `librustc_privacy::EmbargoVisitor`, but also takes
+/// specific rustdoc annotations into account (i.e., `doc(hidden)`)
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>LibEmbargoVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="comment">// Accessibility levels for reachable nodes
+    </span>access_levels: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>AccessLevels&lt;<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+    <span class="comment">// Previous accessibility level, None means unreachable
+    </span>prev_level: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_middle/middle/privacy/enum.AccessLevel.html">AccessLevel</a>&gt;,
+    <span class="comment">// Keeps track of already visited modules, in case a module re-exports its parent
+    </span>visited_mods: FxHashSet&lt;<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; LibEmbargoVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="kw">crate</span>::core::DocContext&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; LibEmbargoVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#11">LibEmbargoVisitor</a> {
+            tcx: <a href="#22">cx</a>.tcx,
+            access_levels: <span class="kw-2">&amp;mut </span><a href="#22">cx</a>.cache.access_levels,
+            prev_level: <span class="prelude-val">Some</span>(AccessLevel::Public),
+            visited_mods: FxHashSet::default(),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visit_lib(<span class="kw-2">&amp;mut </span><span class="self">self</span>, cnum: <a href="../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) {
+        <span class="kw">let </span>did = <a href="#31">cnum</a>.as_def_id();
+        <a class="self" href="#31">self</a>.<a href="#38">update</a>(<a href="#32">did</a>, <span class="prelude-val">Some</span>(AccessLevel::Public));
+        <a class="self" href="#31">self</a>.<a href="#51">visit_mod</a>(<a href="#32">did</a>);
+    }
+
+    <span class="comment">// Updates node level and returns the updated level
+    </span><span class="kw">fn </span>update(<span class="kw-2">&amp;mut </span><span class="self">self</span>, did: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, level: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_middle/middle/privacy/enum.AccessLevel.html">AccessLevel</a>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_middle/middle/privacy/enum.AccessLevel.html">AccessLevel</a>&gt; {
+        <span class="kw">let </span>is_hidden = <a class="self" href="#38">self</a>.tcx.is_doc_hidden(<a href="#38">did</a>);
+
+        <span class="kw">let </span>old_level = <a class="self" href="#38">self</a>.access_levels.get_access_level(<a href="#38">did</a>);
+        <span class="comment">// Accessibility levels can only grow
+        </span><span class="kw">if </span>level &gt; old_level &amp;&amp; !is_hidden {
+            <a class="self" href="#38">self</a>.access_levels.set_access_level(<a href="#38">did</a>, <a href="#38">level</a>.unwrap());
+            <a href="#38">level</a>
+        } <span class="kw">else </span>{
+            <a href="#41">old_level</a>
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visit_mod(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) {
+        <span class="kw">if </span>!<span class="self">self</span>.visited_mods.insert(def_id) {
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">for </span>item <span class="kw">in </span><span class="self">self</span>.tcx.module_children(def_id).iter() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(def_id) = item.res.opt_def_id() {
+                <span class="kw">if </span><span class="self">self</span>.tcx.def_key(def_id).parent.map_or(<span class="bool-val">false</span>, |d| d == def_id.index)
+                    || item.vis.is_public()
+                {
+                    <span class="self">self</span>.visit_item(item.res);
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>visit_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, res: Res&lt;!&gt;) {
+        <span class="kw">let </span>def_id = <a href="#67">res</a>.def_id();
+        <span class="kw">let </span>vis = <a class="self" href="#67">self</a>.tcx.visibility(<a href="#68">def_id</a>);
+        <span class="kw">let </span>inherited_item_level = <span class="kw">if </span>vis.is_public() { <a class="self" href="#67">self</a>.prev_level } <span class="kw">else </span>{ <span class="prelude-val">None </span>};
+
+        <span class="kw">let </span>item_level = <a class="self" href="#67">self</a>.<a href="#38">update</a>(<a href="#68">def_id</a>, <a href="#70">inherited_item_level</a>);
+
+        <span class="kw">if let </span>Res::Def(DefKind::Mod, <span class="kw">_</span>) = <a href="#67">res</a> {
+            <span class="kw">let </span>orig_level = <a class="self" href="#67">self</a>.prev_level;
+
+            <a class="self" href="#67">self</a>.prev_level = <a href="#72">item_level</a>;
+            <a class="self" href="#67">self</a>.<a href="#51">visit_mod</a>(<a href="#68">def_id</a>);
+            <a class="self" href="#67">self</a>.prev_level = <a href="#75">orig_level</a>;
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustdoc" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

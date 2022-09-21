@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["TraitSpecializationKind","Whether this trait is treated specially by the standard library specialization lint."]],"fn":[["incoherent_impls_provider",""],["trait_impls_of_provider",""]],"struct":[["TraitDef","A trait’s definition with type information."],["TraitImpls",""]]};

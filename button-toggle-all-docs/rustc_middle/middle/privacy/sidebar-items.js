@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["AccessLevel","Represents the levels of accessibility an item can have."]],"struct":[["AccessLevels","Holds a map of accessibility levels for reachable HIR nodes."]]};

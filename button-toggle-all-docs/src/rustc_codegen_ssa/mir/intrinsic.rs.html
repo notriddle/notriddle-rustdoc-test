@@ -1,0 +1,1258 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_ssa/src/mir/intrinsic.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intrinsic.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_ssa/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::operand::{<a href="operand.rs.html#42">OperandRef</a>, <a href="operand.rs.html#21">OperandValue</a>};
+<span class="kw">use </span><a href="place.rs.html#16"><span class="kw">super</span>::place::PlaceRef</a>;
+<span class="kw">use </span><a href="mod.rs.html#20"><span class="kw">super</span>::FunctionCx</a>;
+<span class="kw">use </span><span class="kw">crate</span>::common::{<a href="../common.rs.html#197">span_invalid_monomorphization_error</a>, <a href="../common.rs.html#15">IntPredicate</a>};
+<span class="kw">use </span><a href="../lib.rs.html#47"><span class="kw">crate</span>::glue</a>;
+<span class="kw">use </span><a href="../lib.rs.html#48"><span class="kw">crate</span>::meth</a>;
+<span class="kw">use </span><a href="../lib.rs.html#52"><span class="kw">crate</span>::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../lib.rs.html#103-109"><span class="kw">crate</span>::MemFlags</a>;
+
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>};
+<span class="kw">use </span>rustc_target::abi::{
+    call::{<a href="../../../rustc_target/abi/call/struct.FnAbi.html">FnAbi</a>, <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode</a>},
+    <a href="../../../rustc_target/abi/struct.WrappingRange.html">WrappingRange</a>,
+};
+
+<span class="kw">fn </span>copy_intrinsic&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    allow_overlap: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    volatile: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    dst: Bx::Value,
+    src: Bx::Value,
+    count: Bx::Value,
+) {
+    <span class="kw">let </span>layout = <a href="#18">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#21">ty</a>);
+    <span class="kw">let </span>size = <a href="#26">layout</a>.size;
+    <span class="kw">let </span>align = <a href="#26">layout</a>.align.abi;
+    <span class="kw">let </span>size = <a href="#18">bx</a>.<a href="../traits/builder.rs.html#88">mul</a>(<a href="#18">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#27">size</a>.bytes()), <a href="#24">count</a>);
+    <span class="kw">let </span>flags = <span class="kw">if </span>volatile { MemFlags::VOLATILE } <span class="kw">else </span>{ MemFlags::empty() };
+    <span class="kw">if </span>allow_overlap {
+        <a href="#18">bx</a>.<a href="../traits/builder.rs.html#239-247">memmove</a>(<a href="#22">dst</a>, <a href="#28">align</a>, <a href="#23">src</a>, <a href="#28">align</a>, <a href="#29">size</a>, <a href="#30">flags</a>);
+    } <span class="kw">else </span>{
+        <a href="#18">bx</a>.<a href="../traits/builder.rs.html#230-238">memcpy</a>(<a href="#22">dst</a>, <a href="#28">align</a>, <a href="#23">src</a>, <a href="#28">align</a>, <a href="#29">size</a>, <a href="#30">flags</a>);
+    }
+}
+
+<span class="kw">fn </span>memset_intrinsic&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    volatile: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    dst: Bx::Value,
+    val: Bx::Value,
+    count: Bx::Value,
+) {
+    <span class="kw">let </span>layout = <a href="#39">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#41">ty</a>);
+    <span class="kw">let </span>size = <a href="#46">layout</a>.size;
+    <span class="kw">let </span>align = <a href="#46">layout</a>.align.abi;
+    <span class="kw">let </span>size = <a href="#39">bx</a>.<a href="../traits/builder.rs.html#88">mul</a>(<a href="#39">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#47">size</a>.bytes()), <a href="#44">count</a>);
+    <span class="kw">let </span>flags = <span class="kw">if </span>volatile { MemFlags::VOLATILE } <span class="kw">else </span>{ MemFlags::empty() };
+    <a href="#39">bx</a>.<a href="../traits/builder.rs.html#248-255">memset</a>(<a href="#42">dst</a>, <a href="#43">val</a>, <a href="#49">size</a>, <a href="#48">align</a>, <a href="#50">flags</a>);
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; FunctionCx&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx&gt; {
+    <span class="kw">pub fn </span>codegen_intrinsic_call(
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        instance: ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        fn_abi: <span class="kw-2">&amp;</span>FnAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        args: <span class="kw-2">&amp;</span>[OperandRef&lt;<span class="lifetime">&#39;tcx</span>, Bx::Value&gt;],
+        llresult: Bx::Value,
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) {
+        <span class="kw">let </span>callee_ty = <a href="#57">instance</a>.ty(<a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>(), ty::ParamEnv::reveal_all());
+
+        <span class="kw">let </span>ty::FnDef(def_id, substs) = <span class="kw-2">*</span><a href="#63">callee_ty</a>.kind() <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;expected fn item type, found {}&quot;</span>, callee_ty);
+        };
+
+        <span class="kw">let </span>sig = <a href="#63">callee_ty</a>.fn_sig(<a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>());
+        <span class="kw">let </span>sig = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), <a href="#69">sig</a>);
+        <span class="kw">let </span>arg_tys = <a href="#70">sig</a>.inputs();
+        <span class="kw">let </span>ret_ty = <a href="#70">sig</a>.output();
+        <span class="kw">let </span>name = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().item_name(<a href="#65">def_id</a>);
+        <span class="kw">let </span>name_str = <a href="#73">name</a>.as_str();
+
+        <span class="kw">let </span>llret_ty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#72">ret_ty</a>));
+        <span class="kw">let </span>result = PlaceRef::new_sized(<a href="#60">llresult</a>, <a href="#58">fn_abi</a>.ret.layout);
+
+        <span class="kw">let </span>llval = <span class="kw">match </span><a href="#73">name</a> {
+            sym::abort =&gt; {
+                <a href="#56">bx</a>.<a href="../traits/intrinsic.rs.html#20">abort</a>();
+                <span class="kw">return</span>;
+            }
+
+            sym::va_start =&gt; <a href="#56">bx</a>.<a href="../traits/intrinsic.rs.html#35">va_start</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>()),
+            sym::va_end =&gt; <a href="#56">bx</a>.<a href="../traits/intrinsic.rs.html#38">va_end</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>()),
+            sym::size_of_val =&gt; {
+                <span class="kw">let </span>tp_ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">if let </span><a href="operand.rs.html#30">OperandValue::Pair</a>(<span class="kw">_</span>, meta) = <a href="#59">args</a>[<span class="number">0</span>].val {
+                    <span class="kw">let </span>(llsize, <span class="kw">_</span>) = <a href="../glue.rs.html#11-15">glue::size_and_align_of_dst</a>(<a href="#56">bx</a>, <a href="#88">tp_ty</a>, <span class="prelude-val">Some</span>(<a href="#89">meta</a>));
+                    <a href="#90">llsize</a>
+                } <span class="kw">else </span>{
+                    <a href="#56">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#88">tp_ty</a>).size.bytes())
+                }
+            }
+            sym::min_align_of_val =&gt; {
+                <span class="kw">let </span>tp_ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">if let </span><a href="operand.rs.html#30">OperandValue::Pair</a>(<span class="kw">_</span>, meta) = <a href="#59">args</a>[<span class="number">0</span>].val {
+                    <span class="kw">let </span>(<span class="kw">_</span>, llalign) = <a href="../glue.rs.html#11-15">glue::size_and_align_of_dst</a>(<a href="#56">bx</a>, <a href="#97">tp_ty</a>, <span class="prelude-val">Some</span>(<a href="#98">meta</a>));
+                    <a href="#99">llalign</a>
+                } <span class="kw">else </span>{
+                    <a href="#56">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#97">tp_ty</a>).align.abi.bytes())
+                }
+            }
+            sym::vtable_size | sym::vtable_align =&gt; {
+                <span class="kw">let </span>vtable = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>idx = <span class="kw">match </span><a href="#73">name</a> {
+                    sym::vtable_size =&gt; ty::COMMON_VTABLE_ENTRIES_SIZE,
+                    sym::vtable_align =&gt; ty::COMMON_VTABLE_ENTRIES_ALIGN,
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                };
+                <span class="kw">let </span>value = meth::VirtualIndex::from_index(<a href="#107">idx</a>).<a href="../meth.rs.html#48-52">get_usize</a>(<a href="#56">bx</a>, <a href="#106">vtable</a>);
+                <span class="kw">if </span>name == sym::vtable_align {
+                    <span class="comment">// Alignment is always nonzero.
+                    </span><a href="#56">bx</a>.<a href="../traits/builder.rs.html#159">range_metadata</a>(<a href="#112">value</a>, <a href="../../../rustc_target/abi/struct.WrappingRange.html">WrappingRange</a> { start: <span class="number">1</span>, end: !<span class="number">0 </span>});
+                };
+                <a href="#112">value</a>
+            }
+            sym::pref_align_of
+            | sym::needs_drop
+            | sym::type_id
+            | sym::type_name
+            | sym::variant_count =&gt; {
+                <span class="kw">let </span>value = <a href="#56">bx</a>
+                    .<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>()
+                    .const_eval_instance(ty::ParamEnv::reveal_all(), <a href="#57">instance</a>, <span class="prelude-val">None</span>)
+                    .unwrap();
+                OperandRef::from_const(<a href="#56">bx</a>, <a href="#124">value</a>, <a href="#72">ret_ty</a>).<a href="operand.rs.html#140-143">immediate_or_packed_pair</a>(<a href="#56">bx</a>)
+            }
+            sym::offset =&gt; {
+                <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">let </span>layout = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#131">ty</a>);
+                <span class="kw">let </span>ptr = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>offset = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#179-184">inbounds_gep</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#132">layout</a>), <a href="#133">ptr</a>, <span class="kw-2">&amp;</span>[<a href="#134">offset</a>])
+            }
+            sym::arith_offset =&gt; {
+                <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">let </span>layout = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#138">ty</a>);
+                <span class="kw">let </span>ptr = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>offset = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#178">gep</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#139">layout</a>), <a href="#140">ptr</a>, <span class="kw-2">&amp;</span>[<a href="#141">offset</a>])
+            }
+            sym::copy =&gt; {
+                <a href="#17-25">copy_intrinsic</a>(
+                    <a href="#56">bx</a>,
+                    <span class="bool-val">true</span>,
+                    <span class="bool-val">false</span>,
+                    <a href="#65">substs</a>.type_at(<span class="number">0</span>),
+                    <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>(),
+                );
+                <span class="kw">return</span>;
+            }
+            sym::write_bytes =&gt; {
+                <a href="#38-45">memset_intrinsic</a>(
+                    <a href="#56">bx</a>,
+                    <span class="bool-val">false</span>,
+                    <a href="#65">substs</a>.type_at(<span class="number">0</span>),
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>(),
+                );
+                <span class="kw">return</span>;
+            }
+
+            sym::volatile_copy_nonoverlapping_memory =&gt; {
+                <a href="#17-25">copy_intrinsic</a>(
+                    <a href="#56">bx</a>,
+                    <span class="bool-val">false</span>,
+                    <span class="bool-val">true</span>,
+                    <a href="#65">substs</a>.type_at(<span class="number">0</span>),
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>(),
+                );
+                <span class="kw">return</span>;
+            }
+            sym::volatile_copy_memory =&gt; {
+                <a href="#17-25">copy_intrinsic</a>(
+                    <a href="#56">bx</a>,
+                    <span class="bool-val">true</span>,
+                    <span class="bool-val">true</span>,
+                    <a href="#65">substs</a>.type_at(<span class="number">0</span>),
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>(),
+                );
+                <span class="kw">return</span>;
+            }
+            sym::volatile_set_memory =&gt; {
+                <a href="#38-45">memset_intrinsic</a>(
+                    <a href="#56">bx</a>,
+                    <span class="bool-val">true</span>,
+                    <a href="#65">substs</a>.type_at(<span class="number">0</span>),
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>(),
+                    <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>(),
+                );
+                <span class="kw">return</span>;
+            }
+            sym::volatile_store =&gt; {
+                <span class="kw">let </span>dst = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#117">deref</a>(<a href="#56">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>());
+                <a href="#59">args</a>[<span class="number">1</span>].val.<a href="operand.rs.html#254-258">volatile_store</a>(<a href="#56">bx</a>, <a href="#204">dst</a>);
+                <span class="kw">return</span>;
+            }
+            sym::unaligned_volatile_store =&gt; {
+                <span class="kw">let </span>dst = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#117">deref</a>(<a href="#56">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>());
+                <a href="#59">args</a>[<span class="number">1</span>].val.<a href="operand.rs.html#262-266">unaligned_volatile_store</a>(<a href="#56">bx</a>, <a href="#209">dst</a>);
+                <span class="kw">return</span>;
+            }
+            sym::add_with_overflow
+            | sym::sub_with_overflow
+            | sym::mul_with_overflow
+            | sym::unchecked_div
+            | sym::unchecked_rem
+            | sym::unchecked_shl
+            | sym::unchecked_shr
+            | sym::unchecked_add
+            | sym::unchecked_sub
+            | sym::unchecked_mul
+            | sym::exact_div =&gt; {
+                <span class="kw">let </span>ty = <a href="#71">arg_tys</a>[<span class="number">0</span>];
+                <span class="kw">match </span><a href="#609">int_type_width_signed</a>(<a href="#224">ty</a>, <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>()) {
+                    <span class="prelude-val">Some</span>((_width, signed)) =&gt; <span class="kw">match </span><a href="#73">name</a> {
+                        sym::add_with_overflow
+                        | sym::sub_with_overflow
+                        | sym::mul_with_overflow =&gt; {
+                            <span class="kw">let </span>op = <span class="kw">match </span><a href="#73">name</a> {
+                                sym::add_with_overflow =&gt; <a href="../traits/builder.rs.html#25">OverflowOp::Add</a>,
+                                sym::sub_with_overflow =&gt; <a href="../traits/builder.rs.html#26">OverflowOp::Sub</a>,
+                                sym::mul_with_overflow =&gt; <a href="../traits/builder.rs.html#27">OverflowOp::Mul</a>,
+                                <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                            };
+                            <span class="kw">let </span>(val, overflow) =
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#117-123">checked_binop</a>(<a href="#230">op</a>, <a href="#224">ty</a>, <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>());
+                            <span class="comment">// Convert `i1` to a `bool`, and write it to the out parameter
+                            </span><span class="kw">let </span>val = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#125">from_immediate</a>(<a href="#236">val</a>);
+                            <span class="kw">let </span>overflow = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#125">from_immediate</a>(<a href="#236">overflow</a>);
+
+                            <span class="kw">let </span>dest = <a href="#77">result</a>.<a href="place.rs.html#85-89">project_field</a>(<a href="#56">bx</a>, <span class="number">0</span>);
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(<a href="#239">val</a>, <a href="#242">dest</a>.llval, <a href="#242">dest</a>.align);
+                            <span class="kw">let </span>dest = <a href="#77">result</a>.<a href="place.rs.html#85-89">project_field</a>(<a href="#56">bx</a>, <span class="number">1</span>);
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(<a href="#240">overflow</a>, <a href="#244">dest</a>.llval, <a href="#244">dest</a>.align);
+
+                            <span class="kw">return</span>;
+                        }
+                        sym::exact_div =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#94">exactsdiv</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#92">exactudiv</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_div =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#93">sdiv</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#91">udiv</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_rem =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#98">srem</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#97">urem</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_shl =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#101">shl</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        sym::unchecked_shr =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#103">ashr</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#102">lshr</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_add =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#104">unchecked_sadd</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#105">unchecked_uadd</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_sub =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#106">unchecked_ssub</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#107">unchecked_usub</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        sym::unchecked_mul =&gt; {
+                            <span class="kw">if </span>signed {
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#108">unchecked_smul</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#109">unchecked_umul</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>())
+                            }
+                        }
+                        <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                    },
+                    <span class="prelude-val">None </span>=&gt; {
+                        <a href="../common.rs.html#197">span_invalid_monomorphization_error</a>(
+                            <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().sess,
+                            <a href="#61">span</a>,
+                            <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                                <span class="string">&quot;invalid monomorphization of `{}` intrinsic: \
+                                      expected basic integer type, found `{}`&quot;</span>,
+                                name, ty
+                            ),
+                        );
+                        <span class="kw">return</span>;
+                    }
+                }
+            }
+            sym::fadd_fast | sym::fsub_fast | sym::fmul_fast | sym::fdiv_fast | sym::frem_fast =&gt; {
+                <span class="kw">match </span><a href="#623">float_type_width</a>(<a href="#71">arg_tys</a>[<span class="number">0</span>]) {
+                    <span class="prelude-val">Some</span>(_width) =&gt; <span class="kw">match </span><a href="#73">name</a> {
+                        sym::fadd_fast =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#84">fadd_fast</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        sym::fsub_fast =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#87">fsub_fast</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        sym::fmul_fast =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#90">fmul_fast</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        sym::fdiv_fast =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#96">fdiv_fast</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        sym::frem_fast =&gt; <a href="#56">bx</a>.<a href="../traits/builder.rs.html#100">frem_fast</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>()),
+                        <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                    },
+                    <span class="prelude-val">None </span>=&gt; {
+                        <a href="../common.rs.html#197">span_invalid_monomorphization_error</a>(
+                            <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().sess,
+                            <a href="#61">span</a>,
+                            <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                                <span class="string">&quot;invalid monomorphization of `{}` intrinsic: \
+                                      expected basic float type, found `{}`&quot;</span>,
+                                name, arg_tys[<span class="number">0</span>]
+                            ),
+                        );
+                        <span class="kw">return</span>;
+                    }
+                }
+            }
+
+            sym::float_to_int_unchecked =&gt; {
+                <span class="kw">if </span>float_type_width(arg_tys[<span class="number">0</span>]).is_none() {
+                    <a href="../common.rs.html#197">span_invalid_monomorphization_error</a>(
+                        <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().sess,
+                        <a href="#61">span</a>,
+                        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;invalid monomorphization of `float_to_int_unchecked` \
+                                  intrinsic: expected basic float type, \
+                                  found `{}`&quot;</span>,
+                            arg_tys[<span class="number">0</span>]
+                        ),
+                    );
+                    <span class="kw">return</span>;
+                }
+                <span class="kw">let </span><span class="prelude-val">Some</span>((_width, signed)) = <a href="#609">int_type_width_signed</a>(<a href="#72">ret_ty</a>, <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>()) <span class="kw">else </span>{
+                    <a href="../common.rs.html#197">span_invalid_monomorphization_error</a>(
+                        <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().sess,
+                        <a href="#61">span</a>,
+                        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;invalid monomorphization of `float_to_int_unchecked` \
+                                    intrinsic:  expected basic integer type, \
+                                    found `{}`&quot;</span>,
+                            ret_ty
+                        ),
+                    );
+                    <span class="kw">return</span>;
+                };
+                <span class="kw">if </span>signed {
+                    <a href="#56">bx</a>.<a href="../traits/builder.rs.html#192">fptosi</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#76">llret_ty</a>)
+                } <span class="kw">else </span>{
+                    <a href="#56">bx</a>.<a href="../traits/builder.rs.html#191">fptoui</a>(<a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>(), <a href="#76">llret_ty</a>)
+                }
+            }
+
+            sym::discriminant_value =&gt; {
+                <span class="kw">if </span>ret_ty.is_integral() {
+                    <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#117">deref</a>(<a href="#56">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>()).<a href="place.rs.html#207-211">codegen_get_discr</a>(<a href="#56">bx</a>, <a href="#72">ret_ty</a>)
+                } <span class="kw">else </span>{
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(span, <span class="string">&quot;Invalid discriminant type for `{:?}`&quot;</span>, arg_tys[<span class="number">0</span>])
+                }
+            }
+
+            sym::const_allocate =&gt; {
+                <span class="comment">// returns a null pointer at runtime.
+                </span><a href="#56">bx</a>.<a href="../traits/consts.rs.html#9">const_null</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#45">type_i8p</a>())
+            }
+
+            sym::const_deallocate =&gt; {
+                <span class="comment">// nop at runtime.
+                </span><span class="kw">return</span>;
+            }
+
+            <span class="comment">// This requires that atomic intrinsics follow a specific naming pattern:
+            // &quot;atomic_&lt;operation&gt;[_&lt;ordering&gt;]&quot;
+            </span>name <span class="kw">if let </span><span class="prelude-val">Some</span>(atomic) = <a href="#74">name_str</a>.strip_prefix(<span class="string">&quot;atomic_&quot;</span>) =&gt; {
+                <span class="kw">use </span><a href="../common.rs.html#64"><span class="kw">crate</span>::common::AtomicOrdering</a>::<span class="kw-2">*</span>;
+                <span class="kw">use </span><span class="kw">crate</span>::common::{<a href="../common.rs.html#49">AtomicRmwBinOp</a>, <a href="../common.rs.html#74">SynchronizationScope</a>};
+
+                <span class="kw">let </span><span class="prelude-val">Some</span>((instruction, ordering)) = <a href="#394">atomic</a>.split_once(<span class="string">&#39;_&#39;</span>) <span class="kw">else </span>{
+                    <a href="#56">bx</a>.<a href="../traits/misc.rs.html#16">sess</a>().fatal(<span class="string">&quot;Atomic intrinsic missing memory ordering&quot;</span>);
+                };
+
+                <span class="kw">let </span>parse_ordering = |bx: <span class="kw-2">&amp;</span>Bx, s| <span class="kw">match </span><a href="#402">s</a> {
+                    <span class="string">&quot;unordered&quot; </span>=&gt; <a href="../common.rs.html#65">Unordered</a>,
+                    <span class="string">&quot;relaxed&quot; </span>=&gt; <a href="../common.rs.html#66">Relaxed</a>,
+                    <span class="string">&quot;acquire&quot; </span>=&gt; <a href="../common.rs.html#67">Acquire</a>,
+                    <span class="string">&quot;release&quot; </span>=&gt; <a href="../common.rs.html#68">Release</a>,
+                    <span class="string">&quot;acqrel&quot; </span>=&gt; <a href="../common.rs.html#69">AcquireRelease</a>,
+                    <span class="string">&quot;seqcst&quot; </span>=&gt; <a href="../common.rs.html#70">SequentiallyConsistent</a>,
+                    <span class="kw">_ </span>=&gt; <a href="#402">bx</a>.<a href="../traits/misc.rs.html#16">sess</a>().fatal(<span class="string">&quot;unknown ordering in atomic intrinsic&quot;</span>),
+                };
+
+                <span class="kw">let </span>invalid_monomorphization = |ty| {
+                    <a href="../common.rs.html#197">span_invalid_monomorphization_error</a>(
+                        <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().sess,
+                        <a href="#61">span</a>,
+                        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;invalid monomorphization of `{}` intrinsic: \
+                                  expected basic integer type, found `{}`&quot;</span>,
+                            name, ty
+                        ),
+                    );
+                };
+
+                <span class="kw">match </span><a href="#398">instruction</a> {
+                    <span class="string">&quot;cxchg&quot; </span>| <span class="string">&quot;cxchgweak&quot; </span>=&gt; {
+                        <span class="kw">let </span><span class="prelude-val">Some</span>((success, failure)) = <a href="#398">ordering</a>.split_once(<span class="string">&#39;_&#39;</span>) <span class="kw">else </span>{
+                            <a href="#56">bx</a>.<a href="../traits/misc.rs.html#16">sess</a>().fatal(<span class="string">&quot;Atomic compare-exchange intrinsic missing failure memory ordering&quot;</span>);
+                        };
+                        <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                        <span class="kw">if </span>int_type_width_signed(ty, bx.tcx()).is_some() || ty.is_unsafe_ptr() {
+                            <span class="kw">let </span>weak = <a href="#398">instruction</a> == <span class="string">&quot;cxchgweak&quot;</span>;
+                            <span class="kw">let </span><span class="kw-2">mut </span>dst = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">let </span><span class="kw-2">mut </span>cmp = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">let </span><span class="kw-2">mut </span>src = <a href="#59">args</a>[<span class="number">2</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">if </span>ty.is_unsafe_ptr() {
+                                <span class="comment">// Some platforms do not support atomic operations on pointers,
+                                // so we cast to integer first.
+                                </span><span class="kw">let </span>ptr_llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                                <a href="#432">dst</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#432">dst</a>, <a href="#438">ptr_llty</a>);
+                                <a href="#433">cmp</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#433">cmp</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                                <a href="#434">src</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#434">src</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                            }
+                            <span class="kw">let </span>pair = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#287-295">atomic_cmpxchg</a>(<a href="#432">dst</a>, <a href="#433">cmp</a>, <a href="#434">src</a>, <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#426">success</a>), <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#426">failure</a>), <a href="#431">weak</a>);
+                            <span class="kw">let </span>val = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#267">extract_value</a>(<a href="#443">pair</a>, <span class="number">0</span>);
+                            <span class="kw">let </span>success = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#267">extract_value</a>(<a href="#443">pair</a>, <span class="number">1</span>);
+                            <span class="kw">let </span>val = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#125">from_immediate</a>(<a href="#444">val</a>);
+                            <span class="kw">let </span>success = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#125">from_immediate</a>(<a href="#445">success</a>);
+
+                            <span class="kw">let </span>dest = <a href="#77">result</a>.<a href="place.rs.html#85-89">project_field</a>(<a href="#56">bx</a>, <span class="number">0</span>);
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(<a href="#446">val</a>, <a href="#449">dest</a>.llval, <a href="#449">dest</a>.align);
+                            <span class="kw">let </span>dest = <a href="#77">result</a>.<a href="place.rs.html#85-89">project_field</a>(<a href="#56">bx</a>, <span class="number">1</span>);
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(<a href="#447">success</a>, <a href="#451">dest</a>.llval, <a href="#451">dest</a>.align);
+                            <span class="kw">return</span>;
+                        } <span class="kw">else </span>{
+                            <span class="kw">return </span><a href="#412">invalid_monomorphization</a>(<a href="#429">ty</a>);
+                        }
+                    }
+
+                    <span class="string">&quot;load&quot; </span>=&gt; {
+                        <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                        <span class="kw">if </span>int_type_width_signed(ty, bx.tcx()).is_some() || ty.is_unsafe_ptr() {
+                            <span class="kw">let </span>layout = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#460">ty</a>);
+                            <span class="kw">let </span>size = <a href="#462">layout</a>.size;
+                            <span class="kw">let </span><span class="kw-2">mut </span>source = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">if </span>ty.is_unsafe_ptr() {
+                                <span class="comment">// Some platforms do not support atomic operations on pointers,
+                                // so we cast to integer first...
+                                </span><span class="kw">let </span>llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>();
+                                <span class="kw">let </span>ptr_llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#468">llty</a>);
+                                <a href="#464">source</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#464">source</a>, <a href="#469">ptr_llty</a>);
+                                <span class="kw">let </span>result = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#141-147">atomic_load</a>(<a href="#468">llty</a>, <a href="#464">source</a>, <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>), <a href="#463">size</a>);
+                                <span class="comment">// ... and then cast the result back to a pointer
+                                </span><a href="#56">bx</a>.<a href="../traits/builder.rs.html#198">inttoptr</a>(<a href="#471">result</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#462">layout</a>))
+                            } <span class="kw">else </span>{
+                                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#141-147">atomic_load</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#462">layout</a>), <a href="#464">source</a>, <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>), <a href="#463">size</a>)
+                            }
+                        } <span class="kw">else </span>{
+                            <span class="kw">return </span><a href="#412">invalid_monomorphization</a>(<a href="#460">ty</a>);
+                        }
+                    }
+
+                    <span class="string">&quot;store&quot; </span>=&gt; {
+                        <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                        <span class="kw">if </span>int_type_width_signed(ty, bx.tcx()).is_some() || ty.is_unsafe_ptr() {
+                            <span class="kw">let </span>size = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#483">ty</a>).size;
+                            <span class="kw">let </span><span class="kw-2">mut </span>val = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">let </span><span class="kw-2">mut </span>ptr = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">if </span>ty.is_unsafe_ptr() {
+                                <span class="comment">// Some platforms do not support atomic operations on pointers,
+                                // so we cast to integer first.
+                                </span><span class="kw">let </span>ptr_llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                                <a href="#487">ptr</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#487">ptr</a>, <a href="#491">ptr_llty</a>);
+                                <a href="#486">val</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#486">val</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                            }
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#170-176">atomic_store</a>(<a href="#486">val</a>, <a href="#487">ptr</a>, <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>), <a href="#485">size</a>);
+                            <span class="kw">return</span>;
+                        } <span class="kw">else </span>{
+                            <span class="kw">return </span><a href="#412">invalid_monomorphization</a>(<a href="#483">ty</a>);
+                        }
+                    }
+
+                    <span class="string">&quot;fence&quot; </span>=&gt; {
+                        <a href="#56">bx</a>.<a href="../traits/builder.rs.html#303">atomic_fence</a>(<a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>), <a href="../common.rs.html#76">SynchronizationScope::CrossThread</a>);
+                        <span class="kw">return</span>;
+                    }
+
+                    <span class="string">&quot;singlethreadfence&quot; </span>=&gt; {
+                        <a href="#56">bx</a>.<a href="../traits/builder.rs.html#303">atomic_fence</a>(<a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>), <a href="../common.rs.html#75">SynchronizationScope::SingleThread</a>);
+                        <span class="kw">return</span>;
+                    }
+
+                    <span class="comment">// These are all AtomicRMW ops
+                    </span>op =&gt; {
+                        <span class="kw">let </span>atom_op = <span class="kw">match </span><a href="#513">op</a> {
+                            <span class="string">&quot;xchg&quot; </span>=&gt; <a href="../common.rs.html#50">AtomicRmwBinOp::AtomicXchg</a>,
+                            <span class="string">&quot;xadd&quot; </span>=&gt; <a href="../common.rs.html#51">AtomicRmwBinOp::AtomicAdd</a>,
+                            <span class="string">&quot;xsub&quot; </span>=&gt; <a href="../common.rs.html#52">AtomicRmwBinOp::AtomicSub</a>,
+                            <span class="string">&quot;and&quot; </span>=&gt; <a href="../common.rs.html#53">AtomicRmwBinOp::AtomicAnd</a>,
+                            <span class="string">&quot;nand&quot; </span>=&gt; <a href="../common.rs.html#54">AtomicRmwBinOp::AtomicNand</a>,
+                            <span class="string">&quot;or&quot; </span>=&gt; <a href="../common.rs.html#55">AtomicRmwBinOp::AtomicOr</a>,
+                            <span class="string">&quot;xor&quot; </span>=&gt; <a href="../common.rs.html#56">AtomicRmwBinOp::AtomicXor</a>,
+                            <span class="string">&quot;max&quot; </span>=&gt; <a href="../common.rs.html#57">AtomicRmwBinOp::AtomicMax</a>,
+                            <span class="string">&quot;min&quot; </span>=&gt; <a href="../common.rs.html#58">AtomicRmwBinOp::AtomicMin</a>,
+                            <span class="string">&quot;umax&quot; </span>=&gt; <a href="../common.rs.html#59">AtomicRmwBinOp::AtomicUMax</a>,
+                            <span class="string">&quot;umin&quot; </span>=&gt; <a href="../common.rs.html#60">AtomicRmwBinOp::AtomicUMin</a>,
+                            <span class="kw">_ </span>=&gt; <a href="#56">bx</a>.<a href="../traits/misc.rs.html#16">sess</a>().fatal(<span class="string">&quot;unknown atomic operation&quot;</span>),
+                        };
+
+                        <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                        <span class="kw">if </span>int_type_width_signed(ty, bx.tcx()).is_some() || ty.is_unsafe_ptr() {
+                            <span class="kw">let </span><span class="kw-2">mut </span>ptr = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">let </span><span class="kw-2">mut </span>val = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                            <span class="kw">if </span>ty.is_unsafe_ptr() {
+                                <span class="comment">// Some platforms do not support atomic operations on pointers,
+                                // so we cast to integer first.
+                                </span><span class="kw">let </span>ptr_llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                                <a href="#531">ptr</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#531">ptr</a>, <a href="#536">ptr_llty</a>);
+                                <a href="#532">val</a> = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#532">val</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                            }
+                            <a href="#56">bx</a>.<a href="../traits/builder.rs.html#296-302">atomic_rmw</a>(<a href="#514">atom_op</a>, <a href="#531">ptr</a>, <a href="#532">val</a>, <a href="#402">parse_ordering</a>(<a href="#56">bx</a>, <a href="#398">ordering</a>))
+                        } <span class="kw">else </span>{
+                            <span class="kw">return </span><a href="#412">invalid_monomorphization</a>(<a href="#529">ty</a>);
+                        }
+                    }
+                }
+            }
+
+            sym::nontemporal_store =&gt; {
+                <span class="kw">let </span>dst = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#117">deref</a>(<a href="#56">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>());
+                <a href="#59">args</a>[<span class="number">1</span>].val.<a href="operand.rs.html#270-274">nontemporal_store</a>(<a href="#56">bx</a>, <a href="#549">dst</a>);
+                <span class="kw">return</span>;
+            }
+
+            sym::ptr_guaranteed_cmp =&gt; {
+                <span class="kw">let </span>a = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>b = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#227">icmp</a>(<a href="../common.rs.html#16">IntPredicate::IntEQ</a>, <a href="#555">a</a>, <a href="#556">b</a>)
+            }
+
+            sym::ptr_offset_from | sym::ptr_offset_from_unsigned =&gt; {
+                <span class="kw">let </span>ty = <a href="#65">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">let </span>pointee_size = <a href="#56">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#561">ty</a>).size;
+
+                <span class="kw">let </span>a = <a href="#59">args</a>[<span class="number">0</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>b = <a href="#59">args</a>[<span class="number">1</span>].<a href="operand.rs.html#110">immediate</a>();
+                <span class="kw">let </span>a = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#564">a</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                <span class="kw">let </span>b = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#197">ptrtoint</a>(<a href="#565">b</a>, <a href="#56">bx</a>.<a href="../traits/type_.rs.html#21">type_isize</a>());
+                <span class="kw">let </span>pointee_size = <a href="#56">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#562">pointee_size</a>.bytes());
+                <span class="kw">if </span>name == sym::ptr_offset_from {
+                    <span class="comment">// This is the same sequence that Clang emits for pointer subtraction.
+                    // It can be neither `nsw` nor `nuw` because the input is treated as
+                    // unsigned but then the output is treated as signed, so neither works.
+                    </span><span class="kw">let </span>d = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#85">sub</a>(<a href="#566">a</a>, <a href="#567">b</a>);
+                    <span class="comment">// this is where the signed magic happens (notice the `s` in `exactsdiv`)
+                    </span><a href="#56">bx</a>.<a href="../traits/builder.rs.html#94">exactsdiv</a>(<a href="#573">d</a>, <a href="#568">pointee_size</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// The `_unsigned` version knows the relative ordering of the pointers,
+                    // so can use `sub nuw` and `udiv exact` instead of dealing in signed.
+                    </span><span class="kw">let </span>d = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#107">unchecked_usub</a>(<a href="#566">a</a>, <a href="#567">b</a>);
+                    <a href="#56">bx</a>.<a href="../traits/builder.rs.html#92">exactudiv</a>(<a href="#579">d</a>, <a href="#568">pointee_size</a>)
+                }
+            }
+
+            <span class="kw">_ </span>=&gt; {
+                <span class="comment">// Need to use backend-specific things in the implementation.
+                </span><a href="#56">bx</a>.<a href="../traits/intrinsic.rs.html#11-18">codegen_intrinsic_call</a>(<a href="#57">instance</a>, <a href="#58">fn_abi</a>, <a href="#59">args</a>, <a href="#60">llresult</a>, <a href="#61">span</a>);
+                <span class="kw">return</span>;
+            }
+        };
+
+        <span class="kw">if </span>!fn_abi.ret.is_ignore() {
+            <span class="kw">if let </span>PassMode::Cast(ty, <span class="kw">_</span>) = <span class="kw-2">&amp;</span><a href="#58">fn_abi</a>.ret.mode {
+                <span class="kw">let </span>ptr_llty = <a href="#56">bx</a>.<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#56">bx</a>.<a href="../traits/type_.rs.html#104">cast_backend_type</a>(<a href="#592">ty</a>));
+                <span class="kw">let </span>ptr = <a href="#56">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#77">result</a>.llval, <a href="#593">ptr_llty</a>);
+                <a href="#56">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(<a href="#79">llval</a>, <a href="#594">ptr</a>, <a href="#77">result</a>.align);
+            } <span class="kw">else </span>{
+                OperandRef::from_immediate_or_packed_pair(<a href="#56">bx</a>, <a href="#79">llval</a>, <a href="#77">result</a>.layout)
+                    .val
+                    .<a href="operand.rs.html#246-250">store</a>(<a href="#56">bx</a>, <a href="#77">result</a>);
+            }
+        }
+    }
+}
+
+<span class="comment">// Returns the width of an int Ty, and if it&#39;s signed or not
+// Returns None if the type is not an integer
+// FIXME: there’s multiple of this functions, investigate using some of the already existing
+// stuffs.
+</span><span class="kw">fn </span>int_type_width_signed(ty: Ty&lt;<span class="lifetime">&#39;_</span>&gt;, tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>)&gt; {
+    <span class="kw">match </span><a href="#609">ty</a>.kind() {
+        ty::Int(t) =&gt; {
+            <span class="prelude-val">Some</span>((<a href="#611">t</a>.bit_width().unwrap_or(u64::from(<a href="#609">tcx</a>.sess.target.pointer_width)), <span class="bool-val">true</span>))
+        }
+        ty::Uint(t) =&gt; {
+            <span class="prelude-val">Some</span>((<a href="#614">t</a>.bit_width().unwrap_or(u64::from(<a href="#609">tcx</a>.sess.target.pointer_width)), <span class="bool-val">false</span>))
+        }
+        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+    }
+}
+
+<span class="comment">// Returns the width of a float Ty
+// Returns None if the type is not a float
+</span><span class="kw">fn </span>float_type_width(ty: Ty&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt; {
+    <span class="kw">match </span><a href="#623">ty</a>.kind() {
+        ty::Float(t) =&gt; <span class="prelude-val">Some</span>(<a href="#625">t</a>.bit_width()),
+        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_ssa" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

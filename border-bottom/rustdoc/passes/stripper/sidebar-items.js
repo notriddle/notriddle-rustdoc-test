@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["is_item_reachable",""]],"struct":[["ImplStripper","This stripper discards all impls which reference stripped items"],["ImportStripper","This stripper discards all private import statements (`use`, `extern crate`)"],["Stripper",""]]};

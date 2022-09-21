@@ -1,0 +1,3110 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_resolve/src/build_reduced_graph.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>build_reduced_graph.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_resolve/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_resolve/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_resolve/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+<span id="1041">1041</span>
+<span id="1042">1042</span>
+<span id="1043">1043</span>
+<span id="1044">1044</span>
+<span id="1045">1045</span>
+<span id="1046">1046</span>
+<span id="1047">1047</span>
+<span id="1048">1048</span>
+<span id="1049">1049</span>
+<span id="1050">1050</span>
+<span id="1051">1051</span>
+<span id="1052">1052</span>
+<span id="1053">1053</span>
+<span id="1054">1054</span>
+<span id="1055">1055</span>
+<span id="1056">1056</span>
+<span id="1057">1057</span>
+<span id="1058">1058</span>
+<span id="1059">1059</span>
+<span id="1060">1060</span>
+<span id="1061">1061</span>
+<span id="1062">1062</span>
+<span id="1063">1063</span>
+<span id="1064">1064</span>
+<span id="1065">1065</span>
+<span id="1066">1066</span>
+<span id="1067">1067</span>
+<span id="1068">1068</span>
+<span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
+<span id="1086">1086</span>
+<span id="1087">1087</span>
+<span id="1088">1088</span>
+<span id="1089">1089</span>
+<span id="1090">1090</span>
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+<span id="1193">1193</span>
+<span id="1194">1194</span>
+<span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+<span id="1411">1411</span>
+<span id="1412">1412</span>
+<span id="1413">1413</span>
+<span id="1414">1414</span>
+<span id="1415">1415</span>
+<span id="1416">1416</span>
+<span id="1417">1417</span>
+<span id="1418">1418</span>
+<span id="1419">1419</span>
+<span id="1420">1420</span>
+<span id="1421">1421</span>
+<span id="1422">1422</span>
+<span id="1423">1423</span>
+<span id="1424">1424</span>
+<span id="1425">1425</span>
+<span id="1426">1426</span>
+<span id="1427">1427</span>
+<span id="1428">1428</span>
+<span id="1429">1429</span>
+<span id="1430">1430</span>
+<span id="1431">1431</span>
+<span id="1432">1432</span>
+<span id="1433">1433</span>
+<span id="1434">1434</span>
+<span id="1435">1435</span>
+<span id="1436">1436</span>
+<span id="1437">1437</span>
+<span id="1438">1438</span>
+<span id="1439">1439</span>
+<span id="1440">1440</span>
+<span id="1441">1441</span>
+<span id="1442">1442</span>
+<span id="1443">1443</span>
+<span id="1444">1444</span>
+<span id="1445">1445</span>
+<span id="1446">1446</span>
+<span id="1447">1447</span>
+<span id="1448">1448</span>
+<span id="1449">1449</span>
+<span id="1450">1450</span>
+<span id="1451">1451</span>
+<span id="1452">1452</span>
+<span id="1453">1453</span>
+<span id="1454">1454</span>
+<span id="1455">1455</span>
+<span id="1456">1456</span>
+<span id="1457">1457</span>
+<span id="1458">1458</span>
+<span id="1459">1459</span>
+<span id="1460">1460</span>
+<span id="1461">1461</span>
+<span id="1462">1462</span>
+<span id="1463">1463</span>
+<span id="1464">1464</span>
+<span id="1465">1465</span>
+<span id="1466">1466</span>
+<span id="1467">1467</span>
+<span id="1468">1468</span>
+<span id="1469">1469</span>
+<span id="1470">1470</span>
+<span id="1471">1471</span>
+<span id="1472">1472</span>
+<span id="1473">1473</span>
+<span id="1474">1474</span>
+<span id="1475">1475</span>
+<span id="1476">1476</span>
+<span id="1477">1477</span>
+<span id="1478">1478</span>
+<span id="1479">1479</span>
+<span id="1480">1480</span>
+<span id="1481">1481</span>
+<span id="1482">1482</span>
+<span id="1483">1483</span>
+<span id="1484">1484</span>
+<span id="1485">1485</span>
+<span id="1486">1486</span>
+<span id="1487">1487</span>
+<span id="1488">1488</span>
+<span id="1489">1489</span>
+<span id="1490">1490</span>
+<span id="1491">1491</span>
+<span id="1492">1492</span>
+<span id="1493">1493</span>
+<span id="1494">1494</span>
+<span id="1495">1495</span>
+<span id="1496">1496</span>
+<span id="1497">1497</span>
+<span id="1498">1498</span>
+<span id="1499">1499</span>
+<span id="1500">1500</span>
+<span id="1501">1501</span>
+<span id="1502">1502</span>
+<span id="1503">1503</span>
+<span id="1504">1504</span>
+<span id="1505">1505</span>
+<span id="1506">1506</span>
+<span id="1507">1507</span>
+<span id="1508">1508</span>
+<span id="1509">1509</span>
+<span id="1510">1510</span>
+<span id="1511">1511</span>
+<span id="1512">1512</span>
+<span id="1513">1513</span>
+<span id="1514">1514</span>
+<span id="1515">1515</span>
+<span id="1516">1516</span>
+<span id="1517">1517</span>
+<span id="1518">1518</span>
+<span id="1519">1519</span>
+<span id="1520">1520</span>
+<span id="1521">1521</span>
+<span id="1522">1522</span>
+<span id="1523">1523</span>
+<span id="1524">1524</span>
+<span id="1525">1525</span>
+<span id="1526">1526</span>
+<span id="1527">1527</span>
+<span id="1528">1528</span>
+<span id="1529">1529</span>
+<span id="1530">1530</span>
+<span id="1531">1531</span>
+<span id="1532">1532</span>
+<span id="1533">1533</span>
+<span id="1534">1534</span>
+<span id="1535">1535</span>
+<span id="1536">1536</span>
+<span id="1537">1537</span>
+<span id="1538">1538</span>
+<span id="1539">1539</span>
+<span id="1540">1540</span>
+<span id="1541">1541</span>
+<span id="1542">1542</span>
+<span id="1543">1543</span>
+<span id="1544">1544</span>
+<span id="1545">1545</span>
+<span id="1546">1546</span>
+<span id="1547">1547</span>
+<span id="1548">1548</span>
+<span id="1549">1549</span>
+<span id="1550">1550</span>
+<span id="1551">1551</span>
+<span id="1552">1552</span>
+<span id="1553">1553</span>
+<span id="1554">1554</span>
+</pre><pre class="rust"><code><span class="doccomment">//! After we obtain a fresh AST fragment from a macro, code in this module helps to integrate
+//! that fragment into the module structures that are already partially built.
+//!
+//! Items from the fragment are placed into modules,
+//! unexpanded macros in the fragment are visited and registered.
+//! Imports are also considered items and placed into modules here, but not resolved yet.
+
+</span><span class="kw">use </span><a href="def_collector.rs.html#12-16"><span class="kw">crate</span>::def_collector::collect_definitions</a>;
+<span class="kw">use </span><span class="kw">crate</span>::imports::{<a href="imports.rs.html#103">Import</a>, <a href="imports.rs.html#33">ImportKind</a>};
+<span class="kw">use </span><span class="kw">crate</span>::macros::{<a href="macros.rs.html#42">MacroRulesBinding</a>, <a href="macros.rs.html#55">MacroRulesScope</a>, <a href="macros.rs.html#71">MacroRulesScopeRef</a>};
+<span class="kw">use </span><span class="kw">crate</span>::Namespace::{<a class="self" href="../../rustc_resolve/enum.Namespace.html">self</a>, MacroNS, TypeNS, ValueNS};
+<span class="kw">use crate</span>::{<a href="lib.rs.html#87">Determinacy</a>, <a href="lib.rs.html#830">ExternPreludeEntry</a>, <a href="lib.rs.html#2061">Finalize</a>, <a href="lib.rs.html#500">Module</a>, <a href="lib.rs.html#406">ModuleKind</a>, <a href="lib.rs.html#345">ModuleOrUniformRoot</a>};
+<span class="kw">use crate</span>::{
+    <a href="lib.rs.html#848">MacroData</a>, <a href="lib.rs.html#627">NameBinding</a>, <a href="lib.rs.html#646">NameBindingKind</a>, <a href="lib.rs.html#140">ParentScope</a>, <a href="lib.rs.html#380">PathResult</a>, <a href="../../rustc_resolve/struct.PerNS.html">PerNS</a>, <a href="lib.rs.html#173">ResolutionError</a>,
+};
+<span class="kw">use crate</span>::{<a href="lib.rs.html#856">Resolver</a>, <a href="lib.rs.html#1035">ResolverArenas</a>, <a href="lib.rs.html#256">Segment</a>, <a href="lib.rs.html#635">ToNameBinding</a>, <a href="lib.rs.html#244">VisResolutionError</a>};
+
+<span class="kw">use </span>rustc_ast::visit::{<a class="self" href="../../rustc_ast/visit/index.html">self</a>, <a href="../../rustc_ast/visit/enum.AssocCtxt.html">AssocCtxt</a>, <a href="../../rustc_ast/visit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_ast::{<span class="self"><a href="../../rustc_ast/index.html">self</a> </span><span class="kw">as </span>ast, <a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>, <a href="../../rustc_ast/ast/enum.AssocItemKind.html">AssocItemKind</a>, <a href="../../rustc_ast/ast/enum.MetaItemKind.html">MetaItemKind</a>, <a href="../../rustc_ast/ast/enum.StmtKind.html">StmtKind</a>};
+<span class="kw">use </span>rustc_ast::{<a href="../../rustc_ast/ast/struct.Block.html">Block</a>, <a href="../../rustc_ast/ast/struct.Fn.html">Fn</a>, <a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>, <a href="../../rustc_ast/ast/enum.ForeignItemKind.html">ForeignItemKind</a>, <a href="../../rustc_ast/ast/struct.Impl.html">Impl</a>, <a href="../../rustc_ast/ast/struct.Item.html">Item</a>, <a href="../../rustc_ast/ast/enum.ItemKind.html">ItemKind</a>, <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>};
+<span class="kw">use </span><a href="../../rustc_attr/index.html">rustc_attr</a> <span class="kw">as </span>attr;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">rustc_data_structures::sync::Lrc</a>;
+<span class="kw">use </span>rustc_errors::{<a href="../../rustc_errors/macro.struct_span_err.html">struct_span_err</a>, <a href="../../rustc_lint_defs/enum.Applicability.html">Applicability</a>};
+<span class="kw">use </span><a href="../../rustc_expand/expand/enum.AstFragment.html">rustc_expand::expand::AstFragment</a>;
+<span class="kw">use </span>rustc_hir::def::{<a class="self" href="../../rustc_hir/def/index.html">self</a>, <span class="kw-2">*</span>};
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, <a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_metadata/creader/enum.LoadedMacro.html">rustc_metadata::creader::LoadedMacro</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">rustc_middle::bug</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">rustc_middle::metadata::ModChild</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">DefIdTree</a>};
+<span class="kw">use </span><a href="../../rustc_session/cstore/trait.CrateStore.html">rustc_session::cstore::CrateStore</a>;
+<span class="kw">use </span>rustc_span::hygiene::{<a href="../../rustc_span/hygiene/struct.ExpnId.html">ExpnId</a>, <a href="../../rustc_span/hygiene/struct.LocalExpnId.html">LocalExpnId</a>, <a href="../../rustc_span/hygiene/enum.MacroKind.html">MacroKind</a>};
+<span class="kw">use </span>rustc_span::source_map::{<a href="../../rustc_span/source_map/fn.respan.html">respan</a>, <a href="../../rustc_span/source_map/struct.Spanned.html">Spanned</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span><a href="../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cell/struct.Cell.html">std::cell::Cell</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ptr/index.html">std::ptr</a>;
+
+<span class="kw">type </span>Res = def::Res&lt;<a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>&gt;;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Id: Into&lt;<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;&gt; ToNameBinding&lt;<span class="lifetime">&#39;a</span>&gt;
+    <span class="kw">for </span>(Module&lt;<span class="lifetime">&#39;a</span>&gt;, ty::Visibility&lt;Id&gt;, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/hygiene/struct.LocalExpnId.html">LocalExpnId</a>)
+{
+    <span class="kw">fn </span>to_name_binding(<span class="self">self</span>, arenas: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ResolverArenas&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>NameBinding&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a href="#45">arenas</a>.<a href="lib.rs.html#1068">alloc_name_binding</a>(<a href="lib.rs.html#627">NameBinding</a> {
+            kind: <a href="lib.rs.html#648">NameBindingKind::Module</a>(<a class="self" href="#45">self</a>.<span class="number">0</span>),
+            ambiguity: <span class="prelude-val">None</span>,
+            vis: <a class="self" href="#45">self</a>.<span class="number">1</span>.to_def_id(),
+            span: <a class="self" href="#45">self</a>.<span class="number">2</span>,
+            expansion: <a class="self" href="#45">self</a>.<span class="number">3</span>,
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Id: Into&lt;<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;&gt; ToNameBinding&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>(<a href="#40">Res</a>, ty::Visibility&lt;Id&gt;, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/hygiene/struct.LocalExpnId.html">LocalExpnId</a>) {
+    <span class="kw">fn </span>to_name_binding(<span class="self">self</span>, arenas: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ResolverArenas&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>NameBinding&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a href="#57">arenas</a>.<a href="lib.rs.html#1068">alloc_name_binding</a>(<a href="lib.rs.html#627">NameBinding</a> {
+            kind: <a href="lib.rs.html#647">NameBindingKind::Res</a>(<a class="self" href="#57">self</a>.<span class="number">0</span>, <span class="bool-val">false</span>),
+            ambiguity: <span class="prelude-val">None</span>,
+            vis: <a class="self" href="#57">self</a>.<span class="number">1</span>.to_def_id(),
+            span: <a class="self" href="#57">self</a>.<span class="number">2</span>,
+            expansion: <a class="self" href="#57">self</a>.<span class="number">3</span>,
+        })
+    }
+}
+
+<span class="kw">struct </span>IsMacroExport;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ToNameBinding&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>(<a href="#40">Res</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/hygiene/struct.LocalExpnId.html">LocalExpnId</a>, <a href="#68">IsMacroExport</a>) {
+    <span class="kw">fn </span>to_name_binding(<span class="self">self</span>, arenas: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ResolverArenas&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>NameBinding&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a href="#71">arenas</a>.<a href="lib.rs.html#1068">alloc_name_binding</a>(<a href="lib.rs.html#627">NameBinding</a> {
+            kind: <a href="lib.rs.html#647">NameBindingKind::Res</a>(<a class="self" href="#71">self</a>.<span class="number">0</span>, <span class="bool-val">true</span>),
+            ambiguity: <span class="prelude-val">None</span>,
+            vis: <a class="self" href="#71">self</a>.<span class="number">1</span>.to_def_id(),
+            span: <a class="self" href="#71">self</a>.<span class="number">2</span>,
+            expansion: <a class="self" href="#71">self</a>.<span class="number">3</span>,
+        })
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Resolver&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// Defines `name` in namespace `ns` of module `parent` to be `def` if it is not yet defined;
+    /// otherwise, reports an error.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>define&lt;T&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, parent: Module&lt;<span class="lifetime">&#39;a</span>&gt;, ident: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, ns: <a href="../../rustc_resolve/enum.Namespace.html">Namespace</a>, def: T)
+    <span class="kw">where
+        </span>T: ToNameBinding&lt;<span class="lifetime">&#39;a</span>&gt;,
+    {
+        <span class="kw">let </span>binding = <a href="#85">def</a>.<a href="lib.rs.html#636">to_name_binding</a>(<a class="self" href="#85">self</a>.arenas);
+        <span class="kw">let </span>key = <a class="self" href="#85">self</a>.<a href="lib.rs.html#1623">new_key</a>(<a href="#85">ident</a>, <a href="#85">ns</a>);
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(old_binding) = <a class="self" href="#85">self</a>.<a href="imports.rs.html#244-249">try_define</a>(<a href="#85">parent</a>, <a href="#90">key</a>, <a href="#89">binding</a>) {
+            <a class="self" href="#85">self</a>.<a href="diagnostics.rs.html#150-157">report_conflict</a>(<a href="#85">parent</a>, <a href="#85">ident</a>, <a href="#85">ns</a>, <a href="#91">old_binding</a>, <span class="kw-2">&amp;</span><a href="#89">binding</a>);
+        }
+    }
+
+    <span class="doccomment">/// Walks up the tree of definitions starting at `def_id`,
+    /// stopping at the first encountered module.
+    /// Parent block modules for arbitrary def-ids are not recorded for the local crate,
+    /// and are not preserved in metadata for foreign crates, so block modules are never
+    /// returned by this function.
+    ///
+    /// For the local crate ignoring block modules may be incorrect, so use this method with care.
+    ///
+    /// For foreign crates block modules can be ignored without introducing observable differences,
+    /// moreover they has to be ignored right now because they are not kept in metadata.
+    /// Foreign parent modules are used for resolving names used by foreign macros with def-site
+    /// hygiene, therefore block module ignorability relies on macros with def-site hygiene and
+    /// block module parents being unreachable from other crates.
+    /// Reachable macros with block module parents exist due to `#[macro_export] macro_rules!`,
+    /// but they cannot use def-site hygiene, so the assumption holds
+    /// (&lt;https://github.com/rust-lang/rust/pull/77984#issuecomment-712445508&gt;).
+    </span><span class="kw">pub fn </span>get_nearest_non_block_module(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Module&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">loop </span>{
+            <span class="kw">match </span><a class="self" href="#112">self</a>.<a href="#128">get_module</a>(<a href="#112">def_id</a>) {
+                <span class="prelude-val">Some</span>(module) =&gt; <span class="kw">return </span><a href="#115">module</a>,
+                <span class="prelude-val">None </span>=&gt; <a href="#112">def_id</a> = <a class="self" href="#112">self</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">parent</a>(<a href="#112">def_id</a>),
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>expect_module(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Module&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a class="self" href="#121">self</a>.<a href="#128">get_module</a>(<a href="#121">def_id</a>).expect(<span class="string">&quot;argument `DefId` is not a module&quot;</span>)
+    }
+
+    <span class="doccomment">/// If `def_id` refers to a module (in resolver&#39;s sense, i.e. a module item, crate root, enum,
+    /// or trait), then this function returns that module&#39;s resolver representation, otherwise it
+    /// returns `None`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_module(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Module&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        <span class="kw">if let </span>module @ <span class="prelude-val">Some</span>(..) = <a class="self" href="#128">self</a>.module_map.get(<span class="kw-2">&amp;</span><a href="#128">def_id</a>) {
+            <span class="kw">return </span><a href="#129">module</a>.copied();
+        }
+
+        <span class="kw">if </span>!def_id.is_local() {
+            <span class="kw">let </span>def_kind = <a class="self" href="#128">self</a>.<a href="lib.rs.html#1486">cstore</a>().def_kind(<a href="#128">def_id</a>);
+            <span class="kw">match </span><a href="#134">def_kind</a> {
+                DefKind::Mod | DefKind::Enum | DefKind::Trait =&gt; {
+                    <span class="kw">let </span>def_key = <a class="self" href="#128">self</a>.<a href="lib.rs.html#1486">cstore</a>().<a href="../../rustc_session/cstore/trait.CrateStore.html">def_key</a>(<a href="#128">def_id</a>);
+                    <span class="kw">let </span>parent = <a href="#137">def_key</a>.parent.map(|index| {
+                        <a class="self" href="#128">self</a>.<a href="#112">get_nearest_non_block_module</a>(<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a> { <a href="#138">index</a>, krate: <a href="#128">def_id</a>.krate })
+                    });
+                    <span class="kw">let </span>name = <span class="kw">if let </span><span class="prelude-val">Some</span>(cnum) = <a href="#128">def_id</a>.as_crate_root() {
+                        <a class="self" href="#128">self</a>.<a href="lib.rs.html#1486">cstore</a>().<a href="../../rustc_session/cstore/trait.CrateStore.html">crate_name</a>(<a href="#141">cnum</a>)
+                    } <span class="kw">else </span>{
+                        <a href="#137">def_key</a>.disambiguated_data.data.get_opt_name().expect(<span class="string">&quot;module without name&quot;</span>)
+                    };
+
+                    <span class="prelude-val">Some</span>(<a class="self" href="#128">self</a>.<a href="lib.rs.html#1343-1350">new_module</a>(
+                        <a href="#138">parent</a>,
+                        <a href="lib.rs.html#429">ModuleKind::Def</a>(<a href="#134">def_kind</a>, <a href="#128">def_id</a>, <a href="#141">name</a>),
+                        <a class="self" href="#128">self</a>.<a href="lib.rs.html#1486">cstore</a>().module_expansion_untracked(<a href="#128">def_id</a>, <span class="kw-2">&amp;</span><a class="self" href="#128">self</a>.session),
+                        <a class="self" href="#128">self</a>.<a href="lib.rs.html#1486">cstore</a>().get_span_untracked(<a href="#128">def_id</a>, <span class="kw-2">&amp;</span><a class="self" href="#128">self</a>.session),
+                        <span class="comment">// FIXME: Account for `#[no_implicit_prelude]` attributes.
+                        </span><a href="#138">parent</a>.map_or(<span class="bool-val">false</span>, |module| <a href="#153">module</a>.no_implicit_prelude),
+                    ))
+                }
+                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+            }
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>expn_def_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expn_id: <a href="../../rustc_span/hygiene/struct.ExpnId.html">ExpnId</a>) -&gt; Module&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">match </span><a href="#163">expn_id</a>.expn_data().macro_def_id {
+            <span class="prelude-val">Some</span>(def_id) =&gt; <a class="self" href="#163">self</a>.<a href="#173">macro_def_scope</a>(<a href="#165">def_id</a>),
+            <span class="prelude-val">None </span>=&gt; <a href="#163">expn_id</a>
+                .as_local()
+                .and_then(|expn_id| <a class="self" href="#163">self</a>.ast_transform_scopes.get(<span class="kw-2">&amp;</span><a href="#168">expn_id</a>))
+                .unwrap_or(<span class="kw-2">&amp;</span><a class="self" href="#163">self</a>.graph_root),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>macro_def_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Module&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(id) = <a href="#173">def_id</a>.as_local() {
+            <a class="self" href="#173">self</a>.local_macro_def_scopes[<span class="kw-2">&amp;</span><a href="#174">id</a>]
+        } <span class="kw">else </span>{
+            <a class="self" href="#173">self</a>.<a href="#112">get_nearest_non_block_module</a>(<a href="#173">def_id</a>)
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_macro(<span class="kw-2">&amp;mut </span><span class="self">self</span>, res: <a href="#40">Res</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="lib.rs.html#848">MacroData</a>&gt; {
+        <span class="kw">match </span><a href="#181">res</a> {
+            Res::Def(DefKind::Macro(..), def_id) =&gt; <span class="prelude-val">Some</span>(<a class="self" href="#181">self</a>.<a href="#191">get_macro_by_def_id</a>(<a href="#183">def_id</a>)),
+            Res::NonMacroAttr(<span class="kw">_</span>) =&gt; {
+                <span class="prelude-val">Some</span>(<a href="lib.rs.html#848">MacroData</a> { ext: <a class="self" href="#181">self</a>.non_macro_attr.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), macro_rules: <span class="bool-val">false </span>})
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_macro_by_def_id(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="lib.rs.html#848">MacroData</a> {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(macro_data) = <a class="self" href="#191">self</a>.macro_map.get(<span class="kw-2">&amp;</span><a href="#191">def_id</a>) {
+            <span class="kw">return </span><a href="#192">macro_data</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+        }
+
+        <span class="kw">let </span>(ext, macro_rules) = <span class="kw">match </span><a class="self" href="#191">self</a>.<a href="lib.rs.html#1486">cstore</a>().load_macro_untracked(<a href="#191">def_id</a>, <span class="kw-2">&amp;</span><a class="self" href="#191">self</a>.session) {
+            LoadedMacro::MacroDef(item, edition) =&gt; (
+                Lrc::new(<a class="self" href="#191">self</a>.<a href="macros.rs.html#860-864">compile_macro</a>(<span class="kw-2">&amp;</span><a href="#197">item</a>, <a href="#197">edition</a>).<span class="number">0</span>),
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(item.kind, ItemKind::MacroDef(def) <span class="kw">if </span>def.macro_rules),
+            ),
+            LoadedMacro::ProcMacro(extz) =&gt; (Lrc::new(<a href="#201">extz</a>), <span class="bool-val">false</span>),
+        };
+
+        <span class="kw">let </span>macro_data = <a href="lib.rs.html#848">MacroData</a> { <a href="#196">ext</a>, <a href="#196">macro_rules</a> };
+        <a class="self" href="#191">self</a>.macro_map.insert(<a href="#191">def_id</a>, <a href="#204">macro_data</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>());
+        <a href="#204">macro_data</a>
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_reduced_graph(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        fragment: <span class="kw-2">&amp;</span><a href="../../rustc_expand/expand/enum.AstFragment.html">AstFragment</a>,
+        parent_scope: ParentScope&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) -&gt; MacroRulesScopeRef&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a href="def_collector.rs.html#12-16">collect_definitions</a>(<a class="self" href="#210">self</a>, <a href="#211">fragment</a>, <a href="#212">parent_scope</a>.expansion);
+        <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#229">BuildReducedGraphVisitor</a> { r: <a class="self" href="#210">self</a>, <a href="#212">parent_scope</a> };
+        <a href="#211">fragment</a>.visit_with(<span class="kw-2">&amp;mut </span><a href="#215">visitor</a>);
+        <a href="#215">visitor</a>.parent_scope.macro_rules
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_reduced_graph_external(<span class="kw-2">&amp;mut </span><span class="self">self</span>, module: Module&lt;<span class="lifetime">&#39;a</span>&gt;) {
+        <span class="kw">for </span>child <span class="kw">in </span><span class="self">self</span>.cstore().module_children_untracked(module.def_id(), <span class="self">self</span>.session) {
+            <span class="kw">let </span>parent_scope = ParentScope::module(module, <span class="self">self</span>);
+            BuildReducedGraphVisitor { r: <span class="self">self</span>, parent_scope }
+                .build_reduced_graph_for_external_crate_res(child);
+        }
+    }
+}
+
+<span class="kw">struct </span>BuildReducedGraphVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
+    r: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span>Resolver&lt;<span class="lifetime">&#39;a</span>&gt;,
+    parent_scope: ParentScope&lt;<span class="lifetime">&#39;a</span>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; AsMut&lt;Resolver&lt;<span class="lifetime">&#39;a</span>&gt;&gt; <span class="kw">for </span>BuildReducedGraphVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>as_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Resolver&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <a class="self" href="#235">self</a>.r
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; BuildReducedGraphVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
+    <span class="kw">fn </span>resolve_visibility(<span class="kw-2">&amp;mut </span><span class="self">self</span>, vis: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Visibility.html">ast::Visibility</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a> {
+        <a class="self" href="#241">self</a>.<a href="#248-252">try_resolve_visibility</a>(<a href="#241">vis</a>, <span class="bool-val">true</span>).unwrap_or_else(|err| {
+            <a class="self" href="#241">self</a>.r.<a href="diagnostics.rs.html#1058-1061">report_vis_error</a>(<a href="#242">err</a>);
+            ty::Visibility::Public
+        })
+    }
+
+    <span class="kw">fn </span>try_resolve_visibility&lt;<span class="lifetime">&#39;ast</span>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        vis: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ast </span><a href="../../rustc_ast/ast/struct.Visibility.html">ast::Visibility</a>,
+        finalize: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a>, VisResolutionError&lt;<span class="lifetime">&#39;ast</span>&gt;&gt; {
+        <span class="kw">let </span>parent_scope = <span class="kw-2">&amp;</span><a class="self" href="#249">self</a>.parent_scope;
+        <span class="kw">match </span><a href="#250">vis</a>.kind {
+            ast::VisibilityKind::Public =&gt; <span class="prelude-val">Ok</span>(ty::Visibility::Public),
+            ast::VisibilityKind::Inherited =&gt; {
+                <span class="prelude-val">Ok</span>(<span class="kw">match </span><a class="self" href="#249">self</a>.parent_scope.module.kind {
+                    <span class="comment">// Any inherited visibility resolved directly inside an enum or trait
+                    // (i.e. variants, fields, and trait items) inherits from the visibility
+                    // of the enum or trait.
+                    </span><a href="lib.rs.html#429">ModuleKind::Def</a>(DefKind::Enum | DefKind::Trait, def_id, <span class="kw">_</span>) =&gt; {
+                        <a class="self" href="#249">self</a>.r.visibilities[<span class="kw-2">&amp;</span><a href="#261">def_id</a>.expect_local()]
+                    }
+                    <span class="comment">// Otherwise, the visibility is restricted to the nearest parent `mod` item.
+                    </span><span class="kw">_ </span>=&gt; ty::Visibility::Restricted(
+                        <a class="self" href="#249">self</a>.parent_scope.module.<a href="lib.rs.html#600">nearest_parent_mod</a>().expect_local(),
+                    ),
+                })
+            }
+            <a href="../../rustc_ast/ast/enum.VisibilityKind.html">ast::VisibilityKind::Restricted</a> { <span class="kw-2">ref </span>path, id, .. } =&gt; {
+                <span class="comment">// Make `PRIVATE_IN_PUBLIC` lint a hard error.
+                </span><a class="self" href="#249">self</a>.r.has_pub_restricted = <span class="bool-val">true</span>;
+                <span class="comment">// For visibilities we are not ready to provide correct implementation of &quot;uniform
+                // paths&quot; right now, so on 2018 edition we only allow module-relative paths for now.
+                // On 2015 edition visibilities are resolved as crate-relative by default,
+                // so we are prepending a root segment if necessary.
+                </span><span class="kw">let </span>ident = <a href="#270">path</a>.segments.get(<span class="number">0</span>).expect(<span class="string">&quot;empty path in visibility&quot;</span>).ident;
+                <span class="kw">let </span>crate_root = <span class="kw">if </span>ident.is_path_segment_keyword() {
+                    <span class="prelude-val">None
+                </span>} <span class="kw">else if </span>ident.span.rust_2015() {
+                    <span class="prelude-val">Some</span>(Segment::from_ident(Ident::new(
+                        kw::PathRoot,
+                        <a href="#270">path</a>.span.shrink_to_lo().with_ctxt(<a href="#277">ident</a>.span.ctxt()),
+                    )))
+                } <span class="kw">else </span>{
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="lib.rs.html#245">VisResolutionError::Relative2018</a>(<a href="#277">ident</a>.span, <a href="#270">path</a>));
+                };
+
+                <span class="kw">let </span>segments = <a href="#278">crate_root</a>
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#270">path</a>.segments.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|seg| <a href="#291">seg</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()))
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+                <span class="kw">let </span>expected_found_error = |res| {
+                    <span class="prelude-val">Err</span>(<a href="lib.rs.html#248">VisResolutionError::ExpectedFound</a>(
+                        <a href="#270">path</a>.span,
+                        Segment::names_to_string(<span class="kw-2">&amp;</span><a href="#289">segments</a>),
+                        <a href="#293">res</a>,
+                    ))
+                };
+                <span class="kw">match </span><a class="self" href="#249">self</a>.r.<a href="ident.rs.html#1309-1316">resolve_path</a>(
+                    <span class="kw-2">&amp;</span><a href="#289">segments</a>,
+                    <span class="prelude-val">Some</span>(TypeNS),
+                    <a href="#253">parent_scope</a>,
+                    <a href="#251">finalize</a>.then(|| Finalize::new(<a href="#270">id</a>, <a href="#270">path</a>.span)),
+                    <span class="prelude-val">None</span>,
+                ) {
+                    <a href="lib.rs.html#381">PathResult::Module</a>(<a href="lib.rs.html#347">ModuleOrUniformRoot::Module</a>(module)) =&gt; {
+                        <span class="kw">let </span>res = <a href="#307">module</a>.<a href="lib.rs.html#561">res</a>().expect(<span class="string">&quot;visibility resolved to unnamed block&quot;</span>);
+                        <span class="kw">if </span>finalize {
+                            <a class="self" href="#249">self</a>.r.<a href="lib.rs.html#1780">record_partial_res</a>(<a href="#270">id</a>, PartialRes::new(<a href="#308">res</a>));
+                        }
+                        <span class="kw">if </span>module.is_normal() {
+                            <span class="kw">if </span>res == Res::Err {
+                                <span class="prelude-val">Ok</span>(ty::Visibility::Public)
+                            } <span class="kw">else </span>{
+                                <span class="kw">let </span>vis = ty::Visibility::Restricted(<a href="#308">res</a>.def_id());
+                                <span class="kw">if </span><span class="self">self</span>.r.is_accessible_from(vis, parent_scope.module) {
+                                    <span class="prelude-val">Ok</span>(<a href="#316">vis</a>.expect_local())
+                                } <span class="kw">else </span>{
+                                    <span class="prelude-val">Err</span>(<a href="lib.rs.html#246">VisResolutionError::AncestorOnly</a>(<a href="#270">path</a>.span))
+                                }
+                            }
+                        } <span class="kw">else </span>{
+                            <a href="#293">expected_found_error</a>(<a href="#308">res</a>)
+                        }
+                    }
+                    <a href="lib.rs.html#381">PathResult::Module</a>(..) =&gt; <span class="prelude-val">Err</span>(<a href="lib.rs.html#250">VisResolutionError::ModuleOnly</a>(<a href="#270">path</a>.span)),
+                    <a href="lib.rs.html#382">PathResult::NonModule</a>(partial_res) =&gt; {
+                        <a href="#293">expected_found_error</a>(<a href="#328">partial_res</a>.base_res())
+                    }
+                    <a href="lib.rs.html#384">PathResult::Failed</a> { span, label, suggestion, .. } =&gt; {
+                        <span class="prelude-val">Err</span>(<a href="lib.rs.html#247">VisResolutionError::FailedToResolve</a>(<a href="#331">span</a>, <a href="#331">label</a>, <a href="#331">suggestion</a>))
+                    }
+                    <a href="lib.rs.html#383">PathResult::Indeterminate</a> =&gt; <span class="prelude-val">Err</span>(<a href="lib.rs.html#249">VisResolutionError::Indeterminate</a>(<a href="#270">path</a>.span)),
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>insert_field_names_local(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, vdata: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/enum.VariantData.html">ast::VariantData</a>) {
+        <span class="kw">let </span>field_names = <a href="#340">vdata</a>
+            .fields()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|field| <a href="../../rustc_span/source_map/fn.respan.html">respan</a>(<a href="#344">field</a>.span, <a href="#344">field</a>.ident.map_or(<a href="../../rustc_span/symbol/kw_generated/constant.Empty.html">kw::Empty</a>, |ident| <a href="#344">ident</a>.name)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a class="self" href="#340">self</a>.<a href="#349">insert_field_names</a>(<a href="#340">def_id</a>, <a href="#341">field_names</a>);
+    }
+
+    <span class="kw">fn </span>insert_field_names(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, field_names: Vec&lt;Spanned&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;) {
+        <a class="self" href="#349">self</a>.r.field_names.insert(<a href="#349">def_id</a>, <a href="#349">field_names</a>);
+    }
+
+    <span class="kw">fn </span>block_needs_anonymous_module(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// If any statements are items, we need to create an anonymous module
+        </span><a href="#353">block</a>
+            .stmts
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|statement| <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(statement.kind, StmtKind::Item(<span class="kw">_</span>) | StmtKind::MacCall(<span class="kw">_</span>)))
+    }
+
+    <span class="comment">// Add an import to the current module.
+    </span><span class="kw">fn </span>add_import(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        module_path: Vec&lt;<a href="lib.rs.html#256">Segment</a>&gt;,
+        kind: ImportKind&lt;<span class="lifetime">&#39;a</span>&gt;,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">ast::Item</a>,
+        root_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        root_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        vis: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a>,
+    ) {
+        <span class="kw">let </span>current_module = <a class="self" href="#363">self</a>.parent_scope.module;
+        <span class="kw">let </span>import = <a class="self" href="#363">self</a>.r.arenas.<a href="lib.rs.html#1071">alloc_import</a>(<a href="imports.rs.html#103">Import</a> {
+            <a href="#365">kind</a>,
+            parent_scope: <a class="self" href="#363">self</a>.parent_scope,
+            <a href="#364">module_path</a>,
+            imported_module: Cell::new(<span class="prelude-val">None</span>),
+            <a href="#366">span</a>,
+            <a href="#367">id</a>,
+            use_span: <a href="#368">item</a>.span,
+            use_span_with_attributes: <a href="#368">item</a>.span_with_attributes(),
+            has_attributes: !<a href="#368">item</a>.attrs.is_empty(),
+            <a href="#369">root_span</a>,
+            <a href="#370">root_id</a>,
+            vis: Cell::new(<span class="prelude-val">Some</span>(<a href="#371">vis</a>)),
+            used: Cell::new(<span class="bool-val">false</span>),
+        });
+
+        <a class="self" href="#363">self</a>.r.indeterminate_imports.push(<a href="#374">import</a>);
+        <span class="kw">match </span><a href="#374">import</a>.kind {
+            <span class="comment">// Don&#39;t add unresolved underscore imports to modules
+            </span><a href="imports.rs.html#34">ImportKind::Single</a> { target: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a> { name: kw::Underscore, .. }, .. } =&gt; {}
+            <a href="imports.rs.html#34">ImportKind::Single</a> { target, type_ns_only, .. } =&gt; {
+                <a class="self" href="#363">self</a>.r.<a href="lib.rs.html#1499">per_ns</a>(|this, ns| {
+                    <span class="kw">if </span>!type_ns_only || ns == TypeNS {
+                        <span class="kw">let </span>key = <a href="#395">this</a>.<a href="lib.rs.html#1623">new_key</a>(<a href="#394">target</a>, <a href="#395">ns</a>);
+                        <span class="kw">let </span><span class="kw-2">mut </span>resolution = <a href="#395">this</a>.<a href="lib.rs.html#1642-1646">resolution</a>(<a href="#373">current_module</a>, <a href="#397">key</a>).borrow_mut();
+                        <a href="#398">resolution</a>.<a href="imports.rs.html#189">add_single_import</a>(<a href="#374">import</a>);
+                    }
+                });
+            }
+            <span class="comment">// We don&#39;t add prelude imports to the globs since they only affect lexical scopes,
+            // which are not relevant to import resolution.
+            </span><a href="imports.rs.html#51">ImportKind::Glob</a> { is_prelude: <span class="bool-val">true</span>, .. } =&gt; {}
+            <a href="imports.rs.html#51">ImportKind::Glob</a> { .. } =&gt; <a href="#373">current_module</a>.globs.borrow_mut().push(<a href="#374">import</a>),
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        }
+    }
+
+    <span class="kw">fn </span>build_reduced_graph_for_use_tree(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        <span class="comment">// This particular use tree
+        </span>use_tree: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.UseTree.html">ast::UseTree</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        parent_prefix: <span class="kw-2">&amp;</span>[<a href="lib.rs.html#256">Segment</a>],
+        nested: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        <span class="comment">// The whole `use` item
+        </span>item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>,
+        vis: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a>,
+        root_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;build_reduced_graph_for_use_tree(parent_prefix={:?}, use_tree={:?}, nested={})&quot;</span>,
+            parent_prefix, use_tree, nested
+        );
+
+        <span class="kw">let </span><span class="kw-2">mut </span>prefix_iter = <a href="#416">parent_prefix</a>
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#414">use_tree</a>.prefix.segments.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|seg| <a href="#431">seg</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">peekable</a>();
+
+        <span class="comment">// On 2015 edition imports are resolved as crate-relative by default,
+        // so prefixes are prepended with crate root segment if necessary.
+        // The root is prepended lazily, when the first non-empty prefix or terminating glob
+        // appears, so imports in braced groups can have roots prepended independently.
+        </span><span class="kw">let </span>is_glob = <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(use_tree.kind, ast::UseTreeKind::Glob);
+        <span class="kw">let </span>crate_root = <span class="kw">match </span><a href="#428">prefix_iter</a>.peek() {
+            <span class="prelude-val">Some</span>(seg) <span class="kw">if </span>!<a href="#440">seg</a>.ident.is_path_segment_keyword() &amp;&amp; <a href="#440">seg</a>.ident.span.rust_2015() =&gt; {
+                <span class="prelude-val">Some</span>(<a href="#440">seg</a>.ident.span.ctxt())
+            }
+            <span class="prelude-val">None </span><span class="kw">if </span><a href="#438">is_glob</a> &amp;&amp; <a href="#414">use_tree</a>.span.rust_2015() =&gt; <span class="prelude-val">Some</span>(<a href="#414">use_tree</a>.span.ctxt()),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+        .map(|ctxt| {
+            Segment::from_ident(Ident::new(
+                kw::PathRoot,
+                <a href="#414">use_tree</a>.prefix.span.shrink_to_lo().with_ctxt(<a href="#446">ctxt</a>),
+            ))
+        });
+
+        <span class="kw">let </span>prefix = <a href="#439">crate_root</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#428">prefix_iter</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;build_reduced_graph_for_use_tree: prefix={:?}&quot;</span>, prefix);
+
+        <span class="kw">let </span>empty_for_self = |prefix: <span class="kw-2">&amp;</span>[<a href="lib.rs.html#256">Segment</a>]| {
+            <a href="#456">prefix</a>.is_empty() || <a href="#456">prefix</a>.len() == <span class="number">1 </span>&amp;&amp; <a href="#456">prefix</a>[<span class="number">0</span>].ident.name == kw::PathRoot
+        };
+        <span class="kw">match </span><a href="#414">use_tree</a>.kind {
+            ast::UseTreeKind::Simple(rename, id1, id2) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>ident = <a href="#414">use_tree</a>.ident();
+                <span class="kw">let </span><span class="kw-2">mut </span>module_path = <a href="#453">prefix</a>;
+                <span class="kw">let </span><span class="kw-2">mut </span>source = <a href="#462">module_path</a>.pop().unwrap();
+                <span class="kw">let </span><span class="kw-2">mut </span>type_ns_only = <span class="bool-val">false</span>;
+
+                <a class="self" href="#412">self</a>.r.visibilities.insert(<a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#415">id</a>), <a href="#420">vis</a>);
+                <span class="kw">if </span>id1 != ast::DUMMY_NODE_ID {
+                    <a class="self" href="#412">self</a>.r.visibilities.insert(<a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#460">id1</a>), <a href="#420">vis</a>);
+                }
+                <span class="kw">if </span>id2 != ast::DUMMY_NODE_ID {
+                    <a class="self" href="#412">self</a>.r.visibilities.insert(<a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#460">id2</a>), <a href="#420">vis</a>);
+                }
+
+                <span class="kw">if </span>nested {
+                    <span class="comment">// Correctly handle `self`
+                    </span><span class="kw">if </span>source.ident.name == kw::SelfLower {
+                        <a href="#464">type_ns_only</a> = <span class="bool-val">true</span>;
+
+                        <span class="kw">if </span>empty_for_self(<span class="kw-2">&amp;</span>module_path) {
+                            <a class="self" href="#412">self</a>.r.<a href="diagnostics.rs.html#493">report_error</a>(
+                                <a href="#414">use_tree</a>.span,
+                                <a href="lib.rs.html#200">ResolutionError::SelfImportOnlyInImportListWithNonEmptyPrefix</a>,
+                            );
+                            <span class="kw">return</span>;
+                        }
+
+                        <span class="comment">// Replace `use foo::{ self };` with `use foo;`
+                        </span><a href="#463">source</a> = <a href="#462">module_path</a>.pop().unwrap();
+                        <span class="kw">if </span>rename.is_none() {
+                            <a href="#461">ident</a> = <a href="#463">source</a>.ident;
+                        }
+                    }
+                } <span class="kw">else </span>{
+                    <span class="comment">// Disallow `self`
+                    </span><span class="kw">if </span>source.ident.name == kw::SelfLower {
+                        <span class="kw">let </span>parent = <a href="#462">module_path</a>.last();
+
+                        <span class="kw">let </span>span = <span class="kw">match </span><a href="#496">parent</a> {
+                            <span class="comment">// only `::self` from `use foo::self as bar`
+                            </span><span class="prelude-val">Some</span>(seg) =&gt; <a href="#500">seg</a>.ident.span.shrink_to_hi().to(<a href="#463">source</a>.ident.span),
+                            <span class="prelude-val">None </span>=&gt; <a href="#463">source</a>.ident.span,
+                        };
+                        <span class="kw">let </span>span_with_rename = <span class="kw">match </span><a href="#460">rename</a> {
+                            <span class="comment">// only `self as bar` from `use foo::self as bar`
+                            </span><span class="prelude-val">Some</span>(rename) =&gt; <a href="#463">source</a>.ident.span.to(<a href="#505">rename</a>.span),
+                            <span class="prelude-val">None </span>=&gt; <a href="#463">source</a>.ident.span,
+                        };
+                        <a class="self" href="#412">self</a>.r.<a href="diagnostics.rs.html#493">report_error</a>(
+                            <a href="#498">span</a>,
+                            <a href="lib.rs.html#196">ResolutionError::SelfImportsOnlyAllowedWithin</a> {
+                                root: <a href="#496">parent</a>.is_none(),
+                                <a href="#503">span_with_rename</a>,
+                            },
+                        );
+
+                        <span class="comment">// Error recovery: replace `use foo::self;` with `use foo;`
+                        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = <a href="#462">module_path</a>.pop() {
+                            <a href="#463">source</a> = <a href="#517">parent</a>;
+                            <span class="kw">if </span>rename.is_none() {
+                                <a href="#461">ident</a> = <a href="#463">source</a>.ident;
+                            }
+                        }
+                    }
+
+                    <span class="comment">// Disallow `use $crate;`
+                    </span><span class="kw">if </span>source.ident.name == kw::DollarCrate &amp;&amp; module_path.is_empty() {
+                        <span class="kw">let </span>crate_root = <a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1698">resolve_crate_root</a>(<a href="#463">source</a>.ident);
+                        <span class="kw">let </span>crate_name = <span class="kw">match </span><a href="#527">crate_root</a>.kind {
+                            <a href="lib.rs.html#429">ModuleKind::Def</a>(.., name) =&gt; <a href="#529">name</a>,
+                            <a href="lib.rs.html#419">ModuleKind::Block</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+                        };
+                        <span class="comment">// HACK(eddyb) unclear how good this is, but keeping `$crate`
+                        // in `source` breaks `src/test/ui/imports/import-crate-var.rs`,
+                        // while the current crate doesn&#39;t have a valid `crate_name`.
+                        </span><span class="kw">if </span>crate_name != kw::Empty {
+                            <span class="comment">// `crate_name` should not be interpreted as relative.
+                            </span><a href="#462">module_path</a>.push(Segment::from_ident_and_id(
+                                <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a> { name: kw::PathRoot, span: <a href="#463">source</a>.ident.span },
+                                <a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1355">next_node_id</a>(),
+                            ));
+                            <a href="#463">source</a>.ident.name = <a href="#528">crate_name</a>;
+                        }
+                        <span class="kw">if </span>rename.is_none() {
+                            <a href="#461">ident</a>.name = <a href="#528">crate_name</a>;
+                        }
+
+                        <a class="self" href="#412">self</a>.r
+                            .session
+                            .struct_span_err(<a href="#419">item</a>.span, <span class="string">&quot;`$crate` may not be imported&quot;</span>)
+                            .emit();
+                    }
+                }
+
+                <span class="kw">if </span>ident.name == kw::Crate {
+                    <a class="self" href="#412">self</a>.r.session.span_err(
+                        <a href="#461">ident</a>.span,
+                        <span class="string">&quot;crate root imports need to be explicitly named: \
+                         `use crate as name;`&quot;</span>,
+                    );
+                }
+
+                <span class="kw">let </span>kind = <a href="imports.rs.html#34">ImportKind::Single</a> {
+                    source: <a href="#463">source</a>.ident,
+                    target: <a href="#461">ident</a>,
+                    source_bindings: <a href="../../rustc_resolve/struct.PerNS.html">PerNS</a> {
+                        type_ns: Cell::new(<span class="prelude-val">Err</span>(<a href="lib.rs.html#89">Determinacy::Undetermined</a>)),
+                        value_ns: Cell::new(<span class="prelude-val">Err</span>(<a href="lib.rs.html#89">Determinacy::Undetermined</a>)),
+                        macro_ns: Cell::new(<span class="prelude-val">Err</span>(<a href="lib.rs.html#89">Determinacy::Undetermined</a>)),
+                    },
+                    target_bindings: <a href="../../rustc_resolve/struct.PerNS.html">PerNS</a> {
+                        type_ns: Cell::new(<span class="prelude-val">None</span>),
+                        value_ns: Cell::new(<span class="prelude-val">None</span>),
+                        macro_ns: Cell::new(<span class="prelude-val">None</span>),
+                    },
+                    <a href="#464">type_ns_only</a>,
+                    <a href="#417">nested</a>,
+                    additional_ids: (<a href="#460">id1</a>, <a href="#460">id2</a>),
+                };
+
+                <a class="self" href="#412">self</a>.<a href="#362-372">add_import</a>(
+                    <a href="#462">module_path</a>,
+                    <a href="#562">kind</a>,
+                    <a href="#414">use_tree</a>.span,
+                    <a href="#415">id</a>,
+                    <a href="#419">item</a>,
+                    <a href="#421">root_span</a>,
+                    <a href="#419">item</a>.id,
+                    <a href="#420">vis</a>,
+                );
+            }
+            ast::UseTreeKind::Glob =&gt; {
+                <span class="kw">let </span>kind = <a href="imports.rs.html#51">ImportKind::Glob</a> {
+                    is_prelude: <a class="self" href="#412">self</a>.r.session.contains_name(<span class="kw-2">&amp;</span><a href="#419">item</a>.attrs, sym::prelude_import),
+                    max_vis: Cell::new(<span class="prelude-val">None</span>),
+                };
+                <a class="self" href="#412">self</a>.r.visibilities.insert(<a class="self" href="#412">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#415">id</a>), <a href="#420">vis</a>);
+                <a class="self" href="#412">self</a>.<a href="#362-372">add_import</a>(<a href="#453">prefix</a>, <a href="#592">kind</a>, <a href="#414">use_tree</a>.span, <a href="#415">id</a>, <a href="#419">item</a>, <a href="#421">root_span</a>, <a href="#419">item</a>.id, <a href="#420">vis</a>);
+            }
+            ast::UseTreeKind::Nested(<span class="kw-2">ref </span>items) =&gt; {
+                <span class="comment">// Ensure there is at most one `self` in the list
+                </span><span class="kw">let </span>self_spans = <a href="#599">items</a>
+                    .iter()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|<span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>use_tree, <span class="kw">_</span>)| {
+                        <span class="kw">if let </span>ast::UseTreeKind::Simple(..) = <a href="#603">use_tree</a>.kind {
+                            <span class="kw">if </span>use_tree.ident().name == kw::SelfLower {
+                                <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#603">use_tree</a>.span);
+                            }
+                        }
+
+                        <span class="prelude-val">None
+                    </span>})
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+                <span class="kw">if </span>self_spans.len() &gt; <span class="number">1 </span>{
+                    <span class="kw">let </span><span class="kw-2">mut </span>e = <a class="self" href="#412">self</a>.r.<a href="diagnostics.rs.html#497-501">into_struct_error</a>(
+                        <a href="#601">self_spans</a>[<span class="number">0</span>],
+                        <a href="lib.rs.html#198">ResolutionError::SelfImportCanOnlyAppearOnceInTheList</a>,
+                    );
+
+                    <span class="kw">for </span>other_span <span class="kw">in </span>self_spans.iter().skip(<span class="number">1</span>) {
+                        e.span_label(<span class="kw-2">*</span>other_span, <span class="string">&quot;another `self` import appears here&quot;</span>);
+                    }
+
+                    <a href="#614">e</a>.emit();
+                }
+
+                <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>tree, id) <span class="kw">in </span>items {
+                    <span class="self">self</span>.build_reduced_graph_for_use_tree(
+                        <span class="comment">// This particular use tree
+                        </span>tree, id, <span class="kw-2">&amp;</span>prefix, <span class="bool-val">true</span>, <span class="comment">// The whole `use` item
+                        </span>item, vis, root_span,
+                    );
+                }
+
+                <span class="comment">// Empty groups `a::b::{}` are turned into synthetic `self` imports
+                // `a::b::c::{self as _}`, so that their prefixes are correctly
+                // resolved and checked for privacy/stability/etc.
+                </span><span class="kw">if </span>items.is_empty() &amp;&amp; !empty_for_self(<span class="kw-2">&amp;</span>prefix) {
+                    <span class="kw">let </span>new_span = <a href="#453">prefix</a>[<a href="#453">prefix</a>.len() - <span class="number">1</span>].ident.span;
+                    <span class="kw">let </span>tree = <a href="../../rustc_ast/ast/struct.UseTree.html">ast::UseTree</a> {
+                        prefix: ast::Path::from_ident(Ident::new(kw::SelfLower, <a href="#638">new_span</a>)),
+                        kind: ast::UseTreeKind::Simple(
+                            <span class="prelude-val">Some</span>(Ident::new(kw::Underscore, <a href="#638">new_span</a>)),
+                            <a href="../../rustc_ast/node_id/constant.DUMMY_NODE_ID.html">ast::DUMMY_NODE_ID</a>,
+                            <a href="../../rustc_ast/node_id/constant.DUMMY_NODE_ID.html">ast::DUMMY_NODE_ID</a>,
+                        ),
+                        span: <a href="#414">use_tree</a>.span,
+                    };
+                    <a class="self" href="#412">self</a>.<a href="#411-422">build_reduced_graph_for_use_tree</a>(
+                        <span class="comment">// This particular use tree
+                        </span><span class="kw-2">&amp;</span><a href="#639">tree</a>,
+                        <a href="#415">id</a>,
+                        <span class="kw-2">&amp;</span><a href="#453">prefix</a>,
+                        <span class="bool-val">true</span>,
+                        <span class="comment">// The whole `use` item
+                        </span><a href="#419">item</a>,
+                        ty::Visibility::Restricted(
+                            <a class="self" href="#412">self</a>.parent_scope.module.<a href="lib.rs.html#600">nearest_parent_mod</a>().expect_local(),
+                        ),
+                        <a href="#421">root_span</a>,
+                    );
+                }
+            }
+        }
+    }
+
+    <span class="doccomment">/// Constructs the reduced graph for one item.
+    </span><span class="kw">fn </span>build_reduced_graph_for_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>) {
+        <span class="kw">let </span>parent_scope = <span class="kw-2">&amp;</span><a class="self" href="#667">self</a>.parent_scope;
+        <span class="kw">let </span>parent = <a href="#668">parent_scope</a>.module;
+        <span class="kw">let </span>expansion = <a href="#668">parent_scope</a>.expansion;
+        <span class="kw">let </span>ident = <a href="#667">item</a>.ident;
+        <span class="kw">let </span>sp = <a href="#667">item</a>.span;
+        <span class="kw">let </span>vis = <a class="self" href="#667">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#667">item</a>.vis);
+        <span class="kw">let </span>local_def_id = <a class="self" href="#667">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#667">item</a>.id);
+        <span class="kw">let </span>def_id = <a href="#674">local_def_id</a>.to_def_id();
+
+        <a class="self" href="#667">self</a>.r.visibilities.insert(<a href="#674">local_def_id</a>, <a href="#673">vis</a>);
+
+        <span class="kw">match </span><a href="#667">item</a>.kind {
+            ItemKind::Use(<span class="kw-2">ref </span>use_tree) =&gt; {
+                <a class="self" href="#667">self</a>.<a href="#411-422">build_reduced_graph_for_use_tree</a>(
+                    <span class="comment">// This particular use tree
+                    </span><a href="#680">use_tree</a>,
+                    <a href="#667">item</a>.id,
+                    <span class="kw-2">&amp;</span>[],
+                    <span class="bool-val">false</span>,
+                    <span class="comment">// The whole `use` item
+                    </span><a href="#667">item</a>,
+                    <a href="#673">vis</a>,
+                    <a href="#680">use_tree</a>.span,
+                );
+            }
+
+            ItemKind::ExternCrate(orig_name) =&gt; {
+                <a class="self" href="#667">self</a>.<a href="#841-848">build_reduced_graph_for_extern_crate</a>(
+                    <a href="#694">orig_name</a>,
+                    <a href="#667">item</a>,
+                    <a href="#674">local_def_id</a>,
+                    <a href="#673">vis</a>,
+                    <a href="#669">parent</a>,
+                );
+            }
+
+            ItemKind::Mod(..) =&gt; {
+                <span class="kw">let </span>module = <a class="self" href="#667">self</a>.r.<a href="lib.rs.html#1343-1350">new_module</a>(
+                    <span class="prelude-val">Some</span>(<a href="#669">parent</a>),
+                    <a href="lib.rs.html#429">ModuleKind::Def</a>(DefKind::Mod, <a href="#675">def_id</a>, <a href="#671">ident</a>.name),
+                    <a href="#670">expansion</a>.to_expn_id(),
+                    <a href="#667">item</a>.span,
+                    <a href="#669">parent</a>.no_implicit_prelude
+                        || <a class="self" href="#667">self</a>.r.session.contains_name(<span class="kw-2">&amp;</span><a href="#667">item</a>.attrs, sym::no_implicit_prelude),
+                );
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#705">module</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+
+                <span class="comment">// Descend into the module.
+                </span><a class="self" href="#667">self</a>.parent_scope.module = <a href="#705">module</a>;
+            }
+
+            <span class="comment">// These items live in the value namespace.
+            </span>ItemKind::Static(<span class="kw">_</span>, mt, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::Static(<a href="#720">mt</a>), <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, ValueNS, (<a href="#721">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+            }
+            ItemKind::Const(..) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::Const, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, ValueNS, (<a href="#725">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+            }
+            ItemKind::Fn(..) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::Fn, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, ValueNS, (<a href="#729">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+
+                <span class="comment">// Functions introducing procedural macros reserve a slot
+                // in the macro namespace as well (see #52225).
+                </span><a class="self" href="#667">self</a>.<a href="#1244">define_macro</a>(<a href="#667">item</a>);
+            }
+
+            <span class="comment">// These items live in the type namespace.
+            </span>ItemKind::TyAlias(..) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::TyAlias, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#739">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+            }
+
+            ItemKind::Enum(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>module = <a class="self" href="#667">self</a>.r.<a href="lib.rs.html#1343-1350">new_module</a>(
+                    <span class="prelude-val">Some</span>(<a href="#669">parent</a>),
+                    <a href="lib.rs.html#429">ModuleKind::Def</a>(DefKind::Enum, <a href="#675">def_id</a>, <a href="#671">ident</a>.name),
+                    <a href="#670">expansion</a>.to_expn_id(),
+                    <a href="#667">item</a>.span,
+                    <a href="#669">parent</a>.no_implicit_prelude,
+                );
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#744">module</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+                <a class="self" href="#667">self</a>.parent_scope.module = <a href="#744">module</a>;
+            }
+
+            ItemKind::TraitAlias(..) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::TraitAlias, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#756">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+            }
+
+            <span class="comment">// These items live in both the type and value namespaces.
+            </span>ItemKind::Struct(<span class="kw-2">ref </span>vdata, <span class="kw">_</span>) =&gt; {
+                <span class="comment">// Define a name in the type namespace.
+                </span><span class="kw">let </span>res = Res::Def(DefKind::Struct, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#763">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+
+                <span class="comment">// Record field names for error reporting.
+                </span><a class="self" href="#667">self</a>.<a href="#340">insert_field_names_local</a>(<a href="#675">def_id</a>, <a href="#761">vdata</a>);
+
+                <span class="comment">// If this is a tuple or unit struct, define a name
+                // in the value namespace as well.
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(ctor_node_id) = <a href="#761">vdata</a>.ctor_id() {
+                    <span class="comment">// If the structure is marked as non_exhaustive then lower the visibility
+                    // to within the crate.
+                    </span><span class="kw">let </span><span class="kw-2">mut </span>ctor_vis = <span class="kw">if </span>vis.is_public()
+                        &amp;&amp; <span class="self">self</span>.r.session.contains_name(<span class="kw-2">&amp;</span>item.attrs, sym::non_exhaustive)
+                    {
+                        ty::Visibility::Restricted(<a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>)
+                    } <span class="kw">else </span>{
+                        <a href="#673">vis</a>
+                    };
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>ret_fields = Vec::with_capacity(<a href="#761">vdata</a>.fields().len());
+
+                    <span class="kw">for </span>field <span class="kw">in </span>vdata.fields() {
+                        <span class="comment">// NOTE: The field may be an expansion placeholder, but expansion sets
+                        // correct visibilities for unnamed field placeholders specifically, so the
+                        // constructor visibility should still be determined correctly.
+                        </span><span class="kw">let </span>field_vis = <span class="self">self
+                            </span>.try_resolve_visibility(<span class="kw-2">&amp;</span>field.vis, <span class="bool-val">false</span>)
+                            .unwrap_or(ty::Visibility::Public);
+                        <span class="kw">if </span>ctor_vis.is_at_least(field_vis, <span class="kw-2">&amp;*</span><span class="self">self</span>.r) {
+                            ctor_vis = field_vis;
+                        }
+                        ret_fields.push(field_vis.to_def_id());
+                    }
+                    <span class="kw">let </span>ctor_def_id = <a class="self" href="#667">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#771">ctor_node_id</a>);
+                    <span class="kw">let </span>ctor_res = Res::Def(
+                        DefKind::Ctor(CtorOf::Struct, CtorKind::from_ast(<a href="#761">vdata</a>)),
+                        <a href="#796">ctor_def_id</a>.to_def_id(),
+                    );
+                    <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, ValueNS, (<a href="#797">ctor_res</a>, <a href="#774">ctor_vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+                    <a class="self" href="#667">self</a>.r.visibilities.insert(<a href="#796">ctor_def_id</a>, <a href="#774">ctor_vis</a>);
+
+                    <a class="self" href="#667">self</a>.r
+                        .struct_constructors
+                        .insert(<a href="#675">def_id</a>, (<a href="#797">ctor_res</a>, <a href="#774">ctor_vis</a>.to_def_id(), <a href="#782">ret_fields</a>));
+                }
+            }
+
+            ItemKind::Union(<span class="kw-2">ref </span>vdata, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>res = Res::Def(DefKind::Union, <a href="#675">def_id</a>);
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#811">res</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+
+                <span class="comment">// Record field names for error reporting.
+                </span><a class="self" href="#667">self</a>.<a href="#340">insert_field_names_local</a>(<a href="#675">def_id</a>, <a href="#810">vdata</a>);
+            }
+
+            ItemKind::Trait(..) =&gt; {
+                <span class="comment">// Add all the items within to a new module.
+                </span><span class="kw">let </span>module = <a class="self" href="#667">self</a>.r.<a href="lib.rs.html#1343-1350">new_module</a>(
+                    <span class="prelude-val">Some</span>(<a href="#669">parent</a>),
+                    <a href="lib.rs.html#429">ModuleKind::Def</a>(DefKind::Trait, <a href="#675">def_id</a>, <a href="#671">ident</a>.name),
+                    <a href="#670">expansion</a>.to_expn_id(),
+                    <a href="#667">item</a>.span,
+                    <a href="#669">parent</a>.no_implicit_prelude,
+                );
+                <a class="self" href="#667">self</a>.r.<a href="#85-87">define</a>(<a href="#669">parent</a>, <a href="#671">ident</a>, TypeNS, (<a href="#820">module</a>, <a href="#673">vis</a>, <a href="#672">sp</a>, <a href="#670">expansion</a>));
+                <a class="self" href="#667">self</a>.parent_scope.module = <a href="#820">module</a>;
+            }
+
+            <span class="comment">// These items do not add names to modules.
+            </span>ItemKind::Impl(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Impl.html">Impl</a> { of_trait: <span class="prelude-val">Some</span>(..), .. }) =&gt; {
+                <a class="self" href="#667">self</a>.r.trait_impl_items.insert(<a href="#674">local_def_id</a>);
+            }
+            <a href="../../rustc_ast/ast/enum.ItemKind.html">ItemKind::Impl</a> { .. } | ItemKind::ForeignMod(..) | ItemKind::GlobalAsm(..) =&gt; {}
+
+            ItemKind::MacroDef(..) | ItemKind::MacCall(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        }
+    }
+
+    <span class="kw">fn </span>build_reduced_graph_for_extern_crate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        orig_name: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;,
+        item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>,
+        local_def_id: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+        vis: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">ty::Visibility</a>,
+        parent: Module&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) {
+        <span class="kw">let </span>ident = <a href="#844">item</a>.ident;
+        <span class="kw">let </span>sp = <a href="#844">item</a>.span;
+        <span class="kw">let </span>parent_scope = <a class="self" href="#842">self</a>.parent_scope;
+        <span class="kw">let </span>expansion = <a href="#851">parent_scope</a>.expansion;
+
+        <span class="kw">let </span>(used, module, binding) = <span class="kw">if </span>orig_name.is_none() &amp;&amp; ident.name == kw::SelfLower {
+            <a class="self" href="#842">self</a>.r
+                .session
+                .struct_span_err(<a href="#844">item</a>.span, <span class="string">&quot;`extern crate self;` requires renaming&quot;</span>)
+                .span_suggestion(
+                    <a href="#844">item</a>.span,
+                    <span class="string">&quot;rename the `self` crate to be able to import it&quot;</span>,
+                    <span class="string">&quot;extern crate self as name;&quot;</span>,
+                    Applicability::HasPlaceholders,
+                )
+                .emit();
+            <span class="kw">return</span>;
+        } <span class="kw">else if </span>orig_name == <span class="prelude-val">Some</span>(kw::SelfLower) {
+            <span class="prelude-val">Some</span>(<a class="self" href="#842">self</a>.r.graph_root)
+        } <span class="kw">else </span>{
+            <a class="self" href="#842">self</a>.r.crate_loader.process_extern_crate(<a href="#844">item</a>, <span class="kw-2">&amp;</span><a class="self" href="#842">self</a>.r.definitions, <a href="#845">local_def_id</a>).map(
+                |crate_id| {
+                    <a class="self" href="#842">self</a>.r.extern_crate_map.insert(<a href="#845">local_def_id</a>, <a href="#870">crate_id</a>);
+                    <a class="self" href="#842">self</a>.r.<a href="#121">expect_module</a>(<a href="#870">crate_id</a>.as_def_id())
+                },
+            )
+        }
+        .map(|module| {
+            <span class="kw">let </span>used = <a class="self" href="#842">self</a>.<a href="#1065">process_macro_use_imports</a>(<a href="#844">item</a>, <a href="#876">module</a>);
+            <span class="kw">let </span>vis = ty::Visibility::&lt;<a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>&gt;::Public;
+            <span class="kw">let </span>binding = (<a href="#876">module</a>, <a href="#878">vis</a>, <a href="#850">sp</a>, <a href="#852">expansion</a>).<a href="lib.rs.html#636">to_name_binding</a>(<a class="self" href="#842">self</a>.r.arenas);
+            (<a href="#877">used</a>, <span class="prelude-val">Some</span>(<a href="lib.rs.html#347">ModuleOrUniformRoot::Module</a>(<a href="#876">module</a>)), <a href="#879">binding</a>)
+        })
+        .unwrap_or((<span class="bool-val">true</span>, <span class="prelude-val">None</span>, <a class="self" href="#842">self</a>.r.dummy_binding));
+        <span class="kw">let </span>import = <a class="self" href="#842">self</a>.r.arenas.<a href="lib.rs.html#1071">alloc_import</a>(<a href="imports.rs.html#103">Import</a> {
+            kind: <a href="imports.rs.html#56">ImportKind::ExternCrate</a> { source: <a href="#843">orig_name</a>, target: <a href="#849">ident</a> },
+            root_id: <a href="#844">item</a>.id,
+            id: <a href="#844">item</a>.id,
+            parent_scope: <a class="self" href="#842">self</a>.parent_scope,
+            imported_module: Cell::new(<a href="#854">module</a>),
+            has_attributes: !<a href="#844">item</a>.attrs.is_empty(),
+            use_span_with_attributes: <a href="#844">item</a>.span_with_attributes(),
+            use_span: <a href="#844">item</a>.span,
+            root_span: <a href="#844">item</a>.span,
+            span: <a href="#844">item</a>.span,
+            module_path: Vec::new(),
+            vis: Cell::new(<span class="prelude-val">Some</span>(<a href="#846">vis</a>)),
+            used: Cell::new(<a href="#854">used</a>),
+        });
+        <a class="self" href="#842">self</a>.r.potentially_unused_imports.push(<a href="#883">import</a>);
+        <span class="kw">let </span>imported_binding = <a class="self" href="#842">self</a>.r.<a href="imports.rs.html#212-216">import</a>(<a href="#854">binding</a>, <a href="#883">import</a>);
+        <span class="kw">if </span>ptr::eq(parent, <span class="self">self</span>.r.graph_root) {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(entry) = <a class="self" href="#842">self</a>.r.extern_prelude.get(<span class="kw-2">&amp;</span><a href="#849">ident</a>.normalize_to_macros_2_0()) {
+                <span class="kw">if </span>expansion != LocalExpnId::ROOT
+                    &amp;&amp; orig_name.is_some()
+                    &amp;&amp; entry.extern_crate_item.is_none()
+                {
+                    <span class="kw">let </span>msg = <span class="string">&quot;macro-expanded `extern crate` items cannot \
+                                       shadow names passed with `--extern`&quot;</span>;
+                    <a class="self" href="#842">self</a>.r.session.span_err(<a href="#844">item</a>.span, <a href="#906">msg</a>);
+                }
+            }
+            <span class="kw">let </span>entry = <a class="self" href="#842">self</a>.r.extern_prelude.entry(<a href="#849">ident</a>.normalize_to_macros_2_0()).or_insert(
+                <a href="lib.rs.html#830">ExternPreludeEntry</a> { extern_crate_item: <span class="prelude-val">None</span>, introduced_by_item: <span class="bool-val">true </span>},
+            );
+            <a href="#911">entry</a>.extern_crate_item = <span class="prelude-val">Some</span>(<a href="#899">imported_binding</a>);
+            <span class="kw">if </span>orig_name.is_some() {
+                <a href="#911">entry</a>.introduced_by_item = <span class="bool-val">true</span>;
+            }
+        }
+        <a class="self" href="#842">self</a>.r.<a href="#85-87">define</a>(<a href="#847">parent</a>, <a href="#849">ident</a>, TypeNS, <a href="#899">imported_binding</a>);
+    }
+
+    <span class="doccomment">/// Constructs the reduced graph for one foreign item.
+    </span><span class="kw">fn </span>build_reduced_graph_for_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>) {
+        <span class="kw">let </span>local_def_id = <a class="self" href="#923">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#923">item</a>.id);
+        <span class="kw">let </span>def_id = <a href="#924">local_def_id</a>.to_def_id();
+        <span class="kw">let </span>(def_kind, ns) = <span class="kw">match </span><a href="#923">item</a>.kind {
+            ForeignItemKind::Fn(..) =&gt; (DefKind::Fn, ValueNS),
+            ForeignItemKind::Static(<span class="kw">_</span>, mt, <span class="kw">_</span>) =&gt; (DefKind::Static(<a href="#928">mt</a>), ValueNS),
+            ForeignItemKind::TyAlias(..) =&gt; (DefKind::ForeignTy, TypeNS),
+            ForeignItemKind::MacCall(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        };
+        <span class="kw">let </span>parent = <a class="self" href="#923">self</a>.parent_scope.module;
+        <span class="kw">let </span>expansion = <a class="self" href="#923">self</a>.parent_scope.expansion;
+        <span class="kw">let </span>vis = <a class="self" href="#923">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#923">item</a>.vis);
+        <span class="kw">let </span>res = Res::Def(<a href="#926">def_kind</a>, <a href="#925">def_id</a>);
+        <a class="self" href="#923">self</a>.r.<a href="#85-87">define</a>(<a href="#932">parent</a>, <a href="#923">item</a>.ident, <a href="#926">ns</a>, (<a href="#935">res</a>, <a href="#934">vis</a>, <a href="#923">item</a>.span, <a href="#933">expansion</a>));
+        <a class="self" href="#923">self</a>.r.visibilities.insert(<a href="#924">local_def_id</a>, <a href="#934">vis</a>);
+    }
+
+    <span class="kw">fn </span>build_reduced_graph_for_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>) {
+        <span class="kw">let </span>parent = <a class="self" href="#940">self</a>.parent_scope.module;
+        <span class="kw">let </span>expansion = <a class="self" href="#940">self</a>.parent_scope.expansion;
+        <span class="kw">if </span><span class="self">self</span>.block_needs_anonymous_module(block) {
+            <span class="kw">let </span>module = <a class="self" href="#940">self</a>.r.<a href="lib.rs.html#1343-1350">new_module</a>(
+                <span class="prelude-val">Some</span>(<a href="#941">parent</a>),
+                <a href="lib.rs.html#419">ModuleKind::Block</a>,
+                <a href="#942">expansion</a>.to_expn_id(),
+                <a href="#940">block</a>.span,
+                <a href="#941">parent</a>.no_implicit_prelude,
+            );
+            <a class="self" href="#940">self</a>.r.block_map.insert(<a href="#940">block</a>.id, <a href="#944">module</a>);
+            <a class="self" href="#940">self</a>.parent_scope.module = <a href="#944">module</a>; <span class="comment">// Descend into the block.
+        </span>}
+    }
+
+    <span class="doccomment">/// Builds the reduced graph for a single item in an external crate.
+    </span><span class="kw">fn </span>build_reduced_graph_for_external_crate_res(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">ModChild</a>) {
+        <span class="kw">let </span>parent = <a class="self" href="#957">self</a>.parent_scope.module;
+        <span class="kw">let </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">ModChild</a> { ident, res, vis, span, macro_rules } = <a href="#957">child</a>;
+        <span class="kw">let </span>res = <a href="#959">res</a>.expect_non_local();
+        <span class="kw">let </span>expansion = <a class="self" href="#957">self</a>.parent_scope.expansion;
+        <span class="comment">// Record primary definitions.
+        </span><span class="kw">match </span><a href="#960">res</a> {
+            Res::Def(DefKind::Mod | DefKind::Enum | DefKind::Trait, def_id) =&gt; {
+                <span class="kw">let </span>module = <a class="self" href="#957">self</a>.r.<a href="#121">expect_module</a>(<a href="#964">def_id</a>);
+                <a class="self" href="#957">self</a>.r.<a href="#85-87">define</a>(<a href="#958">parent</a>, <a href="#959">ident</a>, TypeNS, (<a href="#965">module</a>, <a href="#959">vis</a>, <a href="#959">span</a>, <a href="#961">expansion</a>));
+            }
+            Res::Def(
+                DefKind::Struct
+                | DefKind::Union
+                | DefKind::Variant
+                | DefKind::TyAlias
+                | DefKind::ForeignTy
+                | DefKind::OpaqueTy
+                | DefKind::ImplTraitPlaceholder
+                | DefKind::TraitAlias
+                | DefKind::AssocTy,
+                <span class="kw">_</span>,
+            )
+            | Res::PrimTy(..)
+            | Res::ToolMod =&gt; <a class="self" href="#957">self</a>.r.<a href="#85-87">define</a>(<a href="#958">parent</a>, <a href="#959">ident</a>, TypeNS, (<a href="#960">res</a>, <a href="#959">vis</a>, <a href="#959">span</a>, <a href="#961">expansion</a>)),
+            Res::Def(
+                DefKind::Fn
+                | DefKind::AssocFn
+                | DefKind::Static(<span class="kw">_</span>)
+                | DefKind::Const
+                | DefKind::AssocConst
+                | DefKind::Ctor(..),
+                <span class="kw">_</span>,
+            ) =&gt; <a class="self" href="#957">self</a>.r.<a href="#85-87">define</a>(<a href="#958">parent</a>, <a href="#959">ident</a>, ValueNS, (<a href="#960">res</a>, <a href="#959">vis</a>, <a href="#959">span</a>, <a href="#961">expansion</a>)),
+            Res::Def(DefKind::Macro(..), <span class="kw">_</span>) | Res::NonMacroAttr(..) =&gt; {
+                <span class="kw">if </span>!macro_rules {
+                    <a class="self" href="#957">self</a>.r.<a href="#85-87">define</a>(<a href="#958">parent</a>, <a href="#959">ident</a>, MacroNS, (<a href="#960">res</a>, <a href="#959">vis</a>, <a href="#959">span</a>, <a href="#961">expansion</a>))
+                }
+            }
+            Res::Def(
+                DefKind::TyParam
+                | DefKind::ConstParam
+                | DefKind::ExternCrate
+                | DefKind::Use
+                | DefKind::ForeignMod
+                | DefKind::AnonConst
+                | DefKind::InlineConst
+                | DefKind::Field
+                | DefKind::LifetimeParam
+                | DefKind::GlobalAsm
+                | DefKind::Closure
+                | DefKind::Impl
+                | DefKind::Generator,
+                <span class="kw">_</span>,
+            )
+            | Res::Local(..)
+            | Res::SelfTy { .. }
+            | Res::SelfCtor(..)
+            | Res::Err =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unexpected resolution: {:?}&quot;</span>, res),
+        }
+        <span class="comment">// Record some extra data for better diagnostics.
+        </span><span class="kw">let </span>cstore = <a class="self" href="#957">self</a>.r.<a href="lib.rs.html#1486">cstore</a>();
+        <span class="kw">match </span><a href="#960">res</a> {
+            Res::Def(DefKind::Struct, def_id) =&gt; {
+                <span class="kw">let </span>field_names =
+                    <a href="#1018">cstore</a>.struct_field_names_untracked(<a href="#1020">def_id</a>, <a class="self" href="#957">self</a>.r.session).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+                <span class="kw">let </span>ctor = <a href="#1018">cstore</a>.ctor_def_id_and_kind_untracked(<a href="#1020">def_id</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((ctor_def_id, ctor_kind)) = <a href="#1023">ctor</a> {
+                    <span class="kw">let </span>ctor_res = Res::Def(DefKind::Ctor(CtorOf::Struct, <a href="#1024">ctor_kind</a>), <a href="#1024">ctor_def_id</a>);
+                    <span class="kw">let </span>ctor_vis = <a href="#1018">cstore</a>.visibility_untracked(<a href="#1024">ctor_def_id</a>);
+                    <span class="kw">let </span>field_visibilities =
+                        <a href="#1018">cstore</a>.struct_field_visibilities_untracked(<a href="#1020">def_id</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+                    <a class="self" href="#957">self</a>.r
+                        .struct_constructors
+                        .insert(<a href="#1020">def_id</a>, (<a href="#1025">ctor_res</a>, <a href="#1026">ctor_vis</a>, <a href="#1027">field_visibilities</a>));
+                }
+                <a class="self" href="#957">self</a>.<a href="#349">insert_field_names</a>(<a href="#1020">def_id</a>, <a href="#1021">field_names</a>);
+            }
+            Res::Def(DefKind::Union, def_id) =&gt; {
+                <span class="kw">let </span>field_names =
+                    <a href="#1018">cstore</a>.struct_field_names_untracked(<a href="#1035">def_id</a>, <a class="self" href="#957">self</a>.r.session).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+                <a class="self" href="#957">self</a>.<a href="#349">insert_field_names</a>(<a href="#1035">def_id</a>, <a href="#1036">field_names</a>);
+            }
+            Res::Def(DefKind::AssocFn, def_id) =&gt; {
+                <span class="kw">if </span>cstore.fn_has_self_parameter_untracked(def_id, <span class="self">self</span>.r.session) {
+                    <a class="self" href="#957">self</a>.r.has_self.insert(<a href="#1040">def_id</a>);
+                }
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+    }
+
+    <span class="kw">fn </span>add_macro_use_binding(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        binding: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>NameBinding&lt;<span class="lifetime">&#39;a</span>&gt;,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        allow_shadowing: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) {
+        <span class="kw">if </span><span class="self">self</span>.r.macro_use_prelude.insert(name, binding).is_some() &amp;&amp; !allow_shadowing {
+            <span class="kw">let </span>msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;`{}` is already in scope&quot;</span>, name);
+            <span class="kw">let </span>note =
+                <span class="string">&quot;macro-expanded `#[macro_use]`s may not shadow existing macros (see RFC 1560)&quot;</span>;
+            <a class="self" href="#1050">self</a>.r.session.struct_span_err(<a href="#1053">span</a>, <span class="kw-2">&amp;</span><a href="#1057">msg</a>).note(<a href="#1058">note</a>).emit();
+        }
+    }
+
+    <span class="doccomment">/// Returns `true` if we should consider the underlying `extern crate` to be used.
+    </span><span class="kw">fn </span>process_macro_use_imports(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>, module: Module&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>import_all = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>single_imports = Vec::new();
+        <span class="kw">for </span>attr <span class="kw">in </span><span class="kw-2">&amp;</span>item.attrs {
+            <span class="kw">if </span>attr.has_name(sym::macro_use) {
+                <span class="kw">if </span><span class="self">self</span>.parent_scope.module.parent.is_some() {
+                    <span class="macro">struct_span_err!</span>(
+                        <span class="self">self</span>.r.session,
+                        item.span,
+                        E0468,
+                        <span class="string">&quot;an `extern crate` loading macros must be at the crate root&quot;
+                    </span>)
+                    .emit();
+                }
+                <span class="kw">if let </span>ItemKind::ExternCrate(<span class="prelude-val">Some</span>(orig_name)) = item.kind {
+                    <span class="kw">if </span>orig_name == kw::SelfLower {
+                        <span class="self">self</span>.r
+                            .session
+                            .struct_span_err(
+                                attr.span,
+                                <span class="string">&quot;`#[macro_use]` is not supported on `extern crate self`&quot;</span>,
+                            )
+                            .emit();
+                    }
+                }
+                <span class="kw">let </span>ill_formed = |span| {
+                    <span class="macro">struct_span_err!</span>(<span class="self">self</span>.r.session, span, E0466, <span class="string">&quot;bad macro import&quot;</span>).emit();
+                };
+                <span class="kw">match </span>attr.meta() {
+                    <span class="prelude-val">Some</span>(meta) =&gt; <span class="kw">match </span>meta.kind {
+                        MetaItemKind::Word =&gt; {
+                            import_all = <span class="prelude-val">Some</span>(meta.span);
+                            <span class="kw">break</span>;
+                        }
+                        MetaItemKind::List(nested_metas) =&gt; {
+                            <span class="kw">for </span>nested_meta <span class="kw">in </span>nested_metas {
+                                <span class="kw">match </span>nested_meta.ident() {
+                                    <span class="prelude-val">Some</span>(ident) <span class="kw">if </span>nested_meta.is_word() =&gt; {
+                                        single_imports.push(ident)
+                                    }
+                                    <span class="kw">_ </span>=&gt; ill_formed(nested_meta.span()),
+                                }
+                            }
+                        }
+                        MetaItemKind::NameValue(..) =&gt; ill_formed(meta.span),
+                    },
+                    <span class="prelude-val">None </span>=&gt; ill_formed(attr.span),
+                }
+            }
+        }
+
+        <span class="kw">let </span>macro_use_import = |this: <span class="kw-2">&amp;</span><span class="self">Self</span>, span| {
+            <a href="#1116">this</a>.r.arenas.<a href="lib.rs.html#1071">alloc_import</a>(<a href="imports.rs.html#103">Import</a> {
+                kind: <a href="imports.rs.html#60">ImportKind::MacroUse</a>,
+                root_id: <a href="#1065">item</a>.id,
+                id: <a href="#1065">item</a>.id,
+                parent_scope: <a href="#1116">this</a>.parent_scope,
+                imported_module: Cell::new(<span class="prelude-val">Some</span>(<a href="lib.rs.html#347">ModuleOrUniformRoot::Module</a>(<a href="#1065">module</a>))),
+                use_span_with_attributes: <a href="#1065">item</a>.span_with_attributes(),
+                has_attributes: !<a href="#1065">item</a>.attrs.is_empty(),
+                use_span: <a href="#1065">item</a>.span,
+                root_span: <a href="#1116">span</a>,
+                <a href="#1116">span</a>,
+                module_path: Vec::new(),
+                vis: Cell::new(<span class="prelude-val">Some</span>(ty::Visibility::Restricted(<a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>))),
+                used: Cell::new(<span class="bool-val">false</span>),
+            })
+        };
+
+        <span class="kw">let </span>allow_shadowing = <a class="self" href="#1065">self</a>.parent_scope.expansion == LocalExpnId::ROOT;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(span) = <a href="#1066">import_all</a> {
+            <span class="kw">let </span>import = <a href="#1116">macro_use_import</a>(<a class="self" href="#1065">self</a>, <a href="#1135">span</a>);
+            <a class="self" href="#1065">self</a>.r.potentially_unused_imports.push(<a href="#1136">import</a>);
+            <a href="#1065">module</a>.<a href="lib.rs.html#529-532">for_each_child</a>(<a class="self" href="#1065">self</a>, |this, ident, ns, binding| {
+                <span class="kw">if </span>ns == MacroNS {
+                    <span class="kw">let </span>imported_binding = <a href="#1138">this</a>.r.<a href="imports.rs.html#212-216">import</a>(<a href="#1138">binding</a>, <a href="#1136">import</a>);
+                    <a href="#1138">this</a>.<a href="#1049-1055">add_macro_use_binding</a>(<a href="#1138">ident</a>.name, <a href="#1140">imported_binding</a>, <a href="#1135">span</a>, <a href="#1134">allow_shadowing</a>);
+                }
+            });
+        } <span class="kw">else </span>{
+            <span class="kw">for </span>ident <span class="kw">in </span>single_imports.iter().cloned() {
+                <span class="kw">let </span>result = <span class="self">self</span>.r.maybe_resolve_ident_in_module(
+                    ModuleOrUniformRoot::Module(module),
+                    ident,
+                    MacroNS,
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.parent_scope,
+                );
+                <span class="kw">if let </span><span class="prelude-val">Ok</span>(binding) = result {
+                    <span class="kw">let </span>import = macro_use_import(<span class="self">self</span>, ident.span);
+                    <span class="self">self</span>.r.potentially_unused_imports.push(import);
+                    <span class="kw">let </span>imported_binding = <span class="self">self</span>.r.import(binding, import);
+                    <span class="self">self</span>.add_macro_use_binding(
+                        ident.name,
+                        imported_binding,
+                        ident.span,
+                        allow_shadowing,
+                    );
+                } <span class="kw">else </span>{
+                    <span class="macro">struct_span_err!</span>(<span class="self">self</span>.r.session, ident.span, E0469, <span class="string">&quot;imported macro not found&quot;</span>)
+                        .emit();
+                }
+            }
+        }
+        <a href="#1066">import_all</a>.is_some() || !<a href="#1067">single_imports</a>.is_empty()
+    }
+
+    <span class="doccomment">/// Returns `true` if this attribute list contains `macro_use`.
+    </span><span class="kw">fn </span>contains_macro_use(<span class="kw-2">&amp;mut </span><span class="self">self</span>, attrs: <span class="kw-2">&amp;</span>[<a href="../../rustc_ast/ast/struct.Attribute.html">ast::Attribute</a>]) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">for </span>attr <span class="kw">in </span>attrs {
+            <span class="kw">if </span>attr.has_name(sym::macro_escape) {
+                <span class="kw">let </span>msg = <span class="string">&quot;`#[macro_escape]` is a deprecated synonym for `#[macro_use]`&quot;</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>err = <span class="self">self</span>.r.session.struct_span_warn(attr.span, msg);
+                <span class="kw">if let </span>ast::AttrStyle::Inner = attr.style {
+                    err.help(<span class="string">&quot;try an outer attribute: `#[macro_use]`&quot;</span>).emit();
+                } <span class="kw">else </span>{
+                    err.emit();
+                }
+            } <span class="kw">else if </span>!attr.has_name(sym::macro_use) {
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">if </span>!attr.is_word() {
+                <span class="self">self</span>.r.session.span_err(attr.span, <span class="string">&quot;arguments to `macro_use` are not allowed here&quot;</span>);
+            }
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        }
+
+        <span class="bool-val">false
+    </span>}
+
+    <span class="kw">fn </span>visit_invoc(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>) -&gt; <a href="../../rustc_span/hygiene/struct.LocalExpnId.html">LocalExpnId</a> {
+        <span class="kw">let </span>invoc_id = <a href="#1195">id</a>.placeholder_to_expn_id();
+        <span class="kw">let </span>old_parent_scope = <a class="self" href="#1195">self</a>.r.invocation_parent_scopes.insert(<a href="#1196">invoc_id</a>, <a class="self" href="#1195">self</a>.parent_scope);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(old_parent_scope.is_none(), <span class="string">&quot;invocation data is reset for an invocation&quot;</span>);
+        <a href="#1196">invoc_id</a>
+    }
+
+    <span class="doccomment">/// Visit invocation in context in which it can emit a named item (possibly `macro_rules`)
+    /// directly into its parent scope&#39;s module.
+    </span><span class="kw">fn </span>visit_invoc_in_module(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>) -&gt; MacroRulesScopeRef&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>invoc_id = <a class="self" href="#1204">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1204">id</a>);
+        <a class="self" href="#1204">self</a>.parent_scope.module.unexpanded_invocations.borrow_mut().insert(<a href="#1205">invoc_id</a>);
+        <a class="self" href="#1204">self</a>.r.arenas.<a href="lib.rs.html#1077">alloc_macro_rules_scope</a>(<a href="macros.rs.html#62">MacroRulesScope::Invocation</a>(<a href="#1205">invoc_id</a>))
+    }
+
+    <span class="kw">fn </span>proc_macro_stub(<span class="kw-2">&amp;</span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">ast::Item</a>) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="../../rustc_span/hygiene/enum.MacroKind.html">MacroKind</a>, <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt; {
+        <span class="kw">if </span><span class="self">self</span>.r.session.contains_name(<span class="kw-2">&amp;</span>item.attrs, sym::proc_macro) {
+            <span class="kw">return </span><span class="prelude-val">Some</span>((MacroKind::Bang, <a href="#1210">item</a>.ident, <a href="#1210">item</a>.span));
+        } <span class="kw">else if </span><span class="self">self</span>.r.session.contains_name(<span class="kw-2">&amp;</span>item.attrs, sym::proc_macro_attribute) {
+            <span class="kw">return </span><span class="prelude-val">Some</span>((MacroKind::Attr, <a href="#1210">item</a>.ident, <a href="#1210">item</a>.span));
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(attr) = <a class="self" href="#1210">self</a>.r.session.find_by_name(<span class="kw-2">&amp;</span><a href="#1210">item</a>.attrs, sym::proc_macro_derive)
+        {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(nested_meta) = <a href="#1215">attr</a>.meta_item_list().and_then(|list| <a href="#1217">list</a>.get(<span class="number">0</span>).cloned()) {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(ident) = <a href="#1217">nested_meta</a>.ident() {
+                    <span class="kw">return </span><span class="prelude-val">Some</span>((MacroKind::Derive, <a href="#1218">ident</a>, <a href="#1218">ident</a>.span));
+                }
+            }
+        }
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="comment">// Mark the given macro as unused unless its name starts with `_`.
+    // Macro uses will remove items from this set, and the remaining
+    // items will be reported as `unused_macros`.
+    </span><span class="kw">fn </span>insert_unused_macro(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ident: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+        def_id: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+        node_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        rule_spans: <span class="kw-2">&amp;</span>[(<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)],
+    ) {
+        <span class="kw">if </span>!ident.as_str().starts_with(<span class="string">&#39;_&#39;</span>) {
+            <a class="self" href="#1230">self</a>.r.unused_macros.insert(<a href="#1232">def_id</a>, (<a href="#1233">node_id</a>, <a href="#1231">ident</a>));
+            <span class="kw">for </span>(rule_i, rule_span) <span class="kw">in </span>rule_spans.iter() {
+                <span class="self">self</span>.r.unused_macro_rules.insert((def_id, <span class="kw-2">*</span>rule_i), (ident, <span class="kw-2">*</span>rule_span));
+            }
+        }
+    }
+
+    <span class="kw">fn </span>define_macro(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">ast::Item</a>) -&gt; MacroRulesScopeRef&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>parent_scope = <a class="self" href="#1244">self</a>.parent_scope;
+        <span class="kw">let </span>expansion = <a href="#1245">parent_scope</a>.expansion;
+        <span class="kw">let </span>def_id = <a class="self" href="#1244">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#1244">item</a>.id);
+        <span class="kw">let </span>(ext, ident, span, macro_rules, rule_spans) = <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#1244">item</a>.kind {
+            ItemKind::MacroDef(def) =&gt; {
+                <span class="kw">let </span>(ext, rule_spans) = <a class="self" href="#1244">self</a>.r.<a href="macros.rs.html#860-864">compile_macro</a>(<a href="#1244">item</a>, <a class="self" href="#1244">self</a>.r.session.edition());
+                <span class="kw">let </span>ext = Lrc::new(<a href="#1250">ext</a>);
+                (<a href="#1251">ext</a>, <a href="#1244">item</a>.ident, <a href="#1244">item</a>.span, <a href="#1249">def</a>.macro_rules, <a href="#1250">rule_spans</a>)
+            }
+            ItemKind::Fn(..) =&gt; <span class="kw">match </span><a class="self" href="#1244">self</a>.<a href="#1210">proc_macro_stub</a>(<a href="#1244">item</a>) {
+                <span class="prelude-val">Some</span>((macro_kind, ident, span)) =&gt; {
+                    <a class="self" href="#1244">self</a>.r.proc_macro_stubs.insert(<a href="#1247">def_id</a>);
+                    (<a class="self" href="#1244">self</a>.r.<a href="lib.rs.html#1490">dummy_ext</a>(<a href="#1255">macro_kind</a>), <a href="#1255">ident</a>, <a href="#1255">span</a>, <span class="bool-val">false</span>, Vec::new())
+                }
+                <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><a href="#1245">parent_scope</a>.macro_rules,
+            },
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(),
+        };
+
+        <span class="kw">let </span>res = Res::Def(DefKind::Macro(<a href="#1248">ext</a>.macro_kind()), <a href="#1247">def_id</a>.to_def_id());
+        <a class="self" href="#1244">self</a>.r.macro_map.insert(<a href="#1247">def_id</a>.to_def_id(), <a href="lib.rs.html#848">MacroData</a> { <a href="#1248">ext</a>, <a href="#1248">macro_rules</a> });
+        <a class="self" href="#1244">self</a>.r.local_macro_def_scopes.insert(<a href="#1247">def_id</a>, <a href="#1245">parent_scope</a>.module);
+
+        <span class="kw">if </span>macro_rules {
+            <span class="kw">let </span>ident = <a href="#1248">ident</a>.normalize_to_macros_2_0();
+            <a class="self" href="#1244">self</a>.r.macro_names.insert(<a href="#1269">ident</a>);
+            <span class="kw">let </span>is_macro_export = <a class="self" href="#1244">self</a>.r.session.contains_name(<span class="kw-2">&amp;</span><a href="#1244">item</a>.attrs, sym::macro_export);
+            <span class="kw">let </span>vis = <span class="kw">if </span>is_macro_export {
+                ty::Visibility::Public
+            } <span class="kw">else </span>{
+                ty::Visibility::Restricted(<a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>)
+            };
+            <span class="kw">let </span>binding = (<a href="#1264">res</a>, <a href="#1272">vis</a>, <a href="#1248">span</a>, <a href="#1246">expansion</a>).<a href="lib.rs.html#636">to_name_binding</a>(<a class="self" href="#1244">self</a>.r.arenas);
+            <a class="self" href="#1244">self</a>.r.<a href="lib.rs.html#1800">set_binding_parent_module</a>(<a href="#1277">binding</a>, <a href="#1245">parent_scope</a>.module);
+            <span class="kw">if </span>is_macro_export {
+                <span class="kw">let </span>module = <a class="self" href="#1244">self</a>.r.graph_root;
+                <a class="self" href="#1244">self</a>.r.<a href="#85-87">define</a>(<a href="#1280">module</a>, <a href="#1269">ident</a>, MacroNS, (<a href="#1264">res</a>, <a href="#1272">vis</a>, <a href="#1248">span</a>, <a href="#1246">expansion</a>, <a href="#68">IsMacroExport</a>));
+            } <span class="kw">else </span>{
+                <a class="self" href="#1244">self</a>.r.<a href="macros.rs.html#843">check_reserved_macro_name</a>(<a href="#1269">ident</a>, <a href="#1264">res</a>);
+                <a class="self" href="#1244">self</a>.<a href="#1229-1235">insert_unused_macro</a>(<a href="#1269">ident</a>, <a href="#1247">def_id</a>, <a href="#1244">item</a>.id, <span class="kw-2">&amp;</span><a href="#1248">rule_spans</a>);
+            }
+            <a class="self" href="#1244">self</a>.r.visibilities.insert(<a href="#1247">def_id</a>, <a href="#1272">vis</a>);
+            <span class="kw">let </span>scope = <a class="self" href="#1244">self</a>.r.arenas.<a href="lib.rs.html#1077">alloc_macro_rules_scope</a>(<a href="macros.rs.html#59">MacroRulesScope::Binding</a>(
+                <a class="self" href="#1244">self</a>.r.arenas.<a href="lib.rs.html#1080-1083">alloc_macro_rules_binding</a>(<a href="macros.rs.html#42">MacroRulesBinding</a> {
+                    parent_macro_rules_scope: <a href="#1245">parent_scope</a>.macro_rules,
+                    <a href="#1277">binding</a>,
+                    <a href="#1269">ident</a>,
+                }),
+            ));
+            <a class="self" href="#1244">self</a>.r.macro_rules_scopes.insert(<a href="#1247">def_id</a>, <a href="#1287">scope</a>);
+            <a href="#1287">scope</a>
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>module = <a href="#1245">parent_scope</a>.module;
+            <span class="kw">let </span>vis = <span class="kw">match </span><a href="#1244">item</a>.kind {
+                <span class="comment">// Visibilities must not be resolved non-speculatively twice
+                // and we already resolved this one as a `fn` item visibility.
+                </span>ItemKind::Fn(..) =&gt; {
+                    <a class="self" href="#1244">self</a>.<a href="#248-252">try_resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#1244">item</a>.vis, <span class="bool-val">false</span>).unwrap_or(ty::Visibility::Public)
+                }
+                <span class="kw">_ </span>=&gt; <a class="self" href="#1244">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#1244">item</a>.vis),
+            };
+            <span class="kw">if </span>!vis.is_public() {
+                <a class="self" href="#1244">self</a>.<a href="#1229-1235">insert_unused_macro</a>(<a href="#1248">ident</a>, <a href="#1247">def_id</a>, <a href="#1244">item</a>.id, <span class="kw-2">&amp;</span><a href="#1248">rule_spans</a>);
+            }
+            <a class="self" href="#1244">self</a>.r.<a href="#85-87">define</a>(<a href="#1297">module</a>, <a href="#1248">ident</a>, MacroNS, (<a href="#1264">res</a>, <a href="#1298">vis</a>, <a href="#1248">span</a>, <a href="#1246">expansion</a>));
+            <a class="self" href="#1244">self</a>.r.visibilities.insert(<a href="#1247">def_id</a>, <a href="#1298">vis</a>);
+            <a class="self" href="#1244">self</a>.parent_scope.macro_rules
+        }
+    }
+}
+
+<span class="macro">macro_rules! </span>method {
+    (<span class="macro-nonterminal">$visit</span>:ident: <span class="macro-nonterminal">$ty</span>:ty, <span class="macro-nonterminal">$invoc</span>:path, <span class="macro-nonterminal">$walk</span>:ident) =&gt; {
+        <span class="kw">fn </span><span class="macro-nonterminal">$visit</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>, node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="macro-nonterminal">$ty</span>) {
+            <span class="kw">if let </span><span class="macro-nonterminal">$invoc</span>(..) = node.kind {
+                <span class="self">self</span>.visit_invoc(node.id);
+            } <span class="kw">else </span>{
+                visit::<span class="macro-nonterminal">$walk</span>(<span class="self">self</span>, node);
+            }
+        }
+    };
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; Visitor&lt;<span class="lifetime">&#39;b</span>&gt; <span class="kw">for </span>BuildReducedGraphVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
+    <a class="macro" href="#1316-1326">method!</a>(visit_expr: <a href="../../rustc_ast/ast/struct.Expr.html">ast::Expr</a>, ast::ExprKind::MacCall, walk_expr);
+    <a class="macro" href="#1316-1326">method!</a>(visit_pat: <a href="../../rustc_ast/ast/struct.Pat.html">ast::Pat</a>, ast::PatKind::MacCall, walk_pat);
+    <a class="macro" href="#1316-1326">method!</a>(visit_ty: <a href="../../rustc_ast/ast/struct.Ty.html">ast::Ty</a>, ast::TyKind::MacCall, walk_ty);
+
+    <span class="kw">fn </span>visit_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>) {
+        <span class="kw">let </span>orig_module_scope = <a class="self" href="#1333">self</a>.parent_scope.module;
+        <a class="self" href="#1333">self</a>.parent_scope.macro_rules = <span class="kw">match </span><a href="#1333">item</a>.kind {
+            ItemKind::MacroDef(..) =&gt; {
+                <span class="kw">let </span>macro_rules_scope = <a class="self" href="#1333">self</a>.<a href="#1244">define_macro</a>(<a href="#1333">item</a>);
+                visit::walk_item(<a class="self" href="#1333">self</a>, <a href="#1333">item</a>);
+                <a href="#1337">macro_rules_scope</a>
+            }
+            ItemKind::MacCall(..) =&gt; {
+                <span class="kw">let </span>macro_rules_scope = <a class="self" href="#1333">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1333">item</a>.id);
+                visit::walk_item(<a class="self" href="#1333">self</a>, <a href="#1333">item</a>);
+                <a href="#1342">macro_rules_scope</a>
+            }
+            <span class="kw">_ </span>=&gt; {
+                <span class="kw">let </span>orig_macro_rules_scope = <a class="self" href="#1333">self</a>.parent_scope.macro_rules;
+                <a class="self" href="#1333">self</a>.<a href="#667">build_reduced_graph_for_item</a>(<a href="#1333">item</a>);
+                visit::walk_item(<a class="self" href="#1333">self</a>, <a href="#1333">item</a>);
+                <span class="kw">match </span><a href="#1333">item</a>.kind {
+                    ItemKind::Mod(..) <span class="kw">if </span><a class="self" href="#1333">self</a>.<a href="#1172">contains_macro_use</a>(<span class="kw-2">&amp;</span><a href="#1333">item</a>.attrs) =&gt; {
+                        <a class="self" href="#1333">self</a>.parent_scope.macro_rules
+                    }
+                    <span class="kw">_ </span>=&gt; <a href="#1347">orig_macro_rules_scope</a>,
+                }
+            }
+        };
+        <a class="self" href="#1333">self</a>.parent_scope.module = <a href="#1334">orig_module_scope</a>;
+    }
+
+    <span class="kw">fn </span>visit_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stmt: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Stmt.html">ast::Stmt</a>) {
+        <span class="kw">if let </span>ast::StmtKind::MacCall(..) = <a href="#1361">stmt</a>.kind {
+            <a class="self" href="#1361">self</a>.parent_scope.macro_rules = <a class="self" href="#1361">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1361">stmt</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_stmt(<a class="self" href="#1361">self</a>, <a href="#1361">stmt</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, foreign_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>) {
+        <span class="kw">if let </span>ForeignItemKind::MacCall(<span class="kw">_</span>) = <a href="#1369">foreign_item</a>.kind {
+            <a class="self" href="#1369">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1369">foreign_item</a>.id);
+            <span class="kw">return</span>;
+        }
+
+        <a class="self" href="#1369">self</a>.<a href="#923">build_reduced_graph_for_foreign_item</a>(<a href="#1369">foreign_item</a>);
+        visit::walk_foreign_item(<a class="self" href="#1369">self</a>, <a href="#1369">foreign_item</a>);
+    }
+
+    <span class="kw">fn </span>visit_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>) {
+        <span class="kw">let </span>orig_current_module = <a class="self" href="#1379">self</a>.parent_scope.module;
+        <span class="kw">let </span>orig_current_macro_rules_scope = <a class="self" href="#1379">self</a>.parent_scope.macro_rules;
+        <a class="self" href="#1379">self</a>.<a href="#940">build_reduced_graph_for_block</a>(<a href="#1379">block</a>);
+        visit::walk_block(<a class="self" href="#1379">self</a>, <a href="#1379">block</a>);
+        <a class="self" href="#1379">self</a>.parent_scope.module = <a href="#1380">orig_current_module</a>;
+        <a class="self" href="#1379">self</a>.parent_scope.macro_rules = <a href="#1381">orig_current_macro_rules_scope</a>;
+    }
+
+    <span class="kw">fn </span>visit_assoc_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>, ctxt: <a href="../../rustc_ast/visit/enum.AssocCtxt.html">AssocCtxt</a>) {
+        <span class="kw">if let </span>AssocItemKind::MacCall(<span class="kw">_</span>) = <a href="#1388">item</a>.kind {
+            <span class="kw">match </span><a href="#1388">ctxt</a> {
+                AssocCtxt::Trait =&gt; {
+                    <a class="self" href="#1388">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1388">item</a>.id);
+                }
+                AssocCtxt::Impl =&gt; {
+                    <a class="self" href="#1388">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1388">item</a>.id);
+                }
+            }
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">let </span>vis = <a class="self" href="#1388">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#1388">item</a>.vis);
+        <span class="kw">let </span>local_def_id = <a class="self" href="#1388">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#1388">item</a>.id);
+        <span class="kw">let </span>def_id = <a href="#1402">local_def_id</a>.to_def_id();
+
+        <span class="kw">if </span>!(ctxt == AssocCtxt::Impl
+            &amp;&amp; <span class="macro">matches!</span>(item.vis.kind, ast::VisibilityKind::Inherited)
+            &amp;&amp; <span class="self">self
+                </span>.r
+                .trait_impl_items
+                .contains(<span class="kw-2">&amp;</span>ty::DefIdTree::local_parent(<span class="kw-2">&amp;*</span><span class="self">self</span>.r, local_def_id)))
+        {
+            <span class="comment">// Trait impl item visibility is inherited from its trait when not specified
+            // explicitly. In that case we cannot determine it here in early resolve,
+            // so we leave a hole in the visibility table to be filled later.
+            </span><a class="self" href="#1388">self</a>.r.visibilities.insert(<a href="#1402">local_def_id</a>, <a href="#1401">vis</a>);
+        }
+
+        <span class="kw">if </span>ctxt == AssocCtxt::Trait {
+            <span class="kw">let </span>(def_kind, ns) = <span class="kw">match </span><a href="#1388">item</a>.kind {
+                AssocItemKind::Const(..) =&gt; (DefKind::AssocConst, ValueNS),
+                AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { <span class="kw-2">ref </span>sig, .. }) =&gt; {
+                    <span class="kw">if </span>sig.decl.has_self() {
+                        <a class="self" href="#1388">self</a>.r.has_self.insert(<a href="#1403">def_id</a>);
+                    }
+                    (DefKind::AssocFn, ValueNS)
+                }
+                AssocItemKind::TyAlias(..) =&gt; (DefKind::AssocTy, TypeNS),
+                AssocItemKind::MacCall(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(), <span class="comment">// handled above
+            </span>};
+
+            <span class="kw">let </span>parent = <a class="self" href="#1388">self</a>.parent_scope.module;
+            <span class="kw">let </span>expansion = <a class="self" href="#1388">self</a>.parent_scope.expansion;
+            <span class="kw">let </span>res = Res::Def(<a href="#1419">def_kind</a>, <a href="#1403">def_id</a>);
+            <a class="self" href="#1388">self</a>.r.<a href="#85-87">define</a>(<a href="#1431">parent</a>, <a href="#1388">item</a>.ident, <a href="#1419">ns</a>, (<a href="#1433">res</a>, <a href="#1401">vis</a>, <a href="#1388">item</a>.span, <a href="#1432">expansion</a>));
+        }
+
+        visit::walk_assoc_item(<a class="self" href="#1388">self</a>, <a href="#1388">item</a>, <a href="#1388">ctxt</a>);
+    }
+
+    <span class="kw">fn </span>visit_attribute(<span class="kw-2">&amp;mut </span><span class="self">self</span>, attr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Attribute.html">ast::Attribute</a>) {
+        <span class="kw">if </span>!attr.is_doc_comment() &amp;&amp; attr::is_builtin_attr(attr) {
+            <a class="self" href="#1440">self</a>.r
+                .builtin_attrs
+                .push((<a href="#1440">attr</a>.get_normal_item().path.segments[<span class="number">0</span>].ident, <a class="self" href="#1440">self</a>.parent_scope));
+        }
+        visit::walk_attribute(<a class="self" href="#1440">self</a>, <a href="#1440">attr</a>);
+    }
+
+    <span class="kw">fn </span>visit_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, arm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Arm.html">ast::Arm</a>) {
+        <span class="kw">if </span>arm.is_placeholder {
+            <a class="self" href="#1449">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1449">arm</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_arm(<a class="self" href="#1449">self</a>, <a href="#1449">arm</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_expr_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.ExprField.html">ast::ExprField</a>) {
+        <span class="kw">if </span>f.is_placeholder {
+            <a class="self" href="#1457">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1457">f</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_expr_field(<a class="self" href="#1457">self</a>, <a href="#1457">f</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_pat_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, fp: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.PatField.html">ast::PatField</a>) {
+        <span class="kw">if </span>fp.is_placeholder {
+            <a class="self" href="#1465">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1465">fp</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_pat_field(<a class="self" href="#1465">self</a>, <a href="#1465">fp</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_generic_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, param: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.GenericParam.html">ast::GenericParam</a>) {
+        <span class="kw">if </span>param.is_placeholder {
+            <a class="self" href="#1473">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1473">param</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_generic_param(<a class="self" href="#1473">self</a>, <a href="#1473">param</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Param.html">ast::Param</a>) {
+        <span class="kw">if </span>p.is_placeholder {
+            <a class="self" href="#1481">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1481">p</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_param(<a class="self" href="#1481">self</a>, <a href="#1481">p</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_field_def(<span class="kw-2">&amp;mut </span><span class="self">self</span>, sf: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.FieldDef.html">ast::FieldDef</a>) {
+        <span class="kw">if </span>sf.is_placeholder {
+            <a class="self" href="#1489">self</a>.<a href="#1195">visit_invoc</a>(<a href="#1489">sf</a>.id);
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>vis = <a class="self" href="#1489">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#1489">sf</a>.vis);
+            <a class="self" href="#1489">self</a>.r.visibilities.insert(<a class="self" href="#1489">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#1489">sf</a>.id), <a href="#1493">vis</a>);
+            visit::walk_field_def(<a class="self" href="#1489">self</a>, <a href="#1489">sf</a>);
+        }
+    }
+
+    <span class="comment">// Constructs the reduced graph for one variant. Variants exist in the
+    // type and value namespaces.
+    </span><span class="kw">fn </span>visit_variant(<span class="kw-2">&amp;mut </span><span class="self">self</span>, variant: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Variant.html">ast::Variant</a>) {
+        <span class="kw">if </span>variant.is_placeholder {
+            <a class="self" href="#1501">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1501">variant</a>.id);
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">let </span>parent = <a class="self" href="#1501">self</a>.parent_scope.module;
+        <span class="kw">let </span>expn_id = <a class="self" href="#1501">self</a>.parent_scope.expansion;
+        <span class="kw">let </span>ident = <a href="#1501">variant</a>.ident;
+
+        <span class="comment">// Define a name in the type namespace.
+        </span><span class="kw">let </span>def_id = <a class="self" href="#1501">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#1501">variant</a>.id);
+        <span class="kw">let </span>res = Res::Def(DefKind::Variant, <a href="#1512">def_id</a>.to_def_id());
+        <span class="kw">let </span>vis = <a class="self" href="#1501">self</a>.<a href="#241">resolve_visibility</a>(<span class="kw-2">&amp;</span><a href="#1501">variant</a>.vis);
+        <a class="self" href="#1501">self</a>.r.<a href="#85-87">define</a>(<a href="#1507">parent</a>, <a href="#1509">ident</a>, TypeNS, (<a href="#1513">res</a>, <a href="#1514">vis</a>, <a href="#1501">variant</a>.span, <a href="#1508">expn_id</a>));
+        <a class="self" href="#1501">self</a>.r.visibilities.insert(<a href="#1512">def_id</a>, <a href="#1514">vis</a>);
+
+        <span class="comment">// If the variant is marked as non_exhaustive then lower the visibility to within the crate.
+        </span><span class="kw">let </span>ctor_vis = <span class="kw">if </span>vis.is_public()
+            &amp;&amp; <span class="self">self</span>.r.session.contains_name(<span class="kw-2">&amp;</span>variant.attrs, sym::non_exhaustive)
+        {
+            ty::Visibility::Restricted(<a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>)
+        } <span class="kw">else </span>{
+            <a href="#1514">vis</a>
+        };
+
+        <span class="comment">// Define a constructor name in the value namespace.
+        // Braced variants, unlike structs, generate unusable names in
+        // value namespace, they are reserved for possible future use.
+        // It&#39;s ok to use the variant&#39;s id as a ctor id since an
+        // error will be reported on any use of such resolution anyway.
+        </span><span class="kw">let </span>ctor_node_id = <a href="#1501">variant</a>.data.ctor_id().unwrap_or(<a href="#1501">variant</a>.id);
+        <span class="kw">let </span>ctor_def_id = <a class="self" href="#1501">self</a>.r.<a href="lib.rs.html#1116">local_def_id</a>(<a href="#1532">ctor_node_id</a>);
+        <span class="kw">let </span>ctor_kind = CtorKind::from_ast(<span class="kw-2">&amp;</span><a href="#1501">variant</a>.data);
+        <span class="kw">let </span>ctor_res = Res::Def(DefKind::Ctor(CtorOf::Variant, <a href="#1534">ctor_kind</a>), <a href="#1533">ctor_def_id</a>.to_def_id());
+        <a class="self" href="#1501">self</a>.r.<a href="#85-87">define</a>(<a href="#1507">parent</a>, <a href="#1509">ident</a>, ValueNS, (<a href="#1535">ctor_res</a>, <a href="#1519">ctor_vis</a>, <a href="#1501">variant</a>.span, <a href="#1508">expn_id</a>));
+        <span class="kw">if </span>ctor_def_id != def_id {
+            <a class="self" href="#1501">self</a>.r.visibilities.insert(<a href="#1533">ctor_def_id</a>, <a href="#1519">ctor_vis</a>);
+        }
+        <span class="comment">// Record field names for error reporting.
+        </span><a class="self" href="#1501">self</a>.<a href="#340">insert_field_names_local</a>(<a href="#1533">ctor_def_id</a>.to_def_id(), <span class="kw-2">&amp;</span><a href="#1501">variant</a>.data);
+
+        visit::walk_variant(<a class="self" href="#1501">self</a>, <a href="#1501">variant</a>);
+    }
+
+    <span class="kw">fn </span>visit_crate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, krate: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><a href="../../rustc_ast/ast/struct.Crate.html">ast::Crate</a>) {
+        <span class="kw">if </span>krate.is_placeholder {
+            <a class="self" href="#1546">self</a>.<a href="#1204">visit_invoc_in_module</a>(<a href="#1546">krate</a>.id);
+        } <span class="kw">else </span>{
+            visit::walk_crate(<a class="self" href="#1546">self</a>, <a href="#1546">krate</a>);
+            <a class="self" href="#1546">self</a>.<a href="#1172">contains_macro_use</a>(<span class="kw-2">&amp;</span><a href="#1546">krate</a>.attrs);
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_resolve" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

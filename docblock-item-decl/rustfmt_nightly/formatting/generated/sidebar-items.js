@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["is_generated_file","Returns `true` if the given span is a part of generated files."]]};

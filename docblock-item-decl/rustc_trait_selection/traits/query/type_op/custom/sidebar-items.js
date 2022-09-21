@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["scrape_region_constraints","Executes `op` and then scrapes out all the “old style” region constraints that result, creating query-region-constraints."]],"struct":[["CustomTypeOp",""]]};

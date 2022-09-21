@@ -1,0 +1,472 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_dataflow/src/framework/cursor.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>cursor.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_mir_dataflow/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Random access inspection of the results of a dataflow analysis.
+
+</span><span class="kw">use </span><a href="mod.rs.html#56"><span class="kw">crate</span>::framework::BitSetExt</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">std::borrow::Borrow</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cmp/enum.Ordering.html">std::cmp::Ordering</a>;
+
+<span class="attribute">#[cfg(debug_assertions)]
+</span><span class="kw">use </span><a href="../../../rustc_index/bit_set/struct.BitSet.html">rustc_index::bit_set::BitSet</a>;
+<span class="kw">use </span>rustc_middle::mir::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>};
+
+<span class="kw">use super</span>::{<a href="mod.rs.html#146">Analysis</a>, <a href="direction.rs.html#11">Direction</a>, <a href="mod.rs.html#531">Effect</a>, <a href="mod.rs.html#547">EffectIndex</a>, <a href="engine.rs.html#30">Results</a>};
+
+<span class="doccomment">/// A `ResultsCursor` that borrows the underlying `Results`.
+</span><span class="kw">pub type </span>ResultsRefCursor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A&gt; = ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;&gt;;
+
+<span class="doccomment">/// Allows random access inspection of the results of a dataflow analysis.
+///
+/// This cursor only has linear performance within a basic block when its statements are visited in
+/// the same order as the `DIRECTION` of the analysis. In the worst case—when statements are
+/// visited in *reverse* order—performance will be quadratic in the number of statements in the
+/// block. The order in which basic blocks are inspected has no impact on performance.
+///
+/// A `ResultsCursor` can either own (the default) or borrow the dataflow results it inspects. The
+/// type of ownership is determined by `R` (see `ResultsRefCursor` above).
+</span><span class="kw">pub struct </span>ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, R = Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    results: R,
+    state: A::Domain,
+
+    pos: <a href="#226">CursorPosition</a>,
+
+    <span class="doccomment">/// Indicates that `state` has been modified with a custom effect.
+    ///
+    /// When this flag is set, we need to reset to an entry set before doing a seek.
+    </span>state_needs_reset: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+
+    <span class="attribute">#[cfg(debug_assertions)]
+    </span>reachable_blocks: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, R&gt; ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, R&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    R: Borrow&lt;Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;&gt;,
+{
+    <span class="doccomment">/// Returns a new cursor that can inspect `results`.
+    </span><span class="kw">pub fn </span>new(body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, results: R) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>bottom_value = <a href="#51">results</a>.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>().analysis.<a href="mod.rs.html#117">bottom_value</a>(<a href="#51">body</a>);
+        <a href="#26">ResultsCursor</a> {
+            <a href="#51">body</a>,
+            <a href="#51">results</a>,
+
+            <span class="comment">// Initialize to the `bottom_value` and set `state_needs_reset` to tell the cursor that
+            // it needs to reset to block entry before the first seek. The cursor position is
+            // immaterial.
+            </span>state_needs_reset: <span class="bool-val">true</span>,
+            state: <a href="#52">bottom_value</a>,
+            pos: CursorPosition::block_entry(mir::START_BLOCK),
+
+            <span class="attribute">#[cfg(debug_assertions)]
+            </span>reachable_blocks: mir::traversal::reachable_as_bitset(<a href="#51">body</a>),
+        }
+    }
+
+    <span class="doccomment">/// Allows inspection of unreachable basic blocks even with `debug_assertions` enabled.
+    </span><span class="attribute">#[cfg(test)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>allow_unreachable(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="attribute">#[cfg(debug_assertions)]
+        </span><span class="self">self</span>.reachable_blocks.insert_all()
+    }
+
+    <span class="doccomment">/// Returns the underlying `Results`.
+    </span><span class="kw">pub fn </span>results(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#77">self</a>.results.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>()
+    }
+
+    <span class="doccomment">/// Returns the `Analysis` used to generate the underlying `Results`.
+    </span><span class="kw">pub fn </span>analysis(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>A {
+        <span class="kw-2">&amp;</span><a class="self" href="#82">self</a>.results.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>().analysis
+    }
+
+    <span class="doccomment">/// Returns the dataflow state at the current location.
+    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>A::Domain {
+        <span class="kw-2">&amp;</span><a class="self" href="#87">self</a>.state
+    }
+
+    <span class="doccomment">/// Resets the cursor to hold the entry set for the given basic block.
+    ///
+    /// For forward dataflow analyses, this is the dataflow state prior to the first statement.
+    ///
+    /// For backward dataflow analyses, this is the dataflow state after the terminator.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>seek_to_block_entry(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) {
+        <span class="attribute">#[cfg(debug_assertions)]
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.reachable_blocks.contains(block));
+
+        <a class="self" href="#96">self</a>.state.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone_from</a>(<span class="kw-2">&amp;</span><a class="self" href="#96">self</a>.results.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>().<a href="engine.rs.html#51">entry_set_for_block</a>(<a href="#96">block</a>));
+        <a class="self" href="#96">self</a>.pos = CursorPosition::block_entry(<a href="#96">block</a>);
+        <a class="self" href="#96">self</a>.state_needs_reset = <span class="bool-val">false</span>;
+    }
+
+    <span class="doccomment">/// Resets the cursor to hold the state prior to the first statement in a basic block.
+    ///
+    /// For forward analyses, this is the entry set for the given block.
+    ///
+    /// For backward analyses, this is the state that will be propagated to its
+    /// predecessors (ignoring edge-specific effects).
+    </span><span class="kw">pub fn </span>seek_to_block_start(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) {
+        <span class="kw">if </span>A::Direction::IS_FORWARD {
+            <a class="self" href="#111">self</a>.<a href="#96">seek_to_block_entry</a>(<a href="#111">block</a>)
+        } <span class="kw">else </span>{
+            <a class="self" href="#111">self</a>.<a href="#149">seek_after</a>(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a> { <a href="#111">block</a>, statement_index: <span class="number">0 </span>}, <a href="mod.rs.html#537">Effect::Primary</a>)
+        }
+    }
+
+    <span class="doccomment">/// Resets the cursor to hold the state after the terminator in a basic block.
+    ///
+    /// For backward analyses, this is the entry set for the given block.
+    ///
+    /// For forward analyses, this is the state that will be propagated to its
+    /// successors (ignoring edge-specific effects).
+    </span><span class="kw">pub fn </span>seek_to_block_end(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) {
+        <span class="kw">if </span>A::Direction::IS_BACKWARD {
+            <a class="self" href="#125">self</a>.<a href="#96">seek_to_block_entry</a>(<a href="#125">block</a>)
+        } <span class="kw">else </span>{
+            <a class="self" href="#125">self</a>.<a href="#149">seek_after</a>(<a class="self" href="#125">self</a>.body.terminator_loc(<a href="#125">block</a>), <a href="mod.rs.html#537">Effect::Primary</a>)
+        }
+    }
+
+    <span class="doccomment">/// Advances the cursor to hold the dataflow state at `target` before its &quot;primary&quot; effect is
+    /// applied.
+    ///
+    /// The &quot;before&quot; effect at the target location *will be* applied.
+    </span><span class="kw">pub fn </span>seek_before_primary_effect(<span class="kw-2">&amp;mut </span><span class="self">self</span>, target: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <a class="self" href="#137">self</a>.<a href="#149">seek_after</a>(<a href="#137">target</a>, <a href="mod.rs.html#534">Effect::Before</a>)
+    }
+
+    <span class="doccomment">/// Advances the cursor to hold the dataflow state at `target` after its &quot;primary&quot; effect is
+    /// applied.
+    ///
+    /// The &quot;before&quot; effect at the target location will be applied as well.
+    </span><span class="kw">pub fn </span>seek_after_primary_effect(<span class="kw-2">&amp;mut </span><span class="self">self</span>, target: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <a class="self" href="#145">self</a>.<a href="#149">seek_after</a>(<a href="#145">target</a>, <a href="mod.rs.html#537">Effect::Primary</a>)
+    }
+
+    <span class="kw">fn </span>seek_after(<span class="kw-2">&amp;mut </span><span class="self">self</span>, target: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>, effect: <a href="mod.rs.html#531">Effect</a>) {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(target &lt;= <span class="self">self</span>.body.terminator_loc(target.block));
+
+        <span class="comment">// Reset to the entry of the target block if any of the following are true:
+        //   - A custom effect has been applied to the cursor state.
+        //   - We are in a different block than the target.
+        //   - We are in the same block but have advanced past the target effect.
+        </span><span class="kw">if </span><span class="self">self</span>.state_needs_reset || <span class="self">self</span>.pos.block != target.block {
+            <a class="self" href="#149">self</a>.<a href="#96">seek_to_block_entry</a>(<a href="#149">target</a>.block);
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(curr_effect) = <a class="self" href="#149">self</a>.pos.curr_effect_index {
+            <span class="kw">let </span><span class="kw-2">mut </span>ord = <a href="#158">curr_effect</a>.statement_index.<a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">cmp</a>(<span class="kw-2">&amp;</span><a href="#149">target</a>.statement_index);
+            <span class="kw">if </span>A::Direction::IS_BACKWARD {
+                <a href="#159">ord</a> = <a href="#159">ord</a>.reverse()
+            }
+
+            <span class="kw">match </span><a href="#159">ord</a>.then_with(|| <a href="#158">curr_effect</a>.effect.<a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">cmp</a>(<span class="kw-2">&amp;</span><a href="#149">effect</a>)) {
+                Ordering::Equal =&gt; <span class="kw">return</span>,
+                Ordering::Greater =&gt; <a class="self" href="#149">self</a>.<a href="#96">seek_to_block_entry</a>(<a href="#149">target</a>.block),
+                Ordering::Less =&gt; {}
+            }
+        }
+
+        <span class="comment">// At this point, the cursor is in the same block as the target location at an earlier
+        // statement.
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(target.block, <span class="self">self</span>.pos.block);
+
+        <span class="kw">let </span>block_data = <span class="kw-2">&amp;</span><a class="self" href="#149">self</a>.body[<a href="#149">target</a>.block];
+        <span class="kw">let </span>next_effect = <span class="kw">if </span>A::Direction::IS_FORWARD {
+            <span class="attribute">#[rustfmt::skip]
+            </span><a class="self" href="#149">self</a>.pos.curr_effect_index.map_or_else(
+                || <a href="mod.rs.html#534">Effect::Before</a>.<a href="mod.rs.html#541">at_index</a>(<span class="number">0</span>),
+                EffectIndex::next_in_forward_order,
+            )
+        } <span class="kw">else </span>{
+            <a class="self" href="#149">self</a>.pos.curr_effect_index.map_or_else(
+                || <a href="mod.rs.html#534">Effect::Before</a>.<a href="mod.rs.html#541">at_index</a>(<a href="#175">block_data</a>.statements.len()),
+                EffectIndex::next_in_backward_order,
+            )
+        };
+
+        <span class="kw">let </span>analysis = <span class="kw-2">&amp;</span><a class="self" href="#149">self</a>.results.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>().analysis;
+        <span class="kw">let </span>target_effect_index = <a href="#149">effect</a>.<a href="mod.rs.html#541">at_index</a>(<a href="#149">target</a>.statement_index);
+
+        A::Direction::apply_effects_in_range(
+            <a href="#189">analysis</a>,
+            <span class="kw-2">&amp;mut </span><a class="self" href="#149">self</a>.state,
+            <a href="#149">target</a>.block,
+            <a href="#175">block_data</a>,
+            <a href="#176">next_effect</a>..=<a href="#190">target_effect_index</a>,
+        );
+
+        <a class="self" href="#149">self</a>.pos =
+            <a href="#226">CursorPosition</a> { block: <a href="#149">target</a>.block, curr_effect_index: <span class="prelude-val">Some</span>(<a href="#190">target_effect_index</a>) };
+    }
+
+    <span class="doccomment">/// Applies `f` to the cursor&#39;s internal state.
+    ///
+    /// This can be used, e.g., to apply the call return effect directly to the cursor without
+    /// creating an extra copy of the dataflow state.
+    </span><span class="kw">pub fn </span>apply_custom_effect(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;</span>A, <span class="kw-2">&amp;mut </span>A::Domain)) {
+        <a href="#208">f</a>(<span class="kw-2">&amp;</span><a class="self" href="#208">self</a>.results.<a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">borrow</a>().analysis, <span class="kw-2">&amp;mut </span><a class="self" href="#208">self</a>.state);
+        <a class="self" href="#208">self</a>.state_needs_reset = <span class="bool-val">true</span>;
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, R&gt; ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A, R&gt;
+<span class="kw">where
+    </span>A: <span class="kw">crate</span>::GenKillAnalysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    A::Domain: BitSetExt&lt;A::Idx&gt;,
+    R: Borrow&lt;Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;&gt;,
+{
+    <span class="kw">pub fn </span>contains(<span class="kw-2">&amp;</span><span class="self">self</span>, elem: A::Idx) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#220">self</a>.<a href="#87">get</a>().<a href="mod.rs.html#58">contains</a>(<a href="#220">elem</a>)
+    }
+}
+
+<span class="attribute">#[derive(Clone, Copy, Debug)]
+</span><span class="kw">struct </span>CursorPosition {
+    block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>,
+    curr_effect_index: <span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#547">EffectIndex</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#226">CursorPosition</a> {
+    <span class="kw">fn </span>block_entry(block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) -&gt; <a href="#226">CursorPosition</a> {
+        <a href="#226">CursorPosition</a> { <a href="#232">block</a>, curr_effect_index: <span class="prelude-val">None </span>}
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_mir_dataflow" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

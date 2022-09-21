@@ -1,0 +1,894 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_incremental/src/assert_dep_graph.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>assert_dep_graph.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_incremental/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_incremental/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_incremental/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+</pre><pre class="rust"><code><span class="doccomment">//! This pass is only used for the UNIT TESTS and DEBUGGING NEEDS
+//! around dependency graph construction. It serves two purposes; it
+//! will dump graphs in graphviz form to disk, and it searches for
+//! `#[rustc_if_this_changed]` and `#[rustc_then_this_would_need]`
+//! annotations. These annotations can be used to test whether paths
+//! exist in the graph. These checks run after codegen, so they view the
+//! the final state of the dependency graph. Note that there are
+//! similar assertions found in `persist::dirty_clean` which check the
+//! **initial** state of the dependency graph, just after it has been
+//! loaded from disk.
+//!
+//! In this code, we report errors on each `rustc_if_this_changed`
+//! annotation. If a path exists in all cases, then we would report
+//! &quot;all path(s) exist&quot;. Otherwise, we report: &quot;no path to `foo`&quot; for
+//! each case where no path exists. `ui` tests can then be
+//! used to check when paths exist or do not.
+//!
+//! The full form of the `rustc_if_this_changed` annotation is
+//! `#[rustc_if_this_changed(&quot;foo&quot;)]`, which will report a
+//! source node of `foo(def_id)`. The `&quot;foo&quot;` is optional and
+//! defaults to `&quot;Hir&quot;` if omitted.
+//!
+//! Example:
+//!
+//! ```ignore (needs flags)
+//! #[rustc_if_this_changed(Hir)]
+//! fn foo() { }
+//!
+//! #[rustc_then_this_would_need(codegen)] //~ ERROR no path from `foo`
+//! fn bar() { }
+//!
+//! #[rustc_then_this_would_need(codegen)] //~ ERROR OK
+//! fn baz() { foo(); }
+//! ```
+
+</span><span class="kw">use </span><a href="../../rustc_ast/index.html">rustc_ast</a> <span class="kw">as </span>ast;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashSet;
+<span class="kw">use </span>rustc_data_structures::graph::implementation::{<a href="../../rustc_data_structures/graph/implementation/struct.Direction.html">Direction</a>, NodeIndex, <a href="../../rustc_data_structures/graph/implementation/constant.INCOMING.html">INCOMING</a>, <a href="../../rustc_data_structures/graph/implementation/constant.OUTGOING.html">OUTGOING</a>};
+<span class="kw">use </span><a href="../../rustc_graphviz/index.html">rustc_graphviz</a> <span class="kw">as </span>dot;
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span>rustc_hir::intravisit::{<a class="self" href="../../rustc_hir/intravisit/index.html">self</a>, <a href="../../rustc_hir/intravisit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_middle::dep_graph::{
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/trait.DepNodeExt.html">DepNodeExt</a>, <a href="../../rustc_query_system/dep_graph/debug/struct.DepNodeFilter.html">DepNodeFilter</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.EdgeFilter.html">EdgeFilter</a>,
+};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/hir/nested_filter/index.html">rustc_middle::hir::nested_filter</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">rustc_middle::ty::TyCtxt</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span><a href="../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/macro.env.html">std::env</a>;
+<span class="kw">use </span>std::fs::{<a class="self" href="https://doc.rust-lang.org/nightly/std/fs/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/std/fs/struct.File.html">File</a>};
+<span class="kw">use </span>std::io::{<a href="https://doc.rust-lang.org/nightly/std/io/buffered/bufwriter/struct.BufWriter.html">BufWriter</a>, <a href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html">Write</a>};
+
+<span class="attribute">#[allow(missing_docs)]
+</span><span class="kw">pub fn </span>assert_dep_graph(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;) {
+    <a href="#56">tcx</a>.dep_graph.with_ignore(|| {
+        <span class="kw">if </span>tcx.sess.opts.unstable_opts.dump_dep_graph {
+            <a href="#56">tcx</a>.dep_graph.with_query(<a href="#232">dump_graph</a>);
+        }
+
+        <span class="kw">if </span>!tcx.sess.opts.unstable_opts.query_dep_graph {
+            <span class="kw">return</span>;
+        }
+
+        <span class="comment">// if the `rustc_attrs` feature is not enabled, then the
+        // attributes we are interested in cannot be present anyway, so
+        // skip the walk.
+        </span><span class="kw">if </span>!tcx.features().rustc_attrs {
+            <span class="kw">return</span>;
+        }
+
+        <span class="comment">// Find annotations supplied by user (if any).
+        </span><span class="kw">let </span>(if_this_changed, then_this_would_need) = {
+            <span class="kw">let </span><span class="kw-2">mut </span>visitor =
+                <a href="#100">IfThisChanged</a> { <a href="#56">tcx</a>, if_this_changed: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[], then_this_would_need: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[] };
+            <a href="#75">visitor</a>.<a href="#122">process_attrs</a>(hir::CRATE_HIR_ID);
+            <a href="#56">tcx</a>.hir().visit_all_item_likes_in_crate(<span class="kw-2">&amp;mut </span><a href="#75">visitor</a>);
+            (<a href="#75">visitor</a>.if_this_changed, <a href="#75">visitor</a>.then_this_would_need)
+        };
+
+        <span class="kw">if </span>!if_this_changed.is_empty() || !then_this_would_need.is_empty() {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                tcx.sess.opts.unstable_opts.query_dep_graph,
+                <span class="string">&quot;cannot use the `#[{}]` or `#[{}]` annotations \
+                    without supplying `-Z query-dep-graph`&quot;</span>,
+                sym::rustc_if_this_changed,
+                sym::rustc_then_this_would_need
+            );
+        }
+
+        <span class="comment">// Check paths.
+        </span><a href="#203">check_paths</a>(<a href="#56">tcx</a>, <span class="kw-2">&amp;</span><a href="#74">if_this_changed</a>, <span class="kw-2">&amp;</span><a href="#74">then_this_would_need</a>);
+    })
+}
+
+<span class="kw">type </span>Sources = Vec&lt;(<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>)&gt;;
+<span class="kw">type </span>Targets = Vec&lt;(<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>)&gt;;
+
+<span class="kw">struct </span>IfThisChanged&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    if_this_changed: <a href="#97">Sources</a>,
+    then_this_would_need: <a href="#98">Targets</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; IfThisChanged&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>argument(<span class="kw-2">&amp;</span><span class="self">self</span>, attr: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Attribute.html">ast::Attribute</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>value = <span class="prelude-val">None</span>;
+        <span class="kw">for </span>list_item <span class="kw">in </span>attr.meta_item_list().unwrap_or_default() {
+            <span class="kw">match </span>list_item.ident() {
+                <span class="prelude-val">Some</span>(ident) <span class="kw">if </span>list_item.is_word() &amp;&amp; value.is_none() =&gt; value = <span class="prelude-val">Some</span>(ident.name),
+                <span class="kw">_ </span>=&gt;
+                <span class="comment">// FIXME better-encapsulate meta_item (don&#39;t directly access `node`)
+                </span>{
+                    <span class="macro">span_bug!</span>(list_item.span(), <span class="string">&quot;unexpected meta-item {:?}&quot;</span>, list_item)
+                }
+            }
+        }
+        <a href="#108">value</a>
+    }
+
+    <span class="kw">fn </span>process_attrs(<span class="kw-2">&amp;mut </span><span class="self">self</span>, hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <span class="kw">let </span>def_id = <a class="self" href="#122">self</a>.tcx.hir().local_def_id(<a href="#122">hir_id</a>);
+        <span class="kw">let </span>def_path_hash = <a class="self" href="#122">self</a>.tcx.def_path_hash(<a href="#123">def_id</a>.to_def_id());
+        <span class="kw">let </span>attrs = <a class="self" href="#122">self</a>.tcx.hir().attrs(<a href="#122">hir_id</a>);
+        <span class="kw">for </span>attr <span class="kw">in </span>attrs {
+            <span class="kw">if </span>attr.has_name(sym::rustc_if_this_changed) {
+                <span class="kw">let </span>dep_node_interned = <span class="self">self</span>.argument(attr);
+                <span class="kw">let </span>dep_node = <span class="kw">match </span>dep_node_interned {
+                    <span class="prelude-val">None </span>=&gt; {
+                        DepNode::from_def_path_hash(<span class="self">self</span>.tcx, def_path_hash, DepKind::hir_owner)
+                    }
+                    <span class="prelude-val">Some</span>(n) =&gt; {
+                        <span class="kw">match </span>DepNode::from_label_string(<span class="self">self</span>.tcx, n.as_str(), def_path_hash) {
+                            <span class="prelude-val">Ok</span>(n) =&gt; n,
+                            <span class="prelude-val">Err</span>(()) =&gt; {
+                                <span class="self">self</span>.tcx.sess.span_fatal(
+                                    attr.span,
+                                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unrecognized DepNode variant {:?}&quot;</span>, n),
+                                );
+                            }
+                        }
+                    }
+                };
+                <span class="self">self</span>.if_this_changed.push((attr.span, def_id.to_def_id(), dep_node));
+            } <span class="kw">else if </span>attr.has_name(sym::rustc_then_this_would_need) {
+                <span class="kw">let </span>dep_node_interned = <span class="self">self</span>.argument(attr);
+                <span class="kw">let </span>dep_node = <span class="kw">match </span>dep_node_interned {
+                    <span class="prelude-val">Some</span>(n) =&gt; {
+                        <span class="kw">match </span>DepNode::from_label_string(<span class="self">self</span>.tcx, n.as_str(), def_path_hash) {
+                            <span class="prelude-val">Ok</span>(n) =&gt; n,
+                            <span class="prelude-val">Err</span>(()) =&gt; {
+                                <span class="self">self</span>.tcx.sess.span_fatal(
+                                    attr.span,
+                                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unrecognized DepNode variant {:?}&quot;</span>, n),
+                                );
+                            }
+                        }
+                    }
+                    <span class="prelude-val">None </span>=&gt; {
+                        <span class="self">self</span>.tcx.sess.span_fatal(attr.span, <span class="string">&quot;missing DepNode variant&quot;</span>);
+                    }
+                };
+                <span class="self">self</span>.then_this_would_need.push((
+                    attr.span,
+                    dep_node_interned.unwrap(),
+                    hir_id,
+                    dep_node,
+                ));
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>IfThisChanged&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>NestedFilter = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/hir/nested_filter/struct.OnlyBodies.html">nested_filter::OnlyBodies</a>;
+
+    <span class="kw">fn </span>nested_visit_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Map {
+        <a class="self" href="#178">self</a>.tcx.hir()
+    }
+
+    <span class="kw">fn </span>visit_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Item&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#182">self</a>.<a href="#122">process_attrs</a>(<a href="#182">item</a>.hir_id());
+        intravisit::walk_item(<a class="self" href="#182">self</a>, <a href="#182">item</a>);
+    }
+
+    <span class="kw">fn </span>visit_trait_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, trait_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::TraitItem&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#187">self</a>.<a href="#122">process_attrs</a>(<a href="#187">trait_item</a>.hir_id());
+        intravisit::walk_trait_item(<a class="self" href="#187">self</a>, <a href="#187">trait_item</a>);
+    }
+
+    <span class="kw">fn </span>visit_impl_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, impl_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::ImplItem&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#192">self</a>.<a href="#122">process_attrs</a>(<a href="#192">impl_item</a>.hir_id());
+        intravisit::walk_impl_item(<a class="self" href="#192">self</a>, <a href="#192">impl_item</a>);
+    }
+
+    <span class="kw">fn </span>visit_field_def(<span class="kw-2">&amp;mut </span><span class="self">self</span>, s: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::FieldDef&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#197">self</a>.<a href="#122">process_attrs</a>(<a href="#197">s</a>.hir_id);
+        intravisit::walk_field_def(<a class="self" href="#197">self</a>, <a href="#197">s</a>);
+    }
+}
+
+<span class="kw">fn </span>check_paths&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, if_this_changed: <span class="kw-2">&amp;</span><a href="#97">Sources</a>, then_this_would_need: <span class="kw-2">&amp;</span><a href="#98">Targets</a>) {
+    <span class="comment">// Return early here so as not to construct the query, which is not cheap.
+    </span><span class="kw">if </span>if_this_changed.is_empty() {
+        <span class="kw">for </span><span class="kw-2">&amp;</span>(target_span, <span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>) <span class="kw">in </span>then_this_would_need {
+            tcx.sess.span_err(target_span, <span class="string">&quot;no `#[rustc_if_this_changed]` annotation detected&quot;</span>);
+        }
+        <span class="kw">return</span>;
+    }
+    <a href="#203">tcx</a>.dep_graph.with_query(|query| {
+        <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw">_</span>, source_def_id, <span class="kw-2">ref </span>source_dep_node) <span class="kw">in </span>if_this_changed {
+            <span class="kw">let </span>dependents = query.transitive_predecessors(source_dep_node);
+            <span class="kw">for </span><span class="kw-2">&amp;</span>(target_span, <span class="kw-2">ref </span>target_pass, <span class="kw">_</span>, <span class="kw-2">ref </span>target_dep_node) <span class="kw">in </span>then_this_would_need {
+                <span class="kw">if </span>!dependents.contains(<span class="kw-2">&amp;</span>target_dep_node) {
+                    tcx.sess.span_err(
+                        target_span,
+                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                            <span class="string">&quot;no path from `{}` to `{}`&quot;</span>,
+                            tcx.def_path_str(source_def_id),
+                            target_pass
+                        ),
+                    );
+                } <span class="kw">else </span>{
+                    tcx.sess.span_err(target_span, <span class="string">&quot;OK&quot;</span>);
+                }
+            }
+        }
+    });
+}
+
+<span class="kw">fn </span>dump_graph(query: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>) {
+    <span class="kw">let </span>path: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> = env::var(<span class="string">&quot;RUST_DEP_GRAPH&quot;</span>).unwrap_or_else(|<span class="kw">_</span>| <span class="string">&quot;dep_graph&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>());
+
+    <span class="kw">let </span>nodes = <span class="kw">match </span>env::var(<span class="string">&quot;RUST_DEP_GRAPH_FILTER&quot;</span>) {
+        <span class="prelude-val">Ok</span>(string) =&gt; {
+            <span class="comment">// Expect one of: &quot;-&gt; target&quot;, &quot;source -&gt; target&quot;, or &quot;source -&gt;&quot;.
+            </span><span class="kw">let </span>edge_filter =
+                EdgeFilter::new(<span class="kw-2">&amp;</span><a href="#236">string</a>).unwrap_or_else(|e| <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;invalid filter: {}&quot;</span>, e));
+            <span class="kw">let </span>sources = <a href="#309-312">node_set</a>(<span class="kw-2">&amp;</span><a href="#232">query</a>, <span class="kw-2">&amp;</span><a href="#238">edge_filter</a>.source);
+            <span class="kw">let </span>targets = <a href="#309-312">node_set</a>(<span class="kw-2">&amp;</span><a href="#232">query</a>, <span class="kw-2">&amp;</span><a href="#238">edge_filter</a>.target);
+            <a href="#322-326">filter_nodes</a>(<span class="kw-2">&amp;</span><a href="#232">query</a>, <span class="kw-2">&amp;</span><a href="#240">sources</a>, <span class="kw-2">&amp;</span><a href="#241">targets</a>)
+        }
+        <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <a href="#232">query</a>.nodes().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|n| <a href="#244">n</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+    };
+    <span class="kw">let </span>edges = <a href="#435-438">filter_edges</a>(<span class="kw-2">&amp;</span><a href="#232">query</a>, <span class="kw-2">&amp;</span><a href="#235">nodes</a>);
+
+    {
+        <span class="comment">// dump a .txt file with just the edges:
+        </span><span class="kw">let </span>txt_path = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}.txt&quot;</span>, path);
+        <span class="kw">let </span><span class="kw-2">mut </span>file = BufWriter::new(File::create(<span class="kw-2">&amp;</span><a href="#250">txt_path</a>).unwrap());
+        <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>source, <span class="kw-2">ref </span>target) <span class="kw">in </span><span class="kw-2">&amp;</span>edges {
+            <span class="macro">write!</span>(file, <span class="string">&quot;{:?} -&gt; {:?}\n&quot;</span>, source, target).unwrap();
+        }
+    }
+
+    {
+        <span class="comment">// dump a .dot file in graphviz format:
+        </span><span class="kw">let </span>dot_path = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}.dot&quot;</span>, path);
+        <span class="kw">let </span><span class="kw-2">mut </span>v = Vec::new();
+        dot::render(<span class="kw-2">&amp;</span><a href="#267">GraphvizDepGraph</a>(<a href="#235">nodes</a>, <a href="#246">edges</a>), <span class="kw-2">&amp;mut </span><a href="#260">v</a>).unwrap();
+        fs::write(<a href="#259">dot_path</a>, <a href="#260">v</a>).unwrap();
+    }
+}
+
+<span class="attribute">#[allow(missing_docs)]
+</span><span class="kw">pub struct </span>GraphvizDepGraph(FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt;, Vec&lt;(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>)&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; dot::GraphWalk&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span><a href="#267">GraphvizDepGraph</a> {
+    <span class="kw">type </span>Node = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>;
+    <span class="kw">type </span>Edge = (<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>);
+    <span class="kw">fn </span>nodes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; dot::Nodes&lt;<span class="lifetime">&#39;_</span>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt; {
+        <span class="kw">let </span>nodes: Vec&lt;<span class="kw">_</span>&gt; = <a class="self" href="#272">self</a>.<span class="number">0</span>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a href="#273">nodes</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+    <span class="kw">fn </span>edges(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; dot::Edges&lt;<span class="lifetime">&#39;_</span>, (<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>)&gt; {
+        <a class="self" href="#276">self</a>.<span class="number">1</span>[..].<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>, edge: <span class="kw-2">&amp;</span>(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>)) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a> {
+        <a href="#279">edge</a>.<span class="number">0
+    </span>}
+    <span class="kw">fn </span>target(<span class="kw-2">&amp;</span><span class="self">self</span>, edge: <span class="kw-2">&amp;</span>(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>)) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a> {
+        <a href="#282">edge</a>.<span class="number">1
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; dot::Labeller&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span><a href="#267">GraphvizDepGraph</a> {
+    <span class="kw">type </span>Node = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>;
+    <span class="kw">type </span>Edge = (<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>);
+    <span class="kw">fn </span>graph_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; dot::Id&lt;<span class="lifetime">&#39;_</span>&gt; {
+        dot::Id::new(<span class="string">&quot;DependencyGraph&quot;</span>).unwrap()
+    }
+    <span class="kw">fn </span>node_id(<span class="kw-2">&amp;</span><span class="self">self</span>, n: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>) -&gt; dot::Id&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">let </span>s: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, n)
+            .chars()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|c| <span class="kw">if </span>c == <span class="string">&#39;_&#39; </span>|| c.is_alphanumeric() { <a href="#296">c</a> } <span class="kw">else </span>{ <span class="string">&#39;_&#39; </span>})
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;n={:?} s={:?}&quot;</span>, n, s);
+        dot::Id::new(<a href="#294">s</a>).unwrap()
+    }
+    <span class="kw">fn </span>node_label(<span class="kw-2">&amp;</span><span class="self">self</span>, n: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>) -&gt; dot::LabelText&lt;<span class="lifetime">&#39;_</span>&gt; {
+        dot::LabelText::label(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, n))
+    }
+}
+
+<span class="comment">// Given an optional filter like `&quot;x,y,z&quot;`, returns either `None` (no
+// filter) or the set of nodes whose labels contain all of those
+// substrings.
+</span><span class="kw">fn </span>node_set&lt;<span class="lifetime">&#39;q</span>&gt;(
+    query: <span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>,
+    filter: <span class="kw-2">&amp;</span><a href="../../rustc_query_system/dep_graph/debug/struct.DepNodeFilter.html">DepNodeFilter</a>,
+) -&gt; <span class="prelude-ty">Option</span>&lt;FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;&gt; {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;node_set(filter={:?})&quot;</span>, filter);
+
+    <span class="kw">if </span>filter.accepts_all() {
+        <span class="kw">return </span><span class="prelude-val">None</span>;
+    }
+
+    <span class="prelude-val">Some</span>(<a href="#310">query</a>.nodes().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|n| <a href="#311">filter</a>.test(<a href="#319">n</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>())
+}
+
+<span class="kw">fn </span>filter_nodes&lt;<span class="lifetime">&#39;q</span>&gt;(
+    query: <span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>,
+    sources: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;&gt;,
+    targets: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;&gt;,
+) -&gt; FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt; {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(sources) = <a href="#324">sources</a> {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(targets) = <a href="#325">targets</a> {
+            <a href="#364-368">walk_between</a>(<a href="#323">query</a>, <a href="#327">sources</a>, <a href="#328">targets</a>)
+        } <span class="kw">else </span>{
+            <a href="#340-344">walk_nodes</a>(<a href="#323">query</a>, <a href="#327">sources</a>, <a href="../../rustc_data_structures/graph/implementation/constant.OUTGOING.html">OUTGOING</a>)
+        }
+    } <span class="kw">else if let </span><span class="prelude-val">Some</span>(targets) = <a href="#325">targets</a> {
+        <a href="#340-344">walk_nodes</a>(<a href="#323">query</a>, <a href="#333">targets</a>, <a href="../../rustc_data_structures/graph/implementation/constant.INCOMING.html">INCOMING</a>)
+    } <span class="kw">else </span>{
+        <a href="#323">query</a>.nodes().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|n| <a href="#336">n</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+}
+
+<span class="kw">fn </span>walk_nodes&lt;<span class="lifetime">&#39;q</span>&gt;(
+    query: <span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>,
+    starts: <span class="kw-2">&amp;</span>FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;,
+    direction: <a href="../../rustc_data_structures/graph/implementation/struct.Direction.html">Direction</a>,
+) -&gt; FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>set = FxHashSet::default();
+    <span class="kw">for </span><span class="kw-2">&amp;</span>start <span class="kw">in </span>starts {
+        <span class="macro">debug!</span>(<span class="string">&quot;walk_nodes: start={:?} outgoing?={:?}&quot;</span>, start, direction == OUTGOING);
+        <span class="kw">if </span>set.insert(start.kind) {
+            <span class="kw">let </span><span class="kw-2">mut </span>stack = <span class="macro">vec!</span>[query.indices[start]];
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(index) = stack.pop() {
+                <span class="kw">for </span>(<span class="kw">_</span>, edge) <span class="kw">in </span>query.graph.adjacent_edges(index, direction) {
+                    <span class="kw">let </span>neighbor_index = edge.source_or_target(direction);
+                    <span class="kw">let </span>neighbor = query.graph.node_data(neighbor_index);
+                    <span class="kw">if </span>set.insert(neighbor.kind) {
+                        stack.push(neighbor_index);
+                    }
+                }
+            }
+        }
+    }
+    <a href="#345">set</a>
+}
+
+<span class="kw">fn </span>walk_between&lt;<span class="lifetime">&#39;q</span>&gt;(
+    query: <span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>,
+    sources: <span class="kw-2">&amp;</span>FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;,
+    targets: <span class="kw-2">&amp;</span>FxHashSet&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/type.DepNode.html">DepNode</a>&gt;,
+) -&gt; FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt; {
+    <span class="comment">// This is a bit tricky. We want to include a node only if it is:
+    // (a) reachable from a source and (b) will reach a target. And we
+    // have to be careful about cycles etc.  Luckily efficiency is not
+    // a big concern!
+
+    </span><span class="attribute">#[derive(Copy, Clone, PartialEq)]
+    </span><span class="kw">enum </span>State {
+        Undecided,
+        Deciding,
+        Included,
+        Excluded,
+    }
+
+    <span class="kw">let </span><span class="kw-2">mut </span>node_states = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[State::Undecided; query.graph.len_nodes()];
+
+    <span class="kw">for </span><span class="kw-2">&amp;</span>target <span class="kw">in </span>targets {
+        node_states[query.indices[target].<span class="number">0</span>] = State::Included;
+    }
+
+    <span class="kw">for </span>source <span class="kw">in </span>sources.iter().map(|<span class="kw-2">&amp;</span>n| query.indices[n]) {
+        recurse(query, <span class="kw-2">&amp;mut </span>node_states, source);
+    }
+
+    <span class="kw">return </span><a href="#365">query</a>
+        .nodes()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>n| {
+            <span class="kw">let </span>index = <a href="#365">query</a>.indices[<a href="#395">n</a>];
+            <a href="#382">node_states</a>[<a href="#396">index</a>.<span class="number">0</span>] == <a href="#378">State::Included</a>
+        })
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|n| <a href="#399">n</a>.kind)
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+    <span class="kw">fn </span>recurse(query: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>, node_states: <span class="kw-2">&amp;mut </span>[<a href="#375">State</a>], node: <a href="../../rustc_data_structures/graph/implementation/struct.NodeIndex.html">NodeIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a href="#402">node_states</a>[<a href="#402">node</a>.<span class="number">0</span>] {
+            <span class="comment">// known to reach a target
+            </span><a href="#378">State::Included</a> =&gt; <span class="kw">return </span><span class="bool-val">true</span>,
+
+            <span class="comment">// known not to reach a target
+            </span><a href="#379">State::Excluded</a> =&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+
+            <span class="comment">// backedge, not yet known, say false
+            </span><a href="#377">State::Deciding</a> =&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+
+            <a href="#376">State::Undecided</a> =&gt; {}
+        }
+
+        <a href="#402">node_states</a>[<a href="#402">node</a>.<span class="number">0</span>] = <a href="#377">State::Deciding</a>;
+
+        <span class="kw">for </span>neighbor_index <span class="kw">in </span>query.graph.successor_nodes(node) {
+            <span class="kw">if </span>recurse(query, node_states, neighbor_index) {
+                node_states[node.<span class="number">0</span>] = State::Included;
+            }
+        }
+
+        <span class="comment">// if we didn&#39;t find a path to target, then set to excluded
+        </span><span class="kw">if </span>node_states[node.<span class="number">0</span>] == State::Deciding {
+            <a href="#402">node_states</a>[<a href="#402">node</a>.<span class="number">0</span>] = <a href="#379">State::Excluded</a>;
+            <span class="bool-val">false
+        </span>} <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(node_states[node.<span class="number">0</span>] == State::Included);
+            <span class="bool-val">true
+        </span>}
+    }
+}
+
+<span class="kw">fn </span>filter_edges&lt;<span class="lifetime">&#39;q</span>&gt;(
+    query: <span class="kw-2">&amp;</span><span class="lifetime">&#39;q </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/type.DepGraphQuery.html">DepGraphQuery</a>,
+    nodes: <span class="kw-2">&amp;</span>FxHashSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>&gt;,
+) -&gt; Vec&lt;(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/dep_graph/dep_node/enum.DepKind.html">DepKind</a>)&gt; {
+    <span class="kw">let </span>uniq: FxHashSet&lt;<span class="kw">_</span>&gt; = <a href="#436">query</a>
+        .edges()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(s, t)| (<a href="#442">s</a>.kind, <a href="#442">t</a>.kind))
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|(source, target)| <a href="#437">nodes</a>.contains(<a href="#443">source</a>) &amp;&amp; <a href="#437">nodes</a>.contains(<a href="#443">target</a>))
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+    <a href="#439">uniq</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_incremental" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

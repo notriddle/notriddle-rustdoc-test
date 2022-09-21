@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"rustc_errors":[["impl&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"enum\" href=\"rustc_errors/emitter/enum.WritableDst.html\" title=\"enum rustc_errors::emitter::WritableDst\">WritableDst</a>&lt;'a&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

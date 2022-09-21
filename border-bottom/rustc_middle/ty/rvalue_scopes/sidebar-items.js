@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["RvalueScopes","`RvalueScopes` is a mapping from sub-expressions to extended lifetime as determined by rules laid out in `rustc_typeck::check::rvalue_scopes`."]]};

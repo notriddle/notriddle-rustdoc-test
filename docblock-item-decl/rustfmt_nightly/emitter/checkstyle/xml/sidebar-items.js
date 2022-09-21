@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["XmlEscaped","Convert special characters into XML entities. This is needed for checkstyle output."]]};

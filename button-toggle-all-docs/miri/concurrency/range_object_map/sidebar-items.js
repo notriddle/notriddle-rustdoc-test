@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["AccessType",""]],"struct":[["Elem",""],["RangeObjectMap",""]],"type":[["Position","Index of an allocation within the map"]]};

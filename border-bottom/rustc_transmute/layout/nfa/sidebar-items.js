@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Transition","The transitions between states in a `Nfa` reflect bit validity."]],"struct":[["Nfa","A non-deterministic finite automaton (NFA) that represents the layout of a type. The transmutability of two given types is computed by comparing their `Nfa`s."],["State","The states in a `Nfa` represent byte offsets."]]};

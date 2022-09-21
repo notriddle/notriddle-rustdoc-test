@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["UseKind",""]],"struct":[["OpaqueTypeDecl","Information about the opaque types whose values we are inferring in this function (these are the `impl Trait` that appear in the return type)."],["OpaqueTypeStorage",""],["OpaqueTypeTable",""]],"type":[["OpaqueTypeMap",""]]};

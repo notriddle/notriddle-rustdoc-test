@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["UniverseInfoInner","What operation a universe was created for."]],"fn":[["try_extract_error_from_fulfill_cx",""],["try_extract_error_from_region_constraints",""]],"struct":[["AscribeUserTypeQuery",""],["NormalizeQuery",""],["PredicateQuery",""],["UniverseInfo",""]],"trait":[["ToUniverseInfo",""],["TypeOpInfo",""]]};

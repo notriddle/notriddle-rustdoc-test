@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["run_format","Main method for rendering a crate."]],"trait":[["FormatRenderer","Allows for different backends to rustdoc to be used with the `run_format()` function. Each backend renderer has hooks for initialization, documenting an item, entering and exiting a module, and cleanup/finalizing output."]]};

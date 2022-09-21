@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["suggest_new_region_bound",""]],"struct":[["HirTraitObjectVisitor","Collect all `hir::Ty<'_>` `Span`s for trait objects with an implicit lifetime."],["TraitObjectVisitor","Collect all the trait objects in a type that could have received an implicit `'static` lifetime."]]};

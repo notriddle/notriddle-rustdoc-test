@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"rustfmt_nightly":[["impl <a class=\"trait\" href=\"https://docs.rs/lazy_static/1.4.0/lazy_static/trait.LazyStatic.html\" title=\"trait lazy_static::LazyStatic\">LazyStatic</a> for <a class=\"struct\" href=\"rustfmt_nightly/comment/struct.REFERENCE_LINK_URL.html\" title=\"struct rustfmt_nightly::comment::REFERENCE_LINK_URL\">REFERENCE_LINK_URL</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,798 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/fallback.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>fallback.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="fn_ctxt/mod.rs.html#40"><span class="kw">crate</span>::check::FnCtxt</a>;
+<span class="kw">use </span>rustc_data_structures::{
+    fx::{FxHashMap, FxHashSet},
+    <a href="../../../rustc_data_structures/graph/trait.WithSuccessors.html">graph::WithSuccessors</a>,
+    graph::{<a href="../../../rustc_data_structures/graph/iterate/struct.DepthFirstSearch.html">iterate::DepthFirstSearch</a>, <a href="../../../rustc_data_structures/graph/vec_graph/struct.VecGraph.html">vec_graph::VecGraph</a>},
+};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>};
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; FnCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Performs type inference fallback, returning true if any fallback
+    /// occurs.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>type_inference_fallback(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;type-inference-fallback start obligations: {:#?}&quot;</span>,
+            <span class="self">self</span>.fulfillment_cx.borrow_mut().pending_obligations()
+        );
+
+        <span class="comment">// All type checking constraints were added, try to fallback unsolved variables.
+        </span><a class="self" href="#12">self</a>.<a href="fn_ctxt/_impl.rs.html#624-628">select_obligations_where_possible</a>(<span class="bool-val">false</span>, |<span class="kw">_</span>| {});
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;type-inference-fallback post selection obligations: {:#?}&quot;</span>,
+            <span class="self">self</span>.fulfillment_cx.borrow_mut().pending_obligations()
+        );
+
+        <span class="comment">// Check if we have any unsolved variables. If not, no need for fallback.
+        </span><span class="kw">let </span>unsolved_variables = <a class="self" href="#12">self</a>.unsolved_variables();
+        <span class="kw">if </span>unsolved_variables.is_empty() {
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        }
+
+        <span class="kw">let </span>diverging_fallback = <a class="self" href="#12">self</a>.<a href="#195-198">calculate_diverging_fallback</a>(<span class="kw-2">&amp;</span><a href="#27">unsolved_variables</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>fallback_has_occurred = <span class="bool-val">false</span>;
+        <span class="comment">// We do fallback in two passes, to try to generate
+        // better error messages.
+        // The first time, we do *not* replace opaque types.
+        </span><span class="kw">for </span>ty <span class="kw">in </span>unsolved_variables {
+            <span class="macro">debug!</span>(<span class="string">&quot;unsolved_variable = {:?}&quot;</span>, ty);
+            fallback_has_occurred |= <span class="self">self</span>.fallback_if_possible(ty, <span class="kw-2">&amp;</span>diverging_fallback);
+        }
+
+        <span class="comment">// We now see if we can make progress. This might cause us to
+        // unify inference variables for opaque types, since we may
+        // have unified some other type variables during the first
+        // phase of fallback.  This means that we only replace
+        // inference variables with their underlying opaque types as a
+        // last resort.
+        //
+        // In code like this:
+        //
+        // ```rust
+        // type MyType = impl Copy;
+        // fn produce() -&gt; MyType { true }
+        // fn bad_produce() -&gt; MyType { panic!() }
+        // ```
+        //
+        // we want to unify the opaque inference variable in `bad_produce`
+        // with the diverging fallback for `panic!` (e.g. `()` or `!`).
+        // This will produce a nice error message about conflicting concrete
+        // types for `MyType`.
+        //
+        // If we had tried to fallback the opaque inference variable to `MyType`,
+        // we will generate a confusing type-check error that does not explicitly
+        // refer to opaque types.
+        </span><a class="self" href="#12">self</a>.<a href="fn_ctxt/_impl.rs.html#624-628">select_obligations_where_possible</a>(<a href="#34">fallback_has_occurred</a>, |<span class="kw">_</span>| {});
+
+        <a href="#34">fallback_has_occurred</a>
+    }
+
+    <span class="comment">// Tries to apply a fallback to `ty` if it is an unsolved variable.
+    //
+    // - Unconstrained ints are replaced with `i32`.
+    //
+    // - Unconstrained floats are replaced with with `f64`.
+    //
+    // - Non-numerics may get replaced with `()` or `!`, depending on
+    //   how they were categorized by `calculate_diverging_fallback`
+    //   (and the setting of `#![feature(never_type_fallback)]`).
+    //
+    // Fallback becomes very dubious if we have encountered
+    // type-checking errors.  In that case, fallback to Error.
+    //
+    // The return value indicates whether fallback has occurred.
+    </span><span class="kw">fn </span>fallback_if_possible(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diverging_fallback: <span class="kw-2">&amp;</span>FxHashMap&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// Careful: we do NOT shallow-resolve `ty`. We know that `ty`
+        // is an unsolved variable, and we determine its fallback
+        // based solely on how it was created, not what other type
+        // variables it may have been unified with since then.
+        //
+        // The reason this matters is that other attempts at fallback
+        // may (in principle) conflict with this fallback, and we wish
+        // to generate a type error in that case. (However, this
+        // actually isn&#39;t true right now, because we&#39;re only using the
+        // builtin fallback rules. This would be true if we were using
+        // user-supplied fallbacks. But it&#39;s still useful to write the
+        // code to detect bugs.)
+        //
+        // (Note though that if we have a general type variable `?T`
+        // that is then unified with an integer type variable `?I`
+        // that ultimately never gets resolved to a special integral
+        // type, `?T` is not considered unsolved, but `?I` is. The
+        // same is true for float variables.)
+        </span><span class="kw">let </span>fallback = <span class="kw">match </span><a href="#87">ty</a>.kind() {
+            <span class="kw">_ if </span><a class="self" href="#86">self</a>.is_tainted_by_errors() =&gt; <a class="self" href="#86">self</a>.tcx.ty_error(),
+            ty::Infer(ty::IntVar(<span class="kw">_</span>)) =&gt; <a class="self" href="#86">self</a>.tcx.types.i32,
+            ty::Infer(ty::FloatVar(<span class="kw">_</span>)) =&gt; <a class="self" href="#86">self</a>.tcx.types.f64,
+            <span class="kw">_ </span>=&gt; <span class="kw">match </span><a href="#88">diverging_fallback</a>.get(<span class="kw-2">&amp;</span><a href="#87">ty</a>) {
+                <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>fallback_ty) =&gt; <a href="#113">fallback_ty</a>,
+                <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+            },
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;fallback_if_possible(ty={:?}): defaulting to `{:?}`&quot;</span>, ty, fallback);
+
+        <span class="kw">let </span>span = <span class="self"><a href="#86">self</a>
+            </span>.infcx
+            .type_var_origin(<a href="#87">ty</a>)
+            .map(|origin| <a href="#122">origin</a>.span)
+            .unwrap_or(<a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">rustc_span::DUMMY_SP</a>);
+        <a class="self" href="#86">self</a>.<a href="demand.rs.html#84">demand_eqtype</a>(<a href="#119">span</a>, <a href="#87">ty</a>, <a href="#108">fallback</a>);
+        <span class="bool-val">true
+    </span>}
+
+    <span class="doccomment">/// The &quot;diverging fallback&quot; system is rather complicated. This is
+    /// a result of our need to balance &#39;do the right thing&#39; with
+    /// backwards compatibility.
+    ///
+    /// &quot;Diverging&quot; type variables are variables created when we
+    /// coerce a `!` type into an unbound type variable `?X`. If they
+    /// never wind up being constrained, the &quot;right and natural&quot; thing
+    /// is that `?X` should &quot;fallback&quot; to `!`. This means that e.g. an
+    /// expression like `Some(return)` will ultimately wind up with a
+    /// type like `Option&lt;!&gt;` (presuming it is not assigned or
+    /// constrained to have some other type).
+    ///
+    /// However, the fallback used to be `()` (before the `!` type was
+    /// added).  Moreover, there are cases where the `!` type &#39;leaks
+    /// out&#39; from dead code into type variables that affect live
+    /// code. The most common case is something like this:
+    ///
+    /// ```rust
+    /// # fn foo() -&gt; i32 { 4 }
+    /// match foo() {
+    ///     22 =&gt; Default::default(), // call this type `?D`
+    ///     _ =&gt; return, // return has type `!`
+    /// } // call the type of this match `?M`
+    /// ```
+    ///
+    /// Here, coercing the type `!` into `?M` will create a diverging
+    /// type variable `?X` where `?X &lt;: ?M`.  We also have that `?D &lt;:
+    /// ?M`. If `?M` winds up unconstrained, then `?X` will
+    /// fallback. If it falls back to `!`, then all the type variables
+    /// will wind up equal to `!` -- this includes the type `?D`
+    /// (since `!` doesn&#39;t implement `Default`, we wind up a &quot;trait
+    /// not implemented&quot; error in code like this). But since the
+    /// original fallback was `()`, this code used to compile with `?D
+    /// = ()`. This is somewhat surprising, since `Default::default()`
+    /// on its own would give an error because the types are
+    /// insufficiently constrained.
+    ///
+    /// Our solution to this dilemma is to modify diverging variables
+    /// so that they can *either* fallback to `!` (the default) or to
+    /// `()` (the backwards compatibility case). We decide which
+    /// fallback to use based on whether there is a coercion pattern
+    /// like this:
+    ///
+    /// ```ignore (not-rust)
+    /// ?Diverging -&gt; ?V
+    /// ?NonDiverging -&gt; ?V
+    /// ?V != ?NonDiverging
+    /// ```
+    ///
+    /// Here `?Diverging` represents some diverging type variable and
+    /// `?NonDiverging` represents some non-diverging type
+    /// variable. `?V` can be any type variable (diverging or not), so
+    /// long as it is not equal to `?NonDiverging`.
+    ///
+    /// Intuitively, what we are looking for is a case where a
+    /// &quot;non-diverging&quot; type variable (like `?M` in our example above)
+    /// is coerced *into* some variable `?V` that would otherwise
+    /// fallback to `!`. In that case, we make `?V` fallback to `!`,
+    /// along with anything that would flow into `?V`.
+    ///
+    /// The algorithm we use:
+    /// * Identify all variables that are coerced *into* by a
+    ///   diverging variable.  Do this by iterating over each
+    ///   diverging, unsolved variable and finding all variables
+    ///   reachable from there. Call that set `D`.
+    /// * Walk over all unsolved, non-diverging variables, and find
+    ///   any variable that has an edge into `D`.
+    </span><span class="kw">fn </span>calculate_diverging_fallback(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        unsolved_variables: <span class="kw-2">&amp;</span>[Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+    ) -&gt; FxHashMap&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;calculate_diverging_fallback({:?})&quot;</span>, unsolved_variables);
+
+        <span class="kw">let </span>relationships = <a class="self" href="#196">self</a>.fulfillment_cx.borrow_mut().<a href="../../../rustc_infer/traits/engine/trait.TraitEngine.html">relationships</a>().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+
+        <span class="comment">// Construct a coercion graph where an edge `A -&gt; B` indicates
+        // a type variable is that is coerced
+        </span><span class="kw">let </span>coercion_graph = <a class="self" href="#196">self</a>.<a href="#352">create_coercion_graph</a>();
+
+        <span class="comment">// Extract the unsolved type inference variable vids; note that some
+        // unsolved variables are integer/float variables and are excluded.
+        </span><span class="kw">let </span>unsolved_vids = <a href="#197">unsolved_variables</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|ty| <a href="#209">ty</a>.ty_vid());
+
+        <span class="comment">// Compute the diverging root vids D -- that is, the root vid of
+        // those type variables that (a) are the target of a coercion from
+        // a `!` type and (b) have not yet been solved.
+        //
+        // These variables are the ones that are targets for fallback to
+        // either `!` or `()`.
+        </span><span class="kw">let </span>diverging_roots: FxHashSet&lt;<a href="../../../rustc_type_ir/struct.TyVid.html">ty::TyVid</a>&gt; = <span class="self"><a href="#196">self</a>
+            </span>.diverging_type_vars
+            .borrow()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>ty| <a class="self" href="#196">self</a>.shallow_resolve(<a href="#221">ty</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|ty| <a href="#222">ty</a>.ty_vid())
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|vid| <a class="self" href="#196">self</a>.root_var(<a href="#223">vid</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;calculate_diverging_fallback: diverging_type_vars={:?}&quot;</span>,
+            <span class="self">self</span>.diverging_type_vars.borrow()
+        );
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;calculate_diverging_fallback: diverging_roots={:?}&quot;</span>, diverging_roots);
+
+        <span class="comment">// Find all type variables that are reachable from a diverging
+        // type variable. These will typically default to `!`, unless
+        // we find later that they are *also* reachable from some
+        // other type variable outside this set.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>roots_reachable_from_diverging = DepthFirstSearch::new(<span class="kw-2">&amp;</span><a href="#205">coercion_graph</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>diverging_vids = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <span class="kw">let </span><span class="kw-2">mut </span>non_diverging_vids = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <span class="kw">for </span>unsolved_vid <span class="kw">in </span>unsolved_vids {
+            <span class="kw">let </span>root_vid = <span class="self">self</span>.root_var(unsolved_vid);
+            <span class="macro">debug!</span>(
+                <span class="string">&quot;calculate_diverging_fallback: unsolved_vid={:?} root_vid={:?} diverges={:?}&quot;</span>,
+                unsolved_vid,
+                root_vid,
+                diverging_roots.contains(<span class="kw-2">&amp;</span>root_vid),
+            );
+            <span class="kw">if </span>diverging_roots.contains(<span class="kw-2">&amp;</span>root_vid) {
+                diverging_vids.push(unsolved_vid);
+                roots_reachable_from_diverging.push_start_node(root_vid);
+
+                <span class="macro">debug!</span>(
+                    <span class="string">&quot;calculate_diverging_fallback: root_vid={:?} reaches {:?}&quot;</span>,
+                    root_vid,
+                    coercion_graph.depth_first_search(root_vid).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+                );
+
+                <span class="comment">// drain the iterator to visit all nodes reachable from this node
+                </span>roots_reachable_from_diverging.complete_search();
+            } <span class="kw">else </span>{
+                non_diverging_vids.push(unsolved_vid);
+            }
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;calculate_diverging_fallback: roots_reachable_from_diverging={:?}&quot;</span>,
+            roots_reachable_from_diverging,
+        );
+
+        <span class="comment">// Find all type variables N0 that are not reachable from a
+        // diverging variable, and then compute the set reachable from
+        // N0, which we call N. These are the *non-diverging* type
+        // variables. (Note that this set consists of &quot;root variables&quot;.)
+        </span><span class="kw">let </span><span class="kw-2">mut </span>roots_reachable_from_non_diverging = DepthFirstSearch::new(<span class="kw-2">&amp;</span><a href="#205">coercion_graph</a>);
+        <span class="kw">for </span><span class="kw-2">&amp;</span>non_diverging_vid <span class="kw">in </span><span class="kw-2">&amp;</span>non_diverging_vids {
+            <span class="kw">let </span>root_vid = <span class="self">self</span>.root_var(non_diverging_vid);
+            <span class="kw">if </span>roots_reachable_from_diverging.visited(root_vid) {
+                <span class="kw">continue</span>;
+            }
+            roots_reachable_from_non_diverging.push_start_node(root_vid);
+            roots_reachable_from_non_diverging.complete_search();
+        }
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;calculate_diverging_fallback: roots_reachable_from_non_diverging={:?}&quot;</span>,
+            roots_reachable_from_non_diverging,
+        );
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;inherited: {:#?}&quot;</span>, <span class="self">self</span>.inh.fulfillment_cx.borrow_mut().pending_obligations());
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;obligations: {:#?}&quot;</span>, <span class="self">self</span>.fulfillment_cx.borrow_mut().pending_obligations());
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;relationships: {:#?}&quot;</span>, relationships);
+
+        <span class="comment">// For each diverging variable, figure out whether it can
+        // reach a member of N. If so, it falls back to `()`. Else
+        // `!`.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>diverging_fallback = FxHashMap::default();
+        <a href="#293">diverging_fallback</a>.reserve(<a href="#236">diverging_vids</a>.len());
+        <span class="kw">for </span><span class="kw-2">&amp;</span>diverging_vid <span class="kw">in </span><span class="kw-2">&amp;</span>diverging_vids {
+            <span class="kw">let </span>diverging_ty = <span class="self">self</span>.tcx.mk_ty_var(diverging_vid);
+            <span class="kw">let </span>root_vid = <span class="self">self</span>.root_var(diverging_vid);
+            <span class="kw">let </span>can_reach_non_diverging = coercion_graph
+                .depth_first_search(root_vid)
+                .any(|n| roots_reachable_from_non_diverging.visited(n));
+
+            <span class="kw">let </span><span class="kw-2">mut </span>relationship = ty::FoundRelationships { self_in_trait: <span class="bool-val">false</span>, output: <span class="bool-val">false </span>};
+
+            <span class="kw">for </span>(vid, rel) <span class="kw">in </span>relationships.iter() {
+                <span class="kw">if </span><span class="self">self</span>.root_var(<span class="kw-2">*</span>vid) == root_vid {
+                    relationship.self_in_trait |= rel.self_in_trait;
+                    relationship.output |= rel.output;
+                }
+            }
+
+            <span class="kw">if </span>relationship.self_in_trait &amp;&amp; relationship.output {
+                <span class="comment">// This case falls back to () to ensure that the code pattern in
+                // src/test/ui/never_type/fallback-closure-ret.rs continues to
+                // compile when never_type_fallback is enabled.
+                //
+                // This rule is not readily explainable from first principles,
+                // but is rather intended as a patchwork fix to ensure code
+                // which compiles before the stabilization of never type
+                // fallback continues to work.
+                //
+                // Typically this pattern is encountered in a function taking a
+                // closure as a parameter, where the return type of that closure
+                // (checked by `relationship.output`) is expected to implement
+                // some trait (checked by `relationship.self_in_trait`). This
+                // can come up in non-closure cases too, so we do not limit this
+                // rule to specifically `FnOnce`.
+                //
+                // When the closure&#39;s body is something like `panic!()`, the
+                // return type would normally be inferred to `!`. However, it
+                // needs to fall back to `()` in order to still compile, as the
+                // trait is specifically implemented for `()` but not `!`.
+                //
+                // For details on the requirements for these relationships to be
+                // set, see the relationship finding module in
+                // compiler/rustc_trait_selection/src/traits/relationships.rs.
+                </span><span class="macro">debug!</span>(<span class="string">&quot;fallback to () - found trait and projection: {:?}&quot;</span>, diverging_vid);
+                diverging_fallback.insert(diverging_ty, <span class="self">self</span>.tcx.types.unit);
+            } <span class="kw">else if </span>can_reach_non_diverging {
+                <span class="macro">debug!</span>(<span class="string">&quot;fallback to () - reached non-diverging: {:?}&quot;</span>, diverging_vid);
+                diverging_fallback.insert(diverging_ty, <span class="self">self</span>.tcx.types.unit);
+            } <span class="kw">else </span>{
+                <span class="macro">debug!</span>(<span class="string">&quot;fallback to ! - all diverging: {:?}&quot;</span>, diverging_vid);
+                diverging_fallback.insert(diverging_ty, <span class="self">self</span>.tcx.mk_diverging_default());
+            }
+        }
+
+        <a href="#293">diverging_fallback</a>
+    }
+
+    <span class="doccomment">/// Returns a graph whose nodes are (unresolved) inference variables and where
+    /// an edge `?A -&gt; ?B` indicates that the variable `?A` is coerced to `?B`.
+    </span><span class="kw">fn </span>create_coercion_graph(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; VecGraph&lt;<a href="../../../rustc_type_ir/struct.TyVid.html">ty::TyVid</a>&gt; {
+        <span class="kw">let </span>pending_obligations = <a class="self" href="#352">self</a>.fulfillment_cx.borrow_mut().<a href="../../../rustc_infer/traits/engine/trait.TraitEngine.html">pending_obligations</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;create_coercion_graph: pending_obligations={:?}&quot;</span>, pending_obligations);
+        <span class="kw">let </span>coercion_edges: Vec&lt;(<a href="../../../rustc_type_ir/struct.TyVid.html">ty::TyVid</a>, <a href="../../../rustc_type_ir/struct.TyVid.html">ty::TyVid</a>)&gt; = <a href="#353">pending_obligations</a>
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|obligation| {
+                <span class="comment">// The predicates we are looking for look like `Coerce(?A -&gt; ?B)`.
+                // They will have no bound variables.
+                </span><a href="#357">obligation</a>.predicate.kind().no_bound_vars()
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|atom| {
+                <span class="comment">// We consider both subtyping and coercion to imply &#39;flow&#39; from
+                // some position in the code `a` to a different position `b`.
+                // This is then used to determine which variables interact with
+                // live code, and as such must fall back to `()` to preserve
+                // soundness.
+                //
+                // In practice currently the two ways that this happens is
+                // coercion and subtyping.
+                </span><span class="kw">let </span>(a, b) = <span class="kw">if let </span>ty::PredicateKind::Coerce(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.CoercePredicate.html">ty::CoercePredicate</a> { a, b }) = <a href="#362">atom</a> {
+                    (<a href="#371">a</a>, <a href="#371">b</a>)
+                } <span class="kw">else if let </span>ty::PredicateKind::Subtype(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.SubtypePredicate.html">ty::SubtypePredicate</a> {
+                    a_is_expected: <span class="kw">_</span>,
+                    a,
+                    b,
+                }) = <a href="#362">atom</a>
+                {
+                    (<a href="#375">a</a>, <a href="#376">b</a>)
+                } <span class="kw">else </span>{
+                    <span class="kw">return </span><span class="prelude-val">None</span>;
+                };
+
+                <span class="kw">let </span>a_vid = <span class="self">self</span>.root_vid(a)<span class="question-mark">?</span>;
+                <span class="kw">let </span>b_vid = <span class="self">self</span>.root_vid(b)<span class="question-mark">?</span>;
+                <span class="prelude-val">Some</span>((<a href="#384">a_vid</a>, <a href="#385">b_vid</a>))
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;create_coercion_graph: coercion_edges={:?}&quot;</span>, coercion_edges);
+        <span class="kw">let </span>num_ty_vars = <a class="self" href="#352">self</a>.num_ty_vars();
+        VecGraph::new(<a href="#390">num_ty_vars</a>, <a href="#355">coercion_edges</a>)
+    }
+
+    <span class="doccomment">/// If `ty` is an unresolved type variable, returns its root vid.
+    </span><span class="kw">fn </span>root_vid(<span class="kw-2">&amp;</span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_type_ir/struct.TyVid.html">ty::TyVid</a>&gt; {
+        <span class="prelude-val">Some</span>(<a class="self" href="#395">self</a>.root_var(<span class="self">self</span>.shallow_resolve(ty).ty_vid()<span class="question-mark">?</span>))
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

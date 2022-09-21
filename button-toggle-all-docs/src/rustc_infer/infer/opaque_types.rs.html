@@ -1,0 +1,1276 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_infer/src/infer/opaque_types.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>opaque_types.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_infer/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../errors/mod.rs.html#21"><span class="kw">crate</span>::errors::OpaqueHiddenTypeDiag</a>;
+<span class="kw">use </span><span class="kw">crate</span>::infer::{<a href="mod.rs.html#244">DefiningAnchor</a>, <a href="mod.rs.html#254">InferCtxt</a>, <a href="mod.rs.html#75">InferOk</a>};
+<span class="kw">use </span><a href="../lib.rs.html#40"><span class="kw">crate</span>::traits</a>;
+<span class="kw">use </span>hir::def_id::{<a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>};
+<span class="kw">use </span>hir::{<a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../../rustc_hir/hir/enum.OpaqueTyOrigin.html">OpaqueTyOrigin</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">rustc_data_structures::sync::Lrc</a>;
+<span class="kw">use </span><a href="../../../rustc_data_structures/vec_map/struct.VecMap.html">rustc_data_structures::vec_map::VecMap</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../rustc_infer/traits/struct.ObligationCause.html">rustc_middle::traits::ObligationCause</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/struct.BottomUpFolder.html">rustc_middle::ty::fold::BottomUpFolder</a>;
+<span class="kw">use </span>rustc_middle::ty::subst::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/enum.GenericArgKind.html">GenericArgKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/trait.Subst.html">Subst</a>};
+<span class="kw">use </span>rustc_middle::ty::{
+    <a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.OpaqueHiddenType.html">OpaqueHiddenType</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.OpaqueTypeKey.html">OpaqueTypeKey</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeFoldable.html">TypeFoldable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">TypeSuperVisitable</a>,
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitor.html">TypeVisitor</a>,
+};
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/control_flow/enum.ControlFlow.html">std::ops::ControlFlow</a>;
+
+<span class="kw">pub type </span>OpaqueTypeMap&lt;<span class="lifetime">&#39;tcx</span>&gt; = VecMap&lt;OpaqueTypeKey&lt;<span class="lifetime">&#39;tcx</span>&gt;, OpaqueTypeDecl&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+<span class="kw">mod </span><a href="opaque_types/table.rs.html#1-80">table</a>;
+
+<span class="kw">pub use </span>table::{<a href="opaque_types/table.rs.html#11">OpaqueTypeStorage</a>, <a href="opaque_types/table.rs.html#56">OpaqueTypeTable</a>};
+
+<span class="kw">use </span><span class="kw">super</span>::type_variable::{<a href="type_variable.rs.html#114">TypeVariableOrigin</a>, <a href="type_variable.rs.html#121">TypeVariableOriginKind</a>};
+<span class="kw">use </span><a href="mod.rs.html#79"><span class="kw">super</span>::InferResult</a>;
+
+<span class="doccomment">/// Information about the opaque types whose values we
+/// are inferring in this function (these are the `impl Trait` that
+/// appear in the return type).
+</span><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>OpaqueTypeDecl&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The hidden types that have been inferred for this opaque type.
+    /// There can be multiple, but they are all `lub`ed together at the end
+    /// to obtain the canonical hidden type.
+    </span><span class="kw">pub </span>hidden_type: OpaqueHiddenType&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// The origin of the opaque type.
+    </span><span class="kw">pub </span>origin: <a href="../../../rustc_hir/hir/enum.OpaqueTyOrigin.html">hir::OpaqueTyOrigin</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; InferCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// This is a backwards compatibility hack to prevent breaking changes from
+    /// lazy TAIT around RPIT handling.
+    </span><span class="kw">pub fn </span>replace_opaque_types_with_inference_vars&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        value: T,
+        body_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InferOk&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <span class="kw">if </span>!value.has_opaque_types() {
+            <span class="kw">return </span><a href="mod.rs.html#75">InferOk</a> { <a href="#48">value</a>, obligations: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[] };
+        }
+        <span class="kw">let </span><span class="kw-2">mut </span>obligations = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <span class="kw">let </span>replace_opaque_type = |def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>| {
+            <a href="#57">def_id</a>
+                .as_local()
+                .map_or(<span class="bool-val">false</span>, |def_id| <a class="self" href="#47">self</a>.<a href="#394">opaque_type_origin</a>(<a href="#60">def_id</a>, <a href="#50">span</a>).is_some())
+        };
+        <span class="kw">let </span>value = <a href="#48">value</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeFoldable.html">fold_with</a>(<span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/struct.BottomUpFolder.html">ty::fold::BottomUpFolder</a> {
+            tcx: <a class="self" href="#47">self</a>.tcx,
+            lt_op: |lt| <a href="#64">lt</a>,
+            ct_op: |ct| <a href="#65">ct</a>,
+            ty_op: |ty| <span class="kw">match </span><span class="kw-2">*</span><a href="#66">ty</a>.kind() {
+                ty::Opaque(def_id, _substs) <span class="kw">if </span><a href="#57">replace_opaque_type</a>(<a href="#67">def_id</a>) =&gt; {
+                    <span class="kw">let </span>def_span = <a class="self" href="#47">self</a>.tcx.def_span(<a href="#67">def_id</a>);
+                    <span class="kw">let </span>span = <span class="kw">if </span>span.contains(def_span) { <a href="#68">def_span</a> } <span class="kw">else </span>{ <a href="#50">span</a> };
+                    <span class="kw">let </span>code = traits::ObligationCauseCode::OpaqueReturnType(<span class="prelude-val">None</span>);
+                    <span class="kw">let </span>cause = ObligationCause::new(<a href="#69">span</a>, <a href="#49">body_id</a>, <a href="#70">code</a>);
+                    <span class="comment">// FIXME(compiler-errors): We probably should add a new TypeVariableOriginKind
+                    // for opaque types, and then use that kind to fix the spans for type errors
+                    // that we see later on.
+                    </span><span class="kw">let </span>ty_var = <a class="self" href="#47">self</a>.<a href="mod.rs.html#1076">next_ty_var</a>(<a href="type_variable.rs.html#114">TypeVariableOrigin</a> {
+                        kind: <a href="type_variable.rs.html#125">TypeVariableOriginKind::OpaqueTypeInference</a>(<a href="#67">def_id</a>),
+                        <a href="#69">span</a>,
+                    });
+                    <a href="#56">obligations</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(
+                        <a class="self" href="#47">self</a>.<a href="#92-99">handle_opaque_type</a>(<a href="#66">ty</a>, <a href="#75">ty_var</a>, <span class="bool-val">true</span>, <span class="kw-2">&amp;</span><a href="#71">cause</a>, <a href="#51">param_env</a>)
+                            .unwrap()
+                            .obligations,
+                    );
+                    <a href="#75">ty_var</a>
+                }
+                <span class="kw">_ </span>=&gt; <a href="#66">ty</a>,
+            },
+        });
+        <a href="mod.rs.html#75">InferOk</a> { <a href="#62">value</a>, <a href="#56">obligations</a> }
+    }
+
+    <span class="kw">pub fn </span>handle_opaque_type(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a_is_expected: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        cause: <span class="kw-2">&amp;</span>ObligationCause&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InferResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <span class="kw">if </span>a.references_error() || b.references_error() {
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="mod.rs.html#75">InferOk</a> { value: (), obligations: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[] });
+        }
+        <span class="kw">let </span>(a, b) = <span class="kw">if </span>a_is_expected { (<a href="#94">a</a>, <a href="#95">b</a>) } <span class="kw">else </span>{ (<a href="#95">b</a>, <a href="#94">a</a>) };
+        <span class="kw">let </span>process = |a: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, b: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;| <span class="kw">match </span><span class="kw-2">*</span><a href="#104">a</a>.kind() {
+            ty::Opaque(def_id, substs) <span class="kw">if </span><a href="#105">def_id</a>.is_local() =&gt; {
+                <span class="kw">let </span>def_id = <a href="#105">def_id</a>.expect_local();
+                <span class="kw">let </span>origin = <span class="kw">match </span><a class="self" href="#93">self</a>.defining_use_anchor {
+                    <a href="mod.rs.html#246">DefiningAnchor::Bind</a>(<span class="kw">_</span>) =&gt; {
+                        <span class="comment">// Check that this is `impl Trait` type is
+                        // declared by `parent_def_id` -- i.e., one whose
+                        // value we are inferring.  At present, this is
+                        // always true during the first phase of
+                        // type-check, but not always true later on during
+                        // NLL. Once we support named opaque types more fully,
+                        // this same scenario will be able to arise during all phases.
+                        //
+                        // Here is an example using type alias `impl Trait`
+                        // that indicates the distinction we are checking for:
+                        //
+                        // ```rust
+                        // mod a {
+                        //   pub type Foo = impl Iterator;
+                        //   pub fn make_foo() -&gt; Foo { .. }
+                        // }
+                        //
+                        // mod b {
+                        //   fn foo() -&gt; a::Foo { a::make_foo() }
+                        // }
+                        // ```
+                        //
+                        // Here, the return type of `foo` references an
+                        // `Opaque` indeed, but not one whose value is
+                        // presently being inferred. You can get into a
+                        // similar situation with closure return types
+                        // today:
+                        //
+                        // ```rust
+                        // fn foo() -&gt; impl Iterator { .. }
+                        // fn bar() {
+                        //     let x = || foo(); // returns the Opaque assoc with `foo`
+                        // }
+                        // ```
+                        </span><span class="self">self</span>.opaque_type_origin(def_id, cause.span)<span class="question-mark">?
+                    </span>}
+                    <a href="mod.rs.html#249">DefiningAnchor::Bubble</a> =&gt; <a class="self" href="#93">self</a>.<a href="#424">opaque_ty_origin_unchecked</a>(<a href="#106">def_id</a>, <a href="#97">cause</a>.span),
+                    <a href="mod.rs.html#251">DefiningAnchor::Error</a> =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+                };
+                <span class="kw">if let </span>ty::Opaque(did2, <span class="kw">_</span>) = <span class="kw-2">*</span><a href="#104">b</a>.kind() {
+                    <span class="comment">// We could accept this, but there are various ways to handle this situation, and we don&#39;t
+                    // want to make a decision on it right now. Likely this case is so super rare anyway, that
+                    // no one encounters it in practice.
+                    // It does occur however in `fn fut() -&gt; impl Future&lt;Output = i32&gt; { async { 42 } }`,
+                    // where it is of no concern, so we only check for TAITs.
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(OpaqueTyOrigin::TyAlias) =
+                        <a href="#148">did2</a>.as_local().and_then(|did2| <a class="self" href="#93">self</a>.<a href="#394">opaque_type_origin</a>(<a href="#155">did2</a>, <a href="#97">cause</a>.span))
+                    {
+                        <a class="self" href="#93">self</a>.tcx.sess.emit_err(<a href="../errors/mod.rs.html#21">OpaqueHiddenTypeDiag</a> {
+                            span: <a href="#97">cause</a>.span,
+                            hidden_type: <a class="self" href="#93">self</a>.tcx.def_span(<a href="#148">did2</a>),
+                            opaque_type: <a class="self" href="#93">self</a>.tcx.def_span(<a href="#106">def_id</a>),
+                        });
+                    }
+                }
+                <span class="prelude-val">Some</span>(<a class="self" href="#93">self</a>.<a href="#523-530">register_hidden_type</a>(
+                    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.OpaqueTypeKey.html">OpaqueTypeKey</a> { <a href="#106">def_id</a>, <a href="#105">substs</a> },
+                    <a href="#97">cause</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+                    <a href="#98">param_env</a>,
+                    <a href="#104">b</a>,
+                    <a href="#107">origin</a>,
+                ))
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        };
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(res) = <a href="#104">process</a>(<a href="#103">a</a>, <a href="#103">b</a>) {
+            <a href="#174">res</a>
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(res) = <a href="#104">process</a>(<a href="#103">b</a>, <a href="#103">a</a>) {
+            <a href="#176">res</a>
+        } <span class="kw">else </span>{
+            <span class="comment">// Rerun equality check, but this time error out due to
+            // different types.
+            </span><span class="kw">match </span><a class="self" href="#93">self</a>.<a href="at.rs.html#53-57">at</a>(<a href="#97">cause</a>, <a href="#98">param_env</a>).<a href="at.rs.html#100">define_opaque_types</a>(<span class="bool-val">false</span>).<a href="at.rs.html#169-171">eq</a>(<a href="#103">a</a>, <a href="#103">b</a>) {
+                <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                    cause.span,
+                    <span class="string">&quot;opaque types are never equal to anything but themselves: {:#?}&quot;</span>,
+                    (a.kind(), b.kind())
+                ),
+                <span class="prelude-val">Err</span>(e) =&gt; <span class="prelude-val">Err</span>(<a href="#187">e</a>),
+            }
+        }
+    }
+
+    <span class="doccomment">/// Given the map `opaque_types` containing the opaque
+    /// `impl Trait` types whose underlying, hidden types are being
+    /// inferred, this method adds constraints to the regions
+    /// appearing in those underlying hidden types to ensure that they
+    /// at least do not refer to random scopes within the current
+    /// function. These constraints are not (quite) sufficient to
+    /// guarantee that the regions are actually legal values; that
+    /// final condition is imposed after region inference is done.
+    ///
+    /// # The Problem
+    ///
+    /// Let&#39;s work through an example to explain how it works. Assume
+    /// the current function is as follows:
+    ///
+    /// ```text
+    /// fn foo&lt;&#39;a, &#39;b&gt;(..) -&gt; (impl Bar&lt;&#39;a&gt;, impl Bar&lt;&#39;b&gt;)
+    /// ```
+    ///
+    /// Here, we have two `impl Trait` types whose values are being
+    /// inferred (the `impl Bar&lt;&#39;a&gt;` and the `impl
+    /// Bar&lt;&#39;b&gt;`). Conceptually, this is sugar for a setup where we
+    /// define underlying opaque types (`Foo1`, `Foo2`) and then, in
+    /// the return type of `foo`, we *reference* those definitions:
+    ///
+    /// ```text
+    /// type Foo1&lt;&#39;x&gt; = impl Bar&lt;&#39;x&gt;;
+    /// type Foo2&lt;&#39;x&gt; = impl Bar&lt;&#39;x&gt;;
+    /// fn foo&lt;&#39;a, &#39;b&gt;(..) -&gt; (Foo1&lt;&#39;a&gt;, Foo2&lt;&#39;b&gt;) { .. }
+    ///                    //  ^^^^ ^^
+    ///                    //  |    |
+    ///                    //  |    substs
+    ///                    //  def_id
+    /// ```
+    ///
+    /// As indicating in the comments above, each of those references
+    /// is (in the compiler) basically a substitution (`substs`)
+    /// applied to the type of a suitable `def_id` (which identifies
+    /// `Foo1` or `Foo2`).
+    ///
+    /// Now, at this point in compilation, what we have done is to
+    /// replace each of the references (`Foo1&lt;&#39;a&gt;`, `Foo2&lt;&#39;b&gt;`) with
+    /// fresh inference variables C1 and C2. We wish to use the values
+    /// of these variables to infer the underlying types of `Foo1` and
+    /// `Foo2`. That is, this gives rise to higher-order (pattern) unification
+    /// constraints like:
+    ///
+    /// ```text
+    /// for&lt;&#39;a&gt; (Foo1&lt;&#39;a&gt; = C1)
+    /// for&lt;&#39;b&gt; (Foo1&lt;&#39;b&gt; = C2)
+    /// ```
+    ///
+    /// For these equation to be satisfiable, the types `C1` and `C2`
+    /// can only refer to a limited set of regions. For example, `C1`
+    /// can only refer to `&#39;static` and `&#39;a`, and `C2` can only refer
+    /// to `&#39;static` and `&#39;b`. The job of this function is to impose that
+    /// constraint.
+    ///
+    /// Up to this point, C1 and C2 are basically just random type
+    /// inference variables, and hence they may contain arbitrary
+    /// regions. In fact, it is fairly likely that they do! Consider
+    /// this possible definition of `foo`:
+    ///
+    /// ```text
+    /// fn foo&lt;&#39;a, &#39;b&gt;(x: &amp;&#39;a i32, y: &amp;&#39;b i32) -&gt; (impl Bar&lt;&#39;a&gt;, impl Bar&lt;&#39;b&gt;) {
+    ///         (&amp;*x, &amp;*y)
+    ///     }
+    /// ```
+    ///
+    /// Here, the values for the concrete types of the two impl
+    /// traits will include inference variables:
+    ///
+    /// ```text
+    /// &amp;&#39;0 i32
+    /// &amp;&#39;1 i32
+    /// ```
+    ///
+    /// Ordinarily, the subtyping rules would ensure that these are
+    /// sufficiently large. But since `impl Bar&lt;&#39;a&gt;` isn&#39;t a specific
+    /// type per se, we don&#39;t get such constraints by default. This
+    /// is where this function comes into play. It adds extra
+    /// constraints to ensure that all the regions which appear in the
+    /// inferred type are regions that could validly appear.
+    ///
+    /// This is actually a bit of a tricky constraint in general. We
+    /// want to say that each variable (e.g., `&#39;0`) can only take on
+    /// values that were supplied as arguments to the opaque type
+    /// (e.g., `&#39;a` for `Foo1&lt;&#39;a&gt;`) or `&#39;static`, which is always in
+    /// scope. We don&#39;t have a constraint quite of this kind in the current
+    /// region checker.
+    ///
+    /// # The Solution
+    ///
+    /// We generally prefer to make `&lt;=` constraints, since they
+    /// integrate best into the region solver. To do that, we find the
+    /// &quot;minimum&quot; of all the arguments that appear in the substs: that
+    /// is, some region which is less than all the others. In the case
+    /// of `Foo1&lt;&#39;a&gt;`, that would be `&#39;a` (it&#39;s the only choice, after
+    /// all). Then we apply that as a least bound to the variables
+    /// (e.g., `&#39;a &lt;= &#39;0`).
+    ///
+    /// In some cases, there is no minimum. Consider this example:
+    ///
+    /// ```text
+    /// fn baz&lt;&#39;a, &#39;b&gt;() -&gt; impl Trait&lt;&#39;a, &#39;b&gt; { ... }
+    /// ```
+    ///
+    /// Here we would report a more complex &quot;in constraint&quot;, like `&#39;r
+    /// in [&#39;a, &#39;b, &#39;static]` (where `&#39;r` is some region appearing in
+    /// the hidden type).
+    ///
+    /// # Constrain regions, not the hidden concrete type
+    ///
+    /// Note that generating constraints on each region `Rc` is *not*
+    /// the same as generating an outlives constraint on `Tc` itself.
+    /// For example, if we had a function like this:
+    ///
+    /// ```
+    /// # #![feature(type_alias_impl_trait)]
+    /// # fn main() {}
+    /// # trait Foo&lt;&#39;a&gt; {}
+    /// # impl&lt;&#39;a, T&gt; Foo&lt;&#39;a&gt; for (&amp;&#39;a u32, T) {}
+    /// fn foo&lt;&#39;a, T&gt;(x: &amp;&#39;a u32, y: T) -&gt; impl Foo&lt;&#39;a&gt; {
+    ///   (x, y)
+    /// }
+    ///
+    /// // Equivalent to:
+    /// # mod dummy { use super::*;
+    /// type FooReturn&lt;&#39;a, T&gt; = impl Foo&lt;&#39;a&gt;;
+    /// fn foo&lt;&#39;a, T&gt;(x: &amp;&#39;a u32, y: T) -&gt; FooReturn&lt;&#39;a, T&gt; {
+    ///   (x, y)
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// then the hidden type `Tc` would be `(&amp;&#39;0 u32, T)` (where `&#39;0`
+    /// is an inference variable). If we generated a constraint that
+    /// `Tc: &#39;a`, then this would incorrectly require that `T: &#39;a` --
+    /// but this is not necessary, because the opaque type we
+    /// create will be allowed to reference `T`. So we only generate a
+    /// constraint that `&#39;0: &#39;a`.
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">pub fn </span>register_member_constraints(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        opaque_type_key: OpaqueTypeKey&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        concrete_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) {
+        <span class="kw">let </span>def_id = opaque_type_key.def_id;
+
+        <span class="kw">let </span>tcx = <span class="self">self</span>.tcx;
+
+        <span class="kw">let </span>concrete_ty = <span class="self">self</span>.resolve_vars_if_possible(concrete_ty);
+
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>concrete_ty);
+
+        <span class="kw">let </span>first_own_region = <span class="kw">match </span><span class="self">self</span>.opaque_ty_origin_unchecked(def_id, span) {
+            hir::OpaqueTyOrigin::FnReturn(..) | hir::OpaqueTyOrigin::AsyncFn(..) =&gt; {
+                <span class="comment">// We lower
+                //
+                // fn foo&lt;&#39;l0..&#39;ln&gt;() -&gt; impl Trait&lt;&#39;l0..&#39;lm&gt;
+                //
+                // into
+                //
+                // type foo::&lt;&#39;p0..&#39;pn&gt;::Foo&lt;&#39;q0..&#39;qm&gt;
+                // fn foo&lt;l0..&#39;ln&gt;() -&gt; foo::&lt;&#39;static..&#39;static&gt;::Foo&lt;&#39;l0..&#39;lm&gt;.
+                //
+                // For these types we only iterate over `&#39;l0..lm` below.
+                </span>tcx.generics_of(def_id).parent_count
+            }
+            <span class="comment">// These opaque type inherit all lifetime parameters from their
+            // parent, so we have to check them all.
+            </span>hir::OpaqueTyOrigin::TyAlias =&gt; <span class="number">0</span>,
+        };
+
+        <span class="comment">// For a case like `impl Foo&lt;&#39;a, &#39;b&gt;`, we would generate a constraint
+        // `&#39;r in [&#39;a, &#39;b, &#39;static]` for each region `&#39;r` that appears in the
+        // hidden type (i.e., it must be equal to `&#39;a`, `&#39;b`, or `&#39;static`).
+        //
+        // `conflict1` and `conflict2` are the two region bounds that we
+        // detected which were unrelated. They are used for diagnostics.
+
+        // Create the set of choice regions: each region in the hidden
+        // type can be equal to any of the region parameters of the
+        // opaque type definition.
+        </span><span class="kw">let </span>choice_regions: Lrc&lt;Vec&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; = Lrc::new(
+            opaque_type_key.substs[first_own_region..]
+                .iter()
+                .filter_map(|arg| <span class="kw">match </span>arg.unpack() {
+                    GenericArgKind::Lifetime(r) =&gt; <span class="prelude-val">Some</span>(r),
+                    GenericArgKind::Type(<span class="kw">_</span>) | GenericArgKind::Const(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+                })
+                .chain(std::iter::once(<span class="self">self</span>.tcx.lifetimes.re_static))
+                .collect(),
+        );
+
+        concrete_ty.visit_with(<span class="kw-2">&amp;mut </span>ConstrainOpaqueTypeRegionVisitor {
+            op: |r| <span class="self">self</span>.member_constraint(opaque_type_key, span, concrete_ty, r, <span class="kw-2">&amp;</span>choice_regions),
+        });
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;trace&quot;</span>, ret)]
+    </span><span class="kw">pub fn </span>opaque_type_origin(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_hir/hir/enum.OpaqueTyOrigin.html">OpaqueTyOrigin</a>&gt; {
+        <span class="kw">let </span>opaque_hir_id = <span class="self">self</span>.tcx.hir().local_def_id_to_hir_id(def_id);
+        <span class="kw">let </span>parent_def_id = <span class="kw">match </span><span class="self">self</span>.defining_use_anchor {
+            DefiningAnchor::Bubble | DefiningAnchor::Error =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+            DefiningAnchor::Bind(bind) =&gt; bind,
+        };
+        <span class="kw">let </span>item_kind = <span class="kw-2">&amp;</span><span class="self">self</span>.tcx.hir().expect_item(def_id).kind;
+
+        <span class="kw">let </span>hir::ItemKind::OpaqueTy(hir::OpaqueTy { origin, ..  }) = item_kind <span class="kw">else </span>{
+            <span class="macro">span_bug!</span>(
+                span,
+                <span class="string">&quot;weird opaque type: {:#?}, {:#?}&quot;</span>,
+                def_id,
+                item_kind
+            )
+        };
+        <span class="kw">let </span>in_definition_scope = <span class="kw">match </span><span class="kw-2">*</span>origin {
+            <span class="comment">// Async `impl Trait`
+            </span>hir::OpaqueTyOrigin::AsyncFn(parent) =&gt; parent == parent_def_id,
+            <span class="comment">// Anonymous `impl Trait`
+            </span>hir::OpaqueTyOrigin::FnReturn(parent) =&gt; parent == parent_def_id,
+            <span class="comment">// Named `type Foo = impl Bar;`
+            </span>hir::OpaqueTyOrigin::TyAlias =&gt; {
+                may_define_opaque_type(<span class="self">self</span>.tcx, parent_def_id, opaque_hir_id)
+            }
+        };
+        <span class="macro">trace!</span>(<span class="question-mark">?</span>origin);
+        in_definition_scope.then_some(<span class="kw-2">*</span>origin)
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;trace&quot;</span>, ret)]
+    </span><span class="kw">fn </span>opaque_ty_origin_unchecked(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="../../../rustc_hir/hir/enum.OpaqueTyOrigin.html">OpaqueTyOrigin</a> {
+        <span class="kw">match </span><span class="self">self</span>.tcx.hir().expect_item(def_id).kind {
+            hir::ItemKind::OpaqueTy(hir::OpaqueTy { origin, .. }) =&gt; origin,
+            <span class="kw-2">ref </span>itemkind =&gt; {
+                <span class="macro">span_bug!</span>(span, <span class="string">&quot;weird opaque type: {:?}, {:#?}&quot;</span>, def_id, itemkind)
+            }
+        }
+    }
+}
+
+<span class="comment">// Visitor that requires that (almost) all regions in the type visited outlive
+// `least_region`. We cannot use `push_outlives_components` because regions in
+// closure signatures are not included in their outlives components. We need to
+// ensure all regions outlive the given bound so that we don&#39;t end up with,
+// say, `ReVar` appearing in a return type and causing ICEs when other
+// functions end up with region constraints involving regions from other
+// functions.
+//
+// We also cannot use `for_each_free_region` because for closures it includes
+// the regions parameters from the enclosing item.
+//
+// We ignore any type parameters because impl trait values are assumed to
+// capture all the in-scope type parameters.
+</span><span class="kw">struct </span>ConstrainOpaqueTypeRegionVisitor&lt;OP&gt; {
+    op: OP,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, OP&gt; TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ConstrainOpaqueTypeRegionVisitor&lt;OP&gt;
+<span class="kw">where
+    </span>OP: FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+{
+    <span class="kw">fn </span>visit_binder&lt;T: TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: <span class="kw-2">&amp;</span>ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <a href="#458">t</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">super_visit_with</a>(<a class="self" href="#457">self</a>);
+        ControlFlow::CONTINUE
+    }
+
+    <span class="kw">fn </span>visit_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#464">r</a> {
+            <span class="comment">// ignore bound regions, keep visiting
+            </span>ty::ReLateBound(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; ControlFlow::CONTINUE,
+            <span class="kw">_ </span>=&gt; {
+                (<a class="self" href="#464">self</a>.op)(<a href="#464">r</a>);
+                ControlFlow::CONTINUE
+            }
+        }
+    }
+
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="comment">// We&#39;re only interested in types involving regions
+        </span><span class="kw">if </span>!ty.flags().intersects(ty::TypeFlags::HAS_FREE_REGIONS) {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span><a href="#475">ty</a>.kind() {
+            ty::Closure(<span class="kw">_</span>, <span class="kw-2">ref </span>substs) =&gt; {
+                <span class="comment">// Skip lifetime parameters of the enclosing item(s)
+
+                </span><a href="#482">substs</a>.as_closure().tupled_upvars_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+                <a href="#482">substs</a>.as_closure().sig_as_fn_ptr_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+            }
+
+            ty::Generator(<span class="kw">_</span>, <span class="kw-2">ref </span>substs, <span class="kw">_</span>) =&gt; {
+                <span class="comment">// Skip lifetime parameters of the enclosing item(s)
+                // Also skip the witness type, because that has no free regions.
+
+                </span><a href="#489">substs</a>.as_generator().tupled_upvars_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+                <a href="#489">substs</a>.as_generator().return_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+                <a href="#489">substs</a>.as_generator().yield_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+                <a href="#489">substs</a>.as_generator().resume_ty().<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#475">self</a>);
+            }
+            <span class="kw">_ </span>=&gt; {
+                <a href="#475">ty</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">super_visit_with</a>(<a class="self" href="#475">self</a>);
+            }
+        }
+
+        ControlFlow::CONTINUE
+    }
+}
+
+<span class="kw">pub enum </span>UseKind {
+    DefiningUse,
+    OpaqueUse,
+}
+
+<span class="kw">impl </span><a href="#507">UseKind</a> {
+    <span class="kw">pub fn </span>is_defining(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#513">self</a> </span>{
+            <a href="#508">UseKind::DefiningUse</a> =&gt; <span class="bool-val">true</span>,
+            <a href="#509">UseKind::OpaqueUse</a> =&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; InferCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>register_hidden_type(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        opaque_type_key: OpaqueTypeKey&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cause: ObligationCause&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        hidden_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        origin: <a href="../../../rustc_hir/hir/enum.OpaqueTyOrigin.html">hir::OpaqueTyOrigin</a>,
+    ) -&gt; InferResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt; {
+        <span class="kw">let </span>tcx = <span class="self">self</span>.tcx;
+        <span class="kw">let </span>OpaqueTypeKey { def_id, substs } = opaque_type_key;
+
+        <span class="comment">// Ideally, we&#39;d get the span where *this specific `ty` came
+        // from*, but right now we just use the span from the overall
+        // value being folded. In simple cases like `-&gt; impl Foo`,
+        // these are the same span, but not in cases like `-&gt; (impl
+        // Foo, impl Bar)`.
+        </span><span class="kw">let </span>span = cause.span;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>obligations = <span class="macro">vec!</span>[];
+        <span class="kw">let </span>prev = <span class="self">self</span>.inner.borrow_mut().opaque_types().register(
+            OpaqueTypeKey { def_id, substs },
+            OpaqueHiddenType { ty: hidden_ty, span },
+            origin,
+        );
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(prev) = prev {
+            obligations = <span class="self">self</span>.at(<span class="kw-2">&amp;</span>cause, param_env).eq(prev, hidden_ty)<span class="question-mark">?</span>.obligations;
+        }
+
+        <span class="kw">let </span>item_bounds = tcx.bound_explicit_item_bounds(def_id.to_def_id());
+
+        <span class="kw">for </span>predicate <span class="kw">in </span>item_bounds.transpose_iter().map(|e| e.map_bound(|(p, <span class="kw">_</span>)| <span class="kw-2">*</span>p)) {
+            <span class="macro">debug!</span>(<span class="question-mark">?</span>predicate);
+            <span class="kw">let </span>predicate = predicate.subst(tcx, substs);
+
+            <span class="kw">let </span>predicate = predicate.fold_with(<span class="kw-2">&amp;mut </span>BottomUpFolder {
+                tcx,
+                ty_op: |ty| <span class="kw">match </span><span class="kw-2">*</span>ty.kind() {
+                    <span class="comment">// We can&#39;t normalize associated types from `rustc_infer`,
+                    // but we can eagerly register inference variables for them.
+                    </span>ty::Projection(projection_ty) <span class="kw">if </span>!projection_ty.has_escaping_bound_vars() =&gt; {
+                        <span class="self">self</span>.infer_projection(
+                            param_env,
+                            projection_ty,
+                            cause.clone(),
+                            <span class="number">0</span>,
+                            <span class="kw-2">&amp;mut </span>obligations,
+                        )
+                    }
+                    <span class="comment">// Replace all other mentions of the same opaque type with the hidden type,
+                    // as the bounds must hold on the hidden type after all.
+                    </span>ty::Opaque(def_id2, substs2)
+                        <span class="kw">if </span>def_id.to_def_id() == def_id2 &amp;&amp; substs == substs2 =&gt;
+                    {
+                        hidden_ty
+                    }
+                    <span class="kw">_ </span>=&gt; ty,
+                },
+                lt_op: |lt| lt,
+                ct_op: |ct| ct,
+            });
+
+            <span class="kw">if let </span>ty::PredicateKind::Projection(projection) = predicate.kind().skip_binder() {
+                <span class="kw">if </span>projection.term.references_error() {
+                    <span class="comment">// No point on adding these obligations since there&#39;s a type error involved.
+                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(InferOk { value: (), obligations: <span class="macro">vec!</span>[] });
+                }
+                <span class="macro">trace!</span>(<span class="string">&quot;{:#?}&quot;</span>, projection.term);
+            }
+            <span class="comment">// Require that the predicate holds for the concrete type.
+            </span><span class="macro">debug!</span>(<span class="question-mark">?</span>predicate);
+            obligations.push(traits::Obligation::new(cause.clone(), param_env, predicate));
+        }
+        <span class="prelude-val">Ok</span>(InferOk { value: (), obligations })
+    }
+}
+
+<span class="doccomment">/// Returns `true` if `opaque_hir_id` is a sibling or a child of a sibling of `def_id`.
+///
+/// Example:
+/// ```ignore UNSOLVED (is this a bug?)
+/// # #![feature(type_alias_impl_trait)]
+/// pub mod foo {
+///     pub mod bar {
+///         pub trait Bar { /* ... */ }
+///         pub type Baz = impl Bar;
+///
+///         # impl Bar for () {}
+///         fn f1() -&gt; Baz { /* ... */ }
+///     }
+///     fn f2() -&gt; bar::Baz { /* ... */ }
+/// }
+/// ```
+///
+/// Here, `def_id` is the `LocalDefId` of the defining use of the opaque type (e.g., `f1` or `f2`),
+/// and `opaque_hir_id` is the `HirId` of the definition of the opaque type `Baz`.
+/// For the above example, this function returns `true` for `f1` and `false` for `f2`.
+</span><span class="kw">fn </span>may_define_opaque_type(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, opaque_hir_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>hir_id = <a href="#619">tcx</a>.hir().local_def_id_to_hir_id(<a href="#619">def_id</a>);
+
+    <span class="comment">// Named opaque types can be defined by any siblings or children of siblings.
+    </span><span class="kw">let </span>scope = <a href="#619">tcx</a>.hir().get_defining_scope(<a href="#619">opaque_hir_id</a>);
+    <span class="comment">// We walk up the node tree until we hit the root or the scope of the opaque type.
+    </span><span class="kw">while </span>hir_id != scope &amp;&amp; hir_id != hir::CRATE_HIR_ID {
+        hir_id = tcx.hir().local_def_id_to_hir_id(tcx.hir().get_parent_item(hir_id));
+    }
+    <span class="comment">// Syntactically, we are allowed to define the concrete type if:
+    </span><span class="kw">let </span>res = <a href="#620">hir_id</a> == <a href="#623">scope</a>;
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(
+        <span class="string">&quot;may_define_opaque_type(def={:?}, opaque_node={:?}) = {}&quot;</span>,
+        tcx.hir().find(hir_id),
+        tcx.hir().get(opaque_hir_id),
+        res
+    );
+    <a href="#629">res</a>
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

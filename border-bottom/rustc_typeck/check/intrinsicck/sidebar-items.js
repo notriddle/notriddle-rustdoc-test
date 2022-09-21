@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["unpack_option_like","If the type is `Option<T>`, it will return `T`, otherwise the type itself. Works on most `Option`-like types."]],"struct":[["InlineAsmCtxt",""]]};

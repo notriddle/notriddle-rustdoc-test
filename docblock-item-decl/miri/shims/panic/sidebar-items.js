@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["CatchUnwindData","Holds all of the relevant data for when unwinding hits a `try` frame."]],"trait":[["EvalContextExt",""]]};

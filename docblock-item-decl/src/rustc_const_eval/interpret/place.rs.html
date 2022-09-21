@@ -1,0 +1,1796 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/interpret/place.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>place.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Computations on places -- field projections, going from mir::Place, and writing
+//! into a place.
+//! All high-level functions to write to memory work on places as destinations.
+
+</span><span class="kw">use </span><a href="../../../rustc_ast/ast/enum.Mutability.html">rustc_ast::Mutability</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/mir/index.html">rustc_middle::mir</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/ty/index.html">rustc_middle::ty</a>;
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">LayoutOf</a>, <a href="../../../rustc_middle/ty/layout/trait.PrimitiveExt.html">PrimitiveExt</a>, <a href="../../../rustc_middle/ty/layout/type.TyAndLayout.html">TyAndLayout</a>};
+<span class="kw">use </span>rustc_target::abi::{<a class="self" href="../../../rustc_target/abi/index.html">self</a>, <a href="../../../rustc_target/abi/enum.Abi.html">Abi</a>, <a href="../../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>, <a href="../../../rustc_target/abi/struct.Size.html">Size</a>, <a href="../../../rustc_target/abi/enum.TagEncoding.html">TagEncoding</a>, <a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>};
+
+<span class="kw">use super</span>::{
+    <a href="../../../rustc_const_eval/interpret/fn.alloc_range.html">alloc_range</a>, <a href="eval_context.rs.html#345-350">mir_assign_valid_types</a>, AllocId, <a href="memory.rs.html#115">AllocRef</a>, <a href="memory.rs.html#123">AllocRefMut</a>, <a href="../../../rustc_const_eval/interpret/enum.CheckInAllocMsg.html">CheckInAllocMsg</a>,
+    <a href="../../../rustc_const_eval/interpret/struct.ConstAlloc.html">ConstAlloc</a>, <a href="operand.rs.html#88">ImmTy</a>, <a href="operand.rs.html#26">Immediate</a>, <a href="eval_context.rs.html#28">InterpCx</a>, <a href="../../../rustc_const_eval/interpret/type.InterpResult.html">InterpResult</a>, <a href="machine.rs.html#84">Machine</a>, <a href="memory.rs.html#27">MemoryKind</a>, <a href="operand.rs.html#151">OpTy</a>, <a href="operand.rs.html#145">Operand</a>,
+    <a href="../../../rustc_const_eval/interpret/struct.Pointer.html">Pointer</a>, <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>, <a href="../../../rustc_const_eval/interpret/enum.Scalar.html">Scalar</a>,
+};
+
+<span class="attribute">#[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
+</span><span class="doccomment">/// Information required for the sound usage of a `MemPlace`.
+</span><span class="kw">pub enum </span>MemPlaceMeta&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt; {
+    <span class="doccomment">/// The unsized payload (e.g. length for slices or vtable pointer for trait objects).
+    </span>Meta(Scalar&lt;Prov&gt;),
+    <span class="doccomment">/// `Sized` types or unsized `extern type`
+    </span><span class="prelude-val">None</span>,
+}
+
+<span class="kw">impl</span>&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; MemPlaceMeta&lt;Prov&gt; {
+    <span class="kw">pub fn </span>unwrap_meta(<span class="self">self</span>) -&gt; Scalar&lt;Prov&gt; {
+        <span class="kw">match </span><span class="self"><a href="#27">self</a> </span>{
+            <span class="self">Self</span>::Meta(s) =&gt; <a href="#29">s</a>,
+            <span class="self">Self</span>::None =&gt; {
+                <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;expected wide pointer extra data (e.g. slice length or trait object vtable)&quot;</span>)
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>has_meta(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#36">self</a> </span>{
+            <span class="self">Self</span>::Meta(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            <span class="self">Self</span>::None =&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+
+<span class="attribute">#[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
+</span><span class="kw">pub struct </span>MemPlace&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt; {
+    <span class="doccomment">/// The pointer can be a pure integer, with the `None` provenance.
+    </span><span class="kw">pub </span>ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;Prov&gt;&gt;,
+    <span class="doccomment">/// Metadata for unsized places. Interpretation is up to the type.
+    /// Must not be present for sized types, but can be missing for unsized types
+    /// (e.g., `extern type`).
+    </span><span class="kw">pub </span>meta: MemPlaceMeta&lt;Prov&gt;,
+}
+
+<span class="doccomment">/// A MemPlace with its layout. Constructing it is only possible in this module.
+</span><span class="attribute">#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
+</span><span class="kw">pub struct </span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt; {
+    mplace: MemPlace&lt;Prov&gt;,
+    <span class="kw">pub </span>layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="doccomment">/// rustc does not have a proper way to represent the type of a field of a `repr(packed)` struct:
+    /// it needs to have a different alignment than the field type would usually have.
+    /// So we represent this here with a separate field that &quot;overwrites&quot; `layout.align`.
+    /// This means `layout.align` should never be used for a `MPlaceTy`!
+    </span><span class="kw">pub </span>align: <a href="../../../rustc_target/abi/struct.Align.html">Align</a>,
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">pub enum </span>Place&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt; {
+    <span class="doccomment">/// A place referring to a value allocated in the `Memory` system.
+    </span>Ptr(MemPlace&lt;Prov&gt;),
+
+    <span class="doccomment">/// To support alloc-free locals, we are able to write directly to a local.
+    /// (Without that optimization, we&#39;d just always be a `MemPlace`.)
+    </span>Local { frame: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, local: <a href="../../../rustc_middle/mir/struct.Local.html">mir::Local</a> },
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt; {
+    place: Place&lt;Prov&gt;, <span class="comment">// Keep this private; it helps enforce invariants.
+    </span><span class="kw">pub </span>layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="doccomment">/// rustc does not have a proper way to represent the type of a field of a `repr(packed)` struct:
+    /// it needs to have a different alignment than the field type would usually have.
+    /// So we represent this here with a separate field that &quot;overwrites&quot; `layout.align`.
+    /// This means `layout.align` should never be used for a `PlaceTy`!
+    </span><span class="kw">pub </span>align: <a href="../../../rustc_target/abi/struct.Align.html">Align</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; <a href="https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html">std::ops::Deref</a> <span class="kw">for </span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="kw">type </span>Target = Place&lt;Prov&gt;;
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Place&lt;Prov&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#90">self</a>.place
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; <a href="https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html">std::ops::Deref</a> <span class="kw">for </span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="kw">type </span>Target = MemPlace&lt;Prov&gt;;
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>MemPlace&lt;Prov&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#98">self</a>.mplace
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; From&lt;MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;&gt; <span class="kw">for </span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>from(mplace: MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#77">PlaceTy</a> { place: <a href="#69">Place::Ptr</a>(<span class="kw-2">*</span><a href="#105">mplace</a>), layout: <a href="#105">mplace</a>.layout, align: <a href="#105">mplace</a>.align }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;&gt; <span class="kw">for </span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>from(mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#77">PlaceTy</a> { place: <a href="#69">Place::Ptr</a>(<span class="kw-2">**</span><a href="#112">mplace</a>), layout: <a href="#112">mplace</a>.layout, align: <a href="#112">mplace</a>.align }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span><span class="kw-2">mut </span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;&gt; <span class="kw">for </span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>from(mplace: <span class="kw-2">&amp;mut </span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#77">PlaceTy</a> { place: <a href="#69">Place::Ptr</a>(<span class="kw-2">**</span><a href="#119">mplace</a>), layout: <a href="#119">mplace</a>.layout, align: <a href="#119">mplace</a>.align }
+    }
+}
+
+<span class="kw">impl</span>&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; MemPlace&lt;Prov&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>from_ptr(ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;Prov&gt;&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#45">MemPlace</a> { <a href="#126">ptr</a>, meta: <a href="#23">MemPlaceMeta::None</a> }
+    }
+
+    <span class="doccomment">/// Adjust the provenance of the main pointer (metadata is unaffected).
+    </span><span class="kw">pub fn </span>map_provenance(<span class="self">self</span>, f: <span class="kw">impl </span>FnOnce(<span class="prelude-ty">Option</span>&lt;Prov&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Prov&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#45">MemPlace</a> { ptr: <a class="self" href="#131">self</a>.ptr.map_provenance(<a href="#131">f</a>), ..<span class="self"><a href="#131">self</a> </span>}
+    }
+
+    <span class="doccomment">/// Turn a mplace into a (thin or wide) pointer, as a reference, pointing to the same space.
+    /// This is the inverse of `ref_to_mplace`.
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>to_ref(<span class="self">self</span>, cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>) -&gt; Immediate&lt;Prov&gt; {
+        <span class="kw">match </span><a class="self" href="#138">self</a>.meta {
+            <a href="#23">MemPlaceMeta::None</a> =&gt; Immediate::from(Scalar::from_maybe_pointer(<a class="self" href="#138">self</a>.ptr, <a href="#138">cx</a>)),
+            <a href="#21">MemPlaceMeta::Meta</a>(meta) =&gt; {
+                <a href="operand.rs.html#31">Immediate::ScalarPair</a>(Scalar::from_maybe_pointer(<a class="self" href="#138">self</a>.ptr, <a href="#138">cx</a>).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#141">meta</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+            }
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>offset_with_meta&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+        <span class="self">self</span>,
+        offset: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+        meta: MemPlaceMeta&lt;Prov&gt;,
+        cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt; {
+        <span class="prelude-val">Ok</span>(<a href="#45">MemPlace</a> { ptr: <span class="self">self</span>.ptr.offset(offset, cx)<span class="question-mark">?</span>, <a href="#151">meta</a> })
+    }
+}
+
+<span class="kw">impl</span>&lt;Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; Place&lt;Prov&gt; {
+    <span class="doccomment">/// Asserts that this points to some local variable.
+    /// Returns the frame idx and the variable idx.
+    </span><span class="attribute">#[inline]
+    #[cfg_attr(debug_assertions, track_caller)] </span><span class="comment">// only in debug builds due to perf (see #98980)
+    </span><span class="kw">pub fn </span>assert_local(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <a href="../../../rustc_middle/mir/struct.Local.html">mir::Local</a>) {
+        <span class="kw">match </span><span class="self"><a href="#163">self</a> </span>{
+            <a href="#73">Place::Local</a> { frame, local } =&gt; (<span class="kw-2">*</span><a href="#165">frame</a>, <span class="kw-2">*</span><a href="#165">local</a>),
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;assert_local: expected Place::Local, got {:?}&quot;</span>, <span class="self">self</span>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="doccomment">/// Produces a MemPlace that works for ZST but nothing else.
+    /// Conceptually this is a new allocation, but it doesn&#39;t actually create an allocation so you
+    /// don&#39;t need to worry about memory leaks.
+    </span><span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>fake_alloc_zst(layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(layout.is_zst());
+        <span class="kw">let </span>align = <a href="#176">layout</a>.align.abi;
+        <span class="kw">let </span>ptr = Pointer::from_addr(<a href="#178">align</a>.bytes()); <span class="comment">// no provenance, absolute address
+        </span><a href="#56">MPlaceTy</a> { mplace: <a href="#45">MemPlace</a> { <a href="#179">ptr</a>, meta: <a href="#23">MemPlaceMeta::None</a> }, <a href="#176">layout</a>, <a href="#178">align</a> }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>offset_with_meta(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        offset: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+        meta: MemPlaceMeta&lt;Prov&gt;,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt; {
+        <span class="prelude-val">Ok</span>(<a href="#56">MPlaceTy</a> {
+            mplace: <span class="self">self</span>.mplace.offset_with_meta(offset, meta, cx)<span class="question-mark">?</span>,
+            align: <a class="self" href="#185">self</a>.align.restrict_for_offset(<a href="#186">offset</a>),
+            <a href="#188">layout</a>,
+        })
+    }
+
+    <span class="kw">pub fn </span>offset(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        offset: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized());
+        <a class="self" href="#199">self</a>.<a href="#184-190">offset_with_meta</a>(<a href="#200">offset</a>, <a href="#23">MemPlaceMeta::None</a>, <a href="#201">layout</a>, <a href="#202">cx</a>)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>from_aligned_ptr(ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;Prov&gt;&gt;, layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#56">MPlaceTy</a> { mplace: MemPlace::from_ptr(<a href="#209">ptr</a>), <a href="#209">layout</a>, align: <a href="#209">layout</a>.align.abi }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>from_aligned_ptr_with_meta(
+        ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;Prov&gt;&gt;,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        meta: MemPlaceMeta&lt;Prov&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>mplace = MemPlace::from_ptr(<a href="#215">ptr</a>);
+        <a href="#219">mplace</a>.meta = <a href="#217">meta</a>;
+
+        <a href="#56">MPlaceTy</a> { <a href="#219">mplace</a>, <a href="#216">layout</a>, align: <a href="#216">layout</a>.align.abi }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span><span class="kw">impl </span><a href="../../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt; {
+        <span class="kw">if </span><span class="self">self</span>.layout.is_unsized() {
+            <span class="comment">// We need to consult `meta` metadata
+            </span><span class="kw">match </span><a class="self" href="#226">self</a>.layout.ty.kind() {
+                ty::Slice(..) | ty::Str =&gt; <a class="self" href="#226">self</a>.mplace.meta.<a href="#27">unwrap_meta</a>().to_machine_usize(<a href="#226">cx</a>),
+                <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;len not supported on unsized type {:?}&quot;</span>, <span class="self">self</span>.layout.ty),
+            }
+        } <span class="kw">else </span>{
+            <span class="comment">// Go through the layout.  There are lots of types that support a length,
+            // e.g., SIMD types. (But not all repr(simd) types even have FieldsShape::Array!)
+            </span><span class="kw">match </span><a class="self" href="#226">self</a>.layout.fields {
+                <a href="../../../rustc_target/abi/enum.FieldsShape.html">abi::FieldsShape::Array</a> { count, .. } =&gt; <span class="prelude-val">Ok</span>(<a href="#237">count</a>),
+                <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;len not supported on sized type {:?}&quot;</span>, <span class="self">self</span>.layout.ty),
+            }
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>vtable(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Scalar&lt;Prov&gt; {
+        <span class="kw">match </span><a class="self" href="#244">self</a>.layout.ty.kind() {
+            ty::Dynamic(..) =&gt; <a class="self" href="#244">self</a>.mplace.meta.<a href="#27">unwrap_meta</a>(),
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;vtable not supported on type {:?}&quot;</span>, <span class="self">self</span>.layout.ty),
+        }
+    }
+}
+
+<span class="comment">// These are defined here because they produce a place.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; OpTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>try_as_mplace(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;, ImmTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;&gt; {
+        <span class="kw">match </span><span class="kw-2">**</span><span class="self"><a href="#255">self</a> </span>{
+            <a href="operand.rs.html#147">Operand::Indirect</a>(mplace) =&gt; {
+                <span class="prelude-val">Ok</span>(<a href="#56">MPlaceTy</a> { <a href="#257">mplace</a>, layout: <a class="self" href="#255">self</a>.layout, align: <a class="self" href="#255">self</a>.align.unwrap() })
+            }
+            <a href="operand.rs.html#146">Operand::Immediate</a>(imm) =&gt; <span class="prelude-val">Err</span>(ImmTy::from_immediate(<a href="#260">imm</a>, <a class="self" href="#255">self</a>.layout)),
+        }
+    }
+
+    <span class="attribute">#[inline(always)]
+    #[cfg_attr(debug_assertions, track_caller)] </span><span class="comment">// only in debug builds due to perf (see #98980)
+    </span><span class="kw">pub fn </span>assert_mem_place(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+        <a class="self" href="#266">self</a>.<a href="#255">try_as_mplace</a>().unwrap()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a>&gt; PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+    <span class="doccomment">/// A place is either an mplace or some local.
+    </span><span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>try_as_mplace(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt;, (<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <a href="../../../rustc_middle/mir/struct.Local.html">mir::Local</a>)&gt; {
+        <span class="kw">match </span><span class="kw-2">**</span><span class="self"><a href="#274">self</a> </span>{
+            <a href="#69">Place::Ptr</a>(mplace) =&gt; <span class="prelude-val">Ok</span>(<a href="#56">MPlaceTy</a> { <a href="#276">mplace</a>, layout: <a class="self" href="#274">self</a>.layout, align: <a class="self" href="#274">self</a>.align }),
+            <a href="#73">Place::Local</a> { frame, local } =&gt; <span class="prelude-val">Err</span>((<a href="#277">frame</a>, <a href="#277">local</a>)),
+        }
+    }
+
+    <span class="attribute">#[inline(always)]
+    #[cfg_attr(debug_assertions, track_caller)] </span><span class="comment">// only in debug builds due to perf (see #98980)
+    </span><span class="kw">pub fn </span>assert_mem_place(<span class="self">self</span>) -&gt; MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, Prov&gt; {
+        <a class="self" href="#283">self</a>.<a href="#274">try_as_mplace</a>().unwrap()
+    }
+}
+
+<span class="comment">// FIXME: Working around https://github.com/rust-lang/rust/issues/54385
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, Prov, M&gt; InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;
+<span class="kw">where
+    </span>Prov: <a href="../../../rustc_const_eval/interpret/trait.Provenance.html">Provenance</a> + <span class="lifetime">&#39;static</span>,
+    M: Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, Provenance = Prov&gt;,
+{
+    <span class="doccomment">/// Take a value, which represents a (thin or wide) reference, and make it a place.
+    /// Alignment is just based on the type.  This is the inverse of `MemPlace::to_ref()`.
+    ///
+    /// Only call this if you are sure the place is &quot;valid&quot; (aligned and inbounds), or do not
+    /// want to ever use the place for memory access!
+    /// Generally prefer `deref_operand`.
+    </span><span class="kw">pub fn </span>ref_to_mplace(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        val: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span>pointee_type =
+            <a href="#302">val</a>.layout.ty.builtin_deref(<span class="bool-val">true</span>).expect(<span class="string">&quot;`ref_to_mplace` called on non-ptr type&quot;</span>).ty;
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(pointee_type)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(ptr, meta) = <span class="kw">match </span><span class="kw-2">**</span><a href="#302">val</a> {
+            <a href="operand.rs.html#28">Immediate::Scalar</a>(ptr) =&gt; (<a href="#308">ptr</a>, <a href="#23">MemPlaceMeta::None</a>),
+            <a href="operand.rs.html#31">Immediate::ScalarPair</a>(ptr, meta) =&gt; (<a href="#309">ptr</a>, <a href="#21">MemPlaceMeta::Meta</a>(<a href="#309">meta</a>)),
+            <a href="operand.rs.html#33">Immediate::Uninit</a> =&gt; <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub.html">throw_ub!</a>(InvalidUninitBytes(<span class="prelude-val">None</span>)),
+        };
+
+        <span class="kw">let </span>mplace = <a href="#45">MemPlace</a> { ptr: ptr.to_pointer(<span class="self">self</span>)<span class="question-mark">?</span>, <a href="#307">meta</a> };
+        <span class="comment">// When deref&#39;ing a pointer, the *static* alignment given by the type is what matters.
+        </span><span class="kw">let </span>align = <a href="#306">layout</a>.align.abi;
+        <span class="prelude-val">Ok</span>(<a href="#56">MPlaceTy</a> { <a href="#313">mplace</a>, <a href="#306">layout</a>, <a href="#315">align</a> })
+    }
+
+    <span class="doccomment">/// Take an operand, representing a pointer, and dereference it to a place -- that
+    /// will always be a MemPlace.  Lives in `place.rs` because it creates a place.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>deref_operand(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        src: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span>val = <span class="self">self</span>.read_immediate(src)<span class="question-mark">?</span>;
+        <span class="macro">trace!</span>(<span class="string">&quot;deref to {} on {:?}&quot;</span>, val.layout.ty, <span class="kw-2">*</span>val);
+
+        <span class="kw">if </span>val.layout.ty.is_box() {
+            <span class="macro">bug!</span>(<span class="string">&quot;dereferencing {:?}&quot;</span>, val.layout.ty);
+        }
+
+        <span class="kw">let </span>mplace = <span class="self">self</span>.ref_to_mplace(<span class="kw-2">&amp;</span>val)<span class="question-mark">?</span>;
+        <span class="self">self</span>.check_mplace_access(mplace, CheckInAllocMsg::DerefTest)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(mplace)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>get_place_alloc(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="prelude-ty">Option</span>&lt;AllocRef&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>, M::Provenance, M::AllocExtra&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!place.layout.is_unsized());
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!place.meta.has_meta());
+        <span class="kw">let </span>size = <a href="#341">place</a>.layout.size;
+        <a class="self" href="#340">self</a>.<a href="memory.rs.html#558-563">get_ptr_alloc</a>(<a href="#341">place</a>.ptr, <a href="#345">size</a>, <a href="#341">place</a>.align)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>get_place_alloc_mut(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="prelude-ty">Option</span>&lt;AllocRefMut&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>, M::Provenance, M::AllocExtra&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!place.layout.is_unsized());
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!place.meta.has_meta());
+        <span class="kw">let </span>size = <a href="#352">place</a>.layout.size;
+        <a class="self" href="#351">self</a>.<a href="memory.rs.html#630-635">get_ptr_alloc_mut</a>(<a href="#352">place</a>.ptr, <a href="#356">size</a>, <a href="#352">place</a>.align)
+    }
+
+    <span class="doccomment">/// Check if this mplace is dereferenceable and sufficiently aligned.
+    </span><span class="kw">fn </span>check_mplace_access(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        mplace: MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        msg: <a href="../../../rustc_const_eval/interpret/enum.CheckInAllocMsg.html">CheckInAllocMsg</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>(size, align) = <span class="self">self
+            </span>.size_and_align_of_mplace(<span class="kw-2">&amp;</span>mplace)<span class="question-mark">?
+            </span>.unwrap_or((<a href="#363">mplace</a>.layout.size, <a href="#363">mplace</a>.layout.align.abi));
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(mplace.align &lt;= align, <span class="string">&quot;dynamic alignment less strict than static one?&quot;</span>);
+        <span class="kw">let </span>align = M::enforce_alignment(<a class="self" href="#362">self</a>).then_some(<a href="#366">align</a>);
+        <span class="self">self</span>.check_ptr_access_align(mplace.ptr, size, align.unwrap_or(Align::ONE), msg)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Converts a repr(simd) place into a place where `place_index` accesses the SIMD elements.
+    /// Also returns the number of elements.
+    </span><span class="kw">pub fn </span>mplace_to_simd(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, (MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;, <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>)&gt; {
+        <span class="comment">// Basically we just transmute this place into an array following simd_size_and_type.
+        // (Transmuting is okay since this is an in-memory place. We also double-check the size
+        // stays the same.)
+        </span><span class="kw">let </span>(len, e_ty) = <a href="#379">mplace</a>.layout.ty.simd_size_and_type(<span class="kw-2">*</span><a class="self" href="#378">self</a>.tcx);
+        <span class="kw">let </span>array = <a class="self" href="#378">self</a>.tcx.mk_array(<a href="#384">e_ty</a>, <a href="#384">len</a>);
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(array)<span class="question-mark">?</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(layout.size, mplace.layout.size);
+        <span class="prelude-val">Ok</span>((<a href="#56">MPlaceTy</a> { <a href="#386">layout</a>, ..<span class="kw-2">*</span><a href="#379">mplace</a> }, <a href="#384">len</a>))
+    }
+
+    <span class="doccomment">/// Converts a repr(simd) place into a place where `place_index` accesses the SIMD elements.
+    /// Also returns the number of elements.
+    </span><span class="kw">pub fn </span>place_to_simd(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, (MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;, <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>)&gt; {
+        <span class="kw">let </span>mplace = <span class="self">self</span>.force_allocation(place)<span class="question-mark">?</span>;
+        <a class="self" href="#394">self</a>.<a href="#377-380">mplace_to_simd</a>(<span class="kw-2">&amp;</span><a href="#397">mplace</a>)
+    }
+
+    <span class="kw">pub fn </span>local_to_place(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        frame: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        local: <a href="../../../rustc_middle/mir/struct.Local.html">mir::Local</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of_local(<span class="kw-2">&amp;</span><span class="self">self</span>.stack()[frame], local, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>place = <a href="#73">Place::Local</a> { <a href="#403">frame</a>, <a href="#404">local</a> };
+        <span class="prelude-val">Ok</span>(<a href="#77">PlaceTy</a> { <a href="#407">place</a>, <a href="#406">layout</a>, align: <a href="#406">layout</a>.align.abi })
+    }
+
+    <span class="doccomment">/// Computes a place. You should only use this if you intend to write into this
+    /// place; for reading, a more efficient alternative is `eval_place_to_op`.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>eval_place(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        mir_place: mir::Place&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>place = <span class="self">self</span>.local_to_place(<span class="self">self</span>.frame_idx(), mir_place.local)<span class="question-mark">?</span>;
+        <span class="comment">// Using `try_fold` turned out to be bad for performance, hence the loop.
+        </span><span class="kw">for </span>elem <span class="kw">in </span>mir_place.projection.iter() {
+            place = <span class="self">self</span>.place_projection(<span class="kw-2">&amp;</span>place, elem)<span class="question-mark">?
+        </span>}
+
+        <span class="macro">trace!</span>(<span class="string">&quot;{:?}&quot;</span>, <span class="self">self</span>.dump_place(place.place));
+        <span class="comment">// Sanity-check the type we ended up with.
+        </span><span class="macro">debug_assert!</span>(
+            mir_assign_valid_types(
+                <span class="kw-2">*</span><span class="self">self</span>.tcx,
+                <span class="self">self</span>.param_env,
+                <span class="self">self</span>.layout_of(<span class="self">self</span>.subst_from_current_frame_and_normalize_erasing_regions(
+                    mir_place.ty(<span class="kw-2">&amp;</span><span class="self">self</span>.frame().body.local_decls, <span class="kw-2">*</span><span class="self">self</span>.tcx).ty
+                )<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+                place.layout,
+            ),
+            <span class="string">&quot;eval_place of a MIR place with type {:?} produced an interpreter place with type {:?}&quot;</span>,
+            mir_place.ty(<span class="kw-2">&amp;</span><span class="self">self</span>.frame().body.local_decls, <span class="kw-2">*</span><span class="self">self</span>.tcx).ty,
+            place.layout.ty,
+        );
+        <span class="prelude-val">Ok</span>(place)
+    }
+
+    <span class="doccomment">/// Write an immediate to a place
+    </span><span class="attribute">#[inline(always)]
+    #[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>write_immediate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        src: Immediate&lt;M::Provenance&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="self">self</span>.write_immediate_no_validate(src, dest)<span class="question-mark">?</span>;
+
+        <span class="kw">if </span>M::enforce_validity(<span class="self">self</span>) {
+            <span class="comment">// Data got changed, better make sure it matches the type!
+            </span><span class="self">self</span>.validate_operand(<span class="kw-2">&amp;</span><span class="self">self</span>.place_to_op(dest)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Write a scalar to a place
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>write_scalar(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        val: <span class="kw">impl </span>Into&lt;Scalar&lt;M::Provenance&gt;&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#463">self</a>.<a href="#445-449">write_immediate</a>(<a href="operand.rs.html#28">Immediate::Scalar</a>(<a href="#464">val</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()), <a href="#465">dest</a>)
+    }
+
+    <span class="doccomment">/// Write a pointer to a place
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>write_pointer(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ptr: <span class="kw">impl </span>Into&lt;Pointer&lt;<span class="prelude-ty">Option</span>&lt;M::Provenance&gt;&gt;&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#473">self</a>.<a href="#462-466">write_scalar</a>(Scalar::from_maybe_pointer(<a href="#474">ptr</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a class="self" href="#473">self</a>), <a href="#475">dest</a>)
+    }
+
+    <span class="doccomment">/// Write an immediate to a place.
+    /// If you use this you are responsible for validating that things got copied at the
+    /// right type.
+    </span><span class="kw">fn </span>write_immediate_no_validate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        src: Immediate&lt;M::Provenance&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!dest.layout.is_unsized(), <span class="string">&quot;Cannot write unsized data&quot;</span>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;write_immediate: {:?} &lt;- {:?}: {}&quot;</span>, <span class="kw-2">*</span>dest, src, dest.layout.ty);
+
+        <span class="comment">// See if we can avoid an allocation. This is the counterpart to `read_immediate_raw`,
+        // but not factored as a separate function.
+        </span><span class="kw">let </span>mplace = <span class="kw">match </span><a href="#486">dest</a>.place {
+            <a href="#73">Place::Local</a> { frame, local } =&gt; {
+                <span class="kw">match </span>M::access_local_mut(<span class="self">self</span>, frame, local)<span class="question-mark">? </span>{
+                    <a href="operand.rs.html#146">Operand::Immediate</a>(local) =&gt; {
+                        <span class="comment">// Local can be updated in-place.
+                        </span><span class="kw-2">*</span><a href="#496">local</a> = <a href="#485">src</a>;
+                        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+                    }
+                    <a href="operand.rs.html#147">Operand::Indirect</a>(mplace) =&gt; {
+                        <span class="comment">// The local is in memory, go on below.
+                        </span><span class="kw-2">*</span><a href="#501">mplace</a>
+                    }
+                }
+            }
+            <a href="#69">Place::Ptr</a>(mplace) =&gt; <a href="#507">mplace</a>, <span class="comment">// already referring to memory
+        </span>};
+
+        <span class="comment">// This is already in memory, write there.
+        </span><a class="self" href="#484">self</a>.<a href="#517-523">write_immediate_to_mplace_no_validate</a>(<a href="#485">src</a>, <a href="#486">dest</a>.layout, <a href="#486">dest</a>.align, <a href="#493">mplace</a>)
+    }
+
+    <span class="doccomment">/// Write an immediate to memory.
+    /// If you use this you are responsible for validating that things got copied at the
+    /// right layout.
+    </span><span class="kw">fn </span>write_immediate_to_mplace_no_validate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        value: Immediate&lt;M::Provenance&gt;,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        align: <a href="../../../rustc_target/abi/struct.Align.html">Align</a>,
+        dest: MemPlace&lt;M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Note that it is really important that the type here is the right one, and matches the
+        // type things are read at. In case `value` is a `ScalarPair`, we don&#39;t do any magic here
+        // to handle padding properly, which is only correct if we never look at this data with the
+        // wrong type.
+
+        </span><span class="kw">let </span>tcx = <span class="kw-2">*</span><a class="self" href="#518">self</a>.tcx;
+        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>alloc) = <span class="self">self</span>.get_place_alloc_mut(<span class="kw-2">&amp;</span>MPlaceTy { mplace: dest, layout, align })<span class="question-mark">? </span><span class="kw">else </span>{
+            <span class="comment">// zero-sized access
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        };
+
+        <span class="kw">match </span><a href="#519">value</a> {
+            <a href="operand.rs.html#28">Immediate::Scalar</a>(scalar) =&gt; {
+                <span class="kw">let </span>Abi::Scalar(s) = <a href="#520">layout</a>.abi <span class="kw">else </span>{ <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                        <span class="self">self</span>.cur_span(),
+                        <span class="string">&quot;write_immediate_to_mplace: invalid Scalar layout: {layout:#?}&quot;</span>,
+                    )
+                };
+                <span class="kw">let </span>size = <a href="#537">s</a>.size(<span class="kw-2">&amp;</span><a href="#529">tcx</a>);
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(size, layout.size, <span class="string">&quot;abi::Scalar size does not match layout size&quot;</span>);
+                <a href="#530">alloc</a>.<a href="memory.rs.html#903">write_scalar</a>(<a href="../../../rustc_const_eval/interpret/fn.alloc_range.html">alloc_range</a>(Size::ZERO, <a href="#542">size</a>), <a href="#536">scalar</a>)
+            }
+            <a href="operand.rs.html#31">Immediate::ScalarPair</a>(a_val, b_val) =&gt; {
+                <span class="comment">// We checked `ptr_align` above, so all fields will have the alignment they need.
+                // We would anyway check against `ptr_align.restrict_for_offset(b_offset)`,
+                // which `ptr.offset(b_offset)` cannot possibly fail to satisfy.
+                </span><span class="kw">let </span>Abi::ScalarPair(a, b) = <a href="#520">layout</a>.abi <span class="kw">else </span>{ <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                        <span class="self">self</span>.cur_span(),
+                        <span class="string">&quot;write_immediate_to_mplace: invalid ScalarPair layout: {:#?}&quot;</span>,
+                        layout
+                    )
+                };
+                <span class="kw">let </span>(a_size, b_size) = (<a href="#550">a</a>.size(<span class="kw-2">&amp;</span><a href="#529">tcx</a>), <a href="#550">b</a>.size(<span class="kw-2">&amp;</span><a href="#529">tcx</a>));
+                <span class="kw">let </span>b_offset = <a href="#556">a_size</a>.align_to(<a href="#550">b</a>.align(<span class="kw-2">&amp;</span><a href="#529">tcx</a>).abi);
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(b_offset.bytes() &gt; <span class="number">0</span>); <span class="comment">// in `operand_field` we use the offset to tell apart the fields
+
+                // It is tempting to verify `b_offset` against `layout.fields.offset(1)`,
+                // but that does not work: We could be a newtype around a pair, then the
+                // fields do not match the `ScalarPair` components.
+
+                </span>alloc.write_scalar(alloc_range(Size::ZERO, a_size), a_val)<span class="question-mark">?</span>;
+                <a href="#530">alloc</a>.<a href="memory.rs.html#903">write_scalar</a>(<a href="../../../rustc_const_eval/interpret/fn.alloc_range.html">alloc_range</a>(<a href="#557">b_offset</a>, <a href="#556">b_size</a>), <a href="#546">b_val</a>)
+            }
+            <a href="operand.rs.html#33">Immediate::Uninit</a> =&gt; <a href="#530">alloc</a>.<a href="memory.rs.html#918">write_uninit</a>(),
+        }
+    }
+
+    <span class="kw">pub fn </span>write_uninit(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>mplace = <span class="kw">match </span><a href="#571">dest</a>.<a href="#274">try_as_mplace</a>() {
+            <span class="prelude-val">Ok</span>(mplace) =&gt; <a href="#573">mplace</a>,
+            <span class="prelude-val">Err</span>((frame, local)) =&gt; {
+                <span class="kw">match </span>M::access_local_mut(<span class="self">self</span>, frame, local)<span class="question-mark">? </span>{
+                    <a href="operand.rs.html#146">Operand::Immediate</a>(local) =&gt; {
+                        <span class="kw-2">*</span><a href="#576">local</a> = <a href="operand.rs.html#33">Immediate::Uninit</a>;
+                        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+                    }
+                    <a href="operand.rs.html#147">Operand::Indirect</a>(mplace) =&gt; {
+                        <span class="comment">// The local is in memory, go on below.
+                        </span><a href="#56">MPlaceTy</a> { mplace: <span class="kw-2">*</span><a href="#580">mplace</a>, layout: <a href="#571">dest</a>.layout, align: <a href="#571">dest</a>.align }
+                    }
+                }
+            }
+        };
+        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>alloc) = <span class="self">self</span>.get_place_alloc_mut(<span class="kw-2">&amp;</span>mplace)<span class="question-mark">? </span><span class="kw">else </span>{
+            <span class="comment">// Zero-sized access
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        };
+        alloc.write_uninit()<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Copies the data from an operand to a place.
+    /// `allow_transmute` indicates whether the layouts may disagree.
+    </span><span class="attribute">#[inline(always)]
+    #[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>copy_op(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        src: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        allow_transmute: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="self">self</span>.copy_op_no_validate(src, dest, allow_transmute)<span class="question-mark">?</span>;
+
+        <span class="kw">if </span>M::enforce_validity(<span class="self">self</span>) {
+            <span class="comment">// Data got changed, better make sure it matches the type!
+            </span><span class="self">self</span>.validate_operand(<span class="kw-2">&amp;</span><span class="self">self</span>.place_to_op(dest)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Copies the data from an operand to a place.
+    /// `allow_transmute` indicates whether the layouts may disagree.
+    /// Also, if you use this you are responsible for validating that things get copied at the
+    /// right type.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">fn </span>copy_op_no_validate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        src: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        allow_transmute: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// We do NOT compare the types for equality, because well-typed code can
+        // actually &quot;transmute&quot; `&amp;mut T` to `&amp;T` in an assignment without a cast.
+        </span><span class="kw">let </span>layout_compat =
+            mir_assign_valid_types(<span class="kw-2">*</span><span class="self">self</span>.tcx, <span class="self">self</span>.param_env, src.layout, dest.layout);
+        <span class="kw">if </span>!allow_transmute &amp;&amp; !layout_compat {
+            <span class="macro">span_bug!</span>(
+                <span class="self">self</span>.cur_span(),
+                <span class="string">&quot;type mismatch when copying!\nsrc: {:?},\ndest: {:?}&quot;</span>,
+                src.layout.ty,
+                dest.layout.ty,
+            );
+        }
+
+        <span class="comment">// Let us see if the layout is simple so we take a shortcut,
+        // avoid force_allocation.
+        </span><span class="kw">let </span>src = <span class="kw">match </span><span class="self">self</span>.read_immediate_raw(src)<span class="question-mark">? </span>{
+            <span class="prelude-val">Ok</span>(src_val) =&gt; {
+                <span class="macro">assert!</span>(!src.layout.is_unsized(), <span class="string">&quot;cannot copy unsized immediates&quot;</span>);
+                <span class="macro">assert!</span>(
+                    !dest.layout.is_unsized(),
+                    <span class="string">&quot;the src is sized, so the dest must also be sized&quot;
+                </span>);
+                <span class="macro">assert_eq!</span>(src.layout.size, dest.layout.size);
+                <span class="comment">// Yay, we got a value that we can write directly.
+                </span><span class="kw">return if </span>layout_compat {
+                    <span class="self">self</span>.write_immediate_no_validate(<span class="kw-2">*</span>src_val, dest)
+                } <span class="kw">else </span>{
+                    <span class="comment">// This is tricky. The problematic case is `ScalarPair`: the `src_val` was
+                    // loaded using the offsets defined by `src.layout`. When we put this back into
+                    // the destination, we have to use the same offsets! So (a) we make sure we
+                    // write back to memory, and (b) we use `dest` *with the source layout*.
+                    </span><span class="kw">let </span>dest_mem = <span class="self">self</span>.force_allocation(dest)<span class="question-mark">?</span>;
+                    <span class="self">self</span>.write_immediate_to_mplace_no_validate(
+                        <span class="kw-2">*</span>src_val,
+                        src.layout,
+                        dest_mem.align,
+                        <span class="kw-2">*</span>dest_mem,
+                    )
+                };
+            }
+            <span class="prelude-val">Err</span>(mplace) =&gt; mplace,
+        };
+        <span class="comment">// Slow path, this does not fit into an immediate. Just memcpy.
+        </span><span class="macro">trace!</span>(<span class="string">&quot;copy_op: {:?} &lt;- {:?}: {}&quot;</span>, <span class="kw-2">*</span>dest, src, dest.layout.ty);
+
+        <span class="kw">let </span>dest = <span class="self">self</span>.force_allocation(<span class="kw-2">&amp;</span>dest)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="prelude-val">Some</span>((dest_size, <span class="kw">_</span>)) = <span class="self">self</span>.size_and_align_of_mplace(<span class="kw-2">&amp;</span>dest)<span class="question-mark">? </span><span class="kw">else </span>{
+            <span class="macro">span_bug!</span>(<span class="self">self</span>.cur_span(), <span class="string">&quot;copy_op needs (dynamically) sized values&quot;</span>)
+        };
+        <span class="kw">if </span><span class="macro">cfg!</span>(debug_assertions) {
+            <span class="kw">let </span>src_size = <span class="self">self</span>.size_and_align_of_mplace(<span class="kw-2">&amp;</span>src)<span class="question-mark">?</span>.unwrap().<span class="number">0</span>;
+            <span class="macro">assert_eq!</span>(src_size, dest_size, <span class="string">&quot;Cannot copy differently-sized data&quot;</span>);
+        } <span class="kw">else </span>{
+            <span class="comment">// As a cheap approximation, we compare the fixed parts of the size.
+            </span><span class="macro">assert_eq!</span>(src.layout.size, dest.layout.size);
+        }
+
+        <span class="self">self</span>.mem_copy(
+            src.ptr, src.align, dest.ptr, dest.align, dest_size, <span class="comment">/*nonoverlapping*/ </span><span class="bool-val">false</span>,
+        )
+    }
+
+    <span class="doccomment">/// Ensures that a place is in memory, and returns where it is.
+    /// If the place currently refers to a local that doesn&#39;t yet have a matching allocation,
+    /// create such an allocation.
+    /// This is essentially `force_to_memplace`.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>force_allocation(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span>mplace = <span class="kw">match </span>place.place {
+            Place::Local { frame, local } =&gt; {
+                <span class="kw">match </span>M::access_local_mut(<span class="self">self</span>, frame, local)<span class="question-mark">? </span>{
+                    <span class="kw-2">&amp;mut </span>Operand::Immediate(local_val) =&gt; {
+                        <span class="comment">// We need to make an allocation.
+
+                        // We need the layout of the local.  We can NOT use the layout we got,
+                        // that might e.g., be an inner field of a struct with `Scalar` layout,
+                        // that has different alignment than the outer field.
+                        </span><span class="kw">let </span>local_layout =
+                            <span class="self">self</span>.layout_of_local(<span class="kw-2">&amp;</span><span class="self">self</span>.stack()[frame], local, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                        <span class="kw">if </span>local_layout.is_unsized() {
+                            <span class="macro">throw_unsup_format!</span>(<span class="string">&quot;unsized locals are not supported&quot;</span>);
+                        }
+                        <span class="kw">let </span>mplace = <span class="kw-2">*</span><span class="self">self</span>.allocate(local_layout, MemoryKind::Stack)<span class="question-mark">?</span>;
+                        <span class="kw">if </span>!<span class="macro">matches!</span>(local_val, Immediate::Uninit) {
+                            <span class="comment">// Preserve old value. (As an optimization, we can skip this if it was uninit.)
+                            // We don&#39;t have to validate as we can assume the local
+                            // was already valid for its type.
+                            </span><span class="self">self</span>.write_immediate_to_mplace_no_validate(
+                                local_val,
+                                local_layout,
+                                local_layout.align.abi,
+                                mplace,
+                            )<span class="question-mark">?</span>;
+                        }
+                        <span class="comment">// Now we can call `access_mut` again, asserting it goes well,
+                        // and actually overwrite things.
+                        </span><span class="kw-2">*</span>M::access_local_mut(<span class="self">self</span>, frame, local).unwrap() =
+                            Operand::Indirect(mplace);
+                        mplace
+                    }
+                    <span class="kw-2">&amp;mut </span>Operand::Indirect(mplace) =&gt; mplace, <span class="comment">// this already was an indirect local
+                </span>}
+            }
+            Place::Ptr(mplace) =&gt; mplace,
+        };
+        <span class="comment">// Return with the original layout, so that the caller can go on
+        </span><span class="prelude-val">Ok</span>(MPlaceTy { mplace, layout: place.layout, align: place.align })
+    }
+
+    <span class="kw">pub fn </span>allocate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        kind: MemoryKind&lt;M::MemoryKind&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized());
+        <span class="kw">let </span>ptr = <span class="self">self</span>.allocate_ptr(layout.size, layout.align.abi, kind)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(MPlaceTy::from_aligned_ptr(<a href="#744">ptr</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#740">layout</a>))
+    }
+
+    <span class="doccomment">/// Returns a wide MPlace of type `&amp;&#39;static [mut] str` to a new 1-aligned allocation.
+    </span><span class="kw">pub fn </span>allocate_str(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        str: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        kind: MemoryKind&lt;M::MemoryKind&gt;,
+        mutbl: <a href="../../../rustc_ast/ast/enum.Mutability.html">Mutability</a>,
+    ) -&gt; MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt; {
+        <span class="kw">let </span>ptr = <a class="self" href="#750">self</a>.<a href="memory.rs.html#205-211">allocate_bytes_ptr</a>(<a href="#751">str</a>.as_bytes(), Align::ONE, <a href="#752">kind</a>, <a href="#753">mutbl</a>);
+        <span class="kw">let </span>meta = Scalar::from_machine_usize(u64::try_from(<a href="#751">str</a>.len()).unwrap(), <a class="self" href="#750">self</a>);
+        <span class="kw">let </span>mplace = <a href="#45">MemPlace</a> { ptr: <a href="#755">ptr</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), meta: <a href="#21">MemPlaceMeta::Meta</a>(<a href="#756">meta</a>) };
+
+        <span class="kw">let </span>ty = <a class="self" href="#750">self</a>.tcx.mk_ref(
+            <a class="self" href="#750">self</a>.tcx.lifetimes.re_static,
+            <a href="../../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { ty: <a class="self" href="#750">self</a>.tcx.types.str_, <a href="#753">mutbl</a> },
+        );
+        <span class="kw">let </span>layout = <a class="self" href="#750">self</a>.<a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#759">ty</a>).unwrap();
+        <a href="#56">MPlaceTy</a> { <a href="#757">mplace</a>, <a href="#763">layout</a>, align: <a href="#763">layout</a>.align.abi }
+    }
+
+    <span class="doccomment">/// Writes the discriminant of the given variant.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>write_discriminant(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        variant_index: <a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// This must be an enum or generator.
+        </span><span class="kw">match </span>dest.layout.ty.kind() {
+            ty::Adt(adt, <span class="kw">_</span>) =&gt; <span class="macro">assert!</span>(adt.is_enum()),
+            ty::Generator(..) =&gt; {}
+            <span class="kw">_ </span>=&gt; <span class="macro">span_bug!</span>(
+                <span class="self">self</span>.cur_span(),
+                <span class="string">&quot;write_discriminant called on non-variant-type (neither enum nor generator)&quot;
+            </span>),
+        }
+        <span class="comment">// Layout computation excludes uninhabited variants from consideration
+        // therefore there&#39;s no way to represent those variants in the given layout.
+        // Essentially, uninhabited variants do not have a tag that corresponds to their
+        // discriminant, so we cannot do anything here.
+        // When evaluating we will always error before even getting here, but ConstProp &#39;executes&#39;
+        // dead code, so we cannot ICE here.
+        </span><span class="kw">if </span>dest.layout.for_variant(<span class="self">self</span>, variant_index).abi.is_uninhabited() {
+            <span class="macro">throw_ub!</span>(UninhabitedEnumVariantWritten)
+        }
+
+        <span class="kw">match </span>dest.layout.variants {
+            abi::Variants::Single { index } =&gt; {
+                <span class="macro">assert_eq!</span>(index, variant_index);
+            }
+            abi::Variants::Multiple {
+                tag_encoding: TagEncoding::Direct,
+                tag: tag_layout,
+                tag_field,
+                ..
+            } =&gt; {
+                <span class="comment">// No need to validate that the discriminant here because the
+                // `TyAndLayout::for_variant()` call earlier already checks the variant is valid.
+
+                </span><span class="kw">let </span>discr_val =
+                    dest.layout.ty.discriminant_for_variant(<span class="kw-2">*</span><span class="self">self</span>.tcx, variant_index).unwrap().val;
+
+                <span class="comment">// raw discriminants for enums are isize or bigger during
+                // their computation, but the in-memory tag is the smallest possible
+                // representation
+                </span><span class="kw">let </span>size = tag_layout.size(<span class="self">self</span>);
+                <span class="kw">let </span>tag_val = size.truncate(discr_val);
+
+                <span class="kw">let </span>tag_dest = <span class="self">self</span>.place_field(dest, tag_field)<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_scalar(Scalar::from_uint(tag_val, size), <span class="kw-2">&amp;</span>tag_dest)<span class="question-mark">?</span>;
+            }
+            abi::Variants::Multiple {
+                tag_encoding:
+                    TagEncoding::Niche { untagged_variant, <span class="kw-2">ref </span>niche_variants, niche_start },
+                tag: tag_layout,
+                tag_field,
+                ..
+            } =&gt; {
+                <span class="comment">// No need to validate that the discriminant here because the
+                // `TyAndLayout::for_variant()` call earlier already checks the variant is valid.
+
+                </span><span class="kw">if </span>variant_index != untagged_variant {
+                    <span class="kw">let </span>variants_start = niche_variants.start().as_u32();
+                    <span class="kw">let </span>variant_index_relative = variant_index
+                        .as_u32()
+                        .checked_sub(variants_start)
+                        .expect(<span class="string">&quot;overflow computing relative variant idx&quot;</span>);
+                    <span class="comment">// We need to use machine arithmetic when taking into account `niche_start`:
+                    // tag_val = variant_index_relative + niche_start_val
+                    </span><span class="kw">let </span>tag_layout = <span class="self">self</span>.layout_of(tag_layout.primitive().to_int_ty(<span class="kw-2">*</span><span class="self">self</span>.tcx))<span class="question-mark">?</span>;
+                    <span class="kw">let </span>niche_start_val = ImmTy::from_uint(niche_start, tag_layout);
+                    <span class="kw">let </span>variant_index_relative_val =
+                        ImmTy::from_uint(variant_index_relative, tag_layout);
+                    <span class="kw">let </span>tag_val = <span class="self">self</span>.binary_op(
+                        mir::BinOp::Add,
+                        <span class="kw-2">&amp;</span>variant_index_relative_val,
+                        <span class="kw-2">&amp;</span>niche_start_val,
+                    )<span class="question-mark">?</span>;
+                    <span class="comment">// Write result.
+                    </span><span class="kw">let </span>niche_dest = <span class="self">self</span>.place_field(dest, tag_field)<span class="question-mark">?</span>;
+                    <span class="self">self</span>.write_immediate(<span class="kw-2">*</span>tag_val, <span class="kw-2">&amp;</span>niche_dest)<span class="question-mark">?</span>;
+                }
+            }
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub fn </span>raw_const_to_mplace(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        raw: ConstAlloc&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="comment">// This must be an allocation in `tcx`
+        </span><span class="kw">let _ </span>= <a class="self" href="#856">self</a>.tcx.global_alloc(<a href="#857">raw</a>.alloc_id);
+        <span class="kw">let </span>ptr = <span class="self">self</span>.global_base_pointer(Pointer::from(raw.alloc_id))<span class="question-mark">?</span>;
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(raw.ty)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(MPlaceTy::from_aligned_ptr(<a href="#861">ptr</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#862">layout</a>))
+    }
+
+    <span class="doccomment">/// Turn a place with a `dyn Trait` type into a place with the actual dynamic type.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>unpack_dyn_trait(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt; {
+        <span class="kw">let </span>vtable = mplace.vtable().to_pointer(<span class="self">self</span>)<span class="question-mark">?</span>; <span class="comment">// also sanity checks the type
+        </span><span class="kw">let </span>(ty, <span class="kw">_</span>) = <span class="self">self</span>.get_ptr_vtable(vtable)<span class="question-mark">?</span>;
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(ty)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>mplace = <a href="#56">MPlaceTy</a> {
+            mplace: <a href="#45">MemPlace</a> { meta: <a href="#23">MemPlaceMeta::None</a>, ..<span class="kw-2">**</span><a href="#869">mplace</a> },
+            <a href="#873">layout</a>,
+            align: <a href="#873">layout</a>.align.abi,
+        };
+        <span class="prelude-val">Ok</span>(<a href="#875">mplace</a>)
+    }
+}
+
+<span class="comment">// Some nodes are used a lot. Make sure they don&#39;t unintentionally get bigger.
+</span><span class="attribute">#[cfg(all(target_arch = <span class="string">&quot;x86_64&quot;</span>, target_pointer_width = <span class="string">&quot;64&quot;</span>))]
+</span><span class="kw">mod </span>size_asserts {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span><a href="../../../rustc_index/macro.static_assert_size.html">rustc_data_structures::static_assert_size</a>;
+    <span class="comment">// These are in alphabetical order, which is easy to maintain.
+    </span><a class="macro" href="../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(MemPlaceMeta, <span class="number">24</span>);
+    <a class="macro" href="../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(MemPlace, <span class="number">40</span>);
+    <a class="macro" href="../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(MPlaceTy&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="number">64</span>);
+    <span class="attribute">#[cfg(not(bootstrap))]
+    </span><a class="macro" href="../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(Place, <span class="number">40</span>);
+    <span class="attribute">#[cfg(not(bootstrap))]
+    </span><a class="macro" href="../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(PlaceTy&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="number">64</span>);
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

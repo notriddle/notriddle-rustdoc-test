@@ -1,0 +1,494 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_infer/src/infer/fudge.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>fudge.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_infer/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_middle::ty::fold::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeFoldable.html">TypeFoldable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeFolder.html">TypeFolder</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeSuperFoldable.html">TypeSuperFoldable</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.ConstVid.html">ConstVid</a>, <a href="../../../rustc_type_ir/struct.FloatVid.html">FloatVid</a>, <a href="../../../rustc_type_ir/struct.IntVid.html">IntVid</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="../../../rustc_type_ir/struct.TyVid.html">TyVid</a>};
+
+<span class="kw">use </span><a href="type_variable.rs.html#114"><span class="kw">super</span>::type_variable::TypeVariableOrigin</a>;
+<span class="kw">use </span><a href="mod.rs.html#254"><span class="kw">super</span>::InferCtxt</a>;
+<span class="kw">use super</span>::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/struct.ConstVariableOrigin.html">ConstVariableOrigin</a>, <a href="mod.rs.html#442">RegionVariableOrigin</a>, <a href="mod.rs.html#85">UnificationTable</a>};
+
+<span class="kw">use </span><a href="https://docs.rs/ena/latest/ena/snapshot_vec/index.html">rustc_data_structures::snapshot_vec</a> <span class="kw">as </span>sv;
+<span class="kw">use </span><a href="https://docs.rs/ena/latest/ena/unify/index.html">rustc_data_structures::unify</a> <span class="kw">as </span>ut;
+<span class="kw">use </span><a href="https://docs.rs/ena/latest/ena/unify/trait.UnifyKey.html">ut::UnifyKey</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/range/struct.Range.html">std::ops::Range</a>;
+
+<span class="kw">fn </span>vars_since_snapshot&lt;<span class="lifetime">&#39;tcx</span>, T&gt;(
+    table: <span class="kw-2">&amp;mut </span>UnificationTable&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>, T&gt;,
+    snapshot_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+) -&gt; Range&lt;T&gt;
+<span class="kw">where
+    </span>T: <a href="https://docs.rs/ena/latest/ena/unify/trait.UnifyKey.html">UnifyKey</a>,
+    <span class="kw">super</span>::UndoLog&lt;<span class="lifetime">&#39;tcx</span>&gt;: From&lt;sv::UndoLog&lt;ut::Delegate&lt;T&gt;&gt;&gt;,
+{
+    T::from_index(<a href="#16">snapshot_var_len</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)..T::from_index(<a href="#15">table</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)
+}
+
+<span class="kw">fn </span>const_vars_since_snapshot&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    table: <span class="kw-2">&amp;mut </span>UnificationTable&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>, ConstVid&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    snapshot_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+) -&gt; (Range&lt;ConstVid&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/struct.ConstVariableOrigin.html">ConstVariableOrigin</a>&gt;) {
+    <span class="kw">let </span>range = <a href="#14-20">vars_since_snapshot</a>(<a href="#26">table</a>, <a href="#27">snapshot_var_len</a>);
+    (
+        <a href="#29">range</a>.start..<a href="#29">range</a>.end,
+        (<a href="#29">range</a>.start.index..<a href="#29">range</a>.end.index)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|index| <a href="#26">table</a>.probe_value(ConstVid::from_index(<a href="#33">index</a>)).origin)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+    )
+}
+
+<span class="kw">struct </span>VariableLengths {
+    type_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    const_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    int_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    float_var_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    region_constraints_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; InferCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>variable_lengths(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#38">VariableLengths</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>inner = <a class="self" href="#47">self</a>.inner.borrow_mut();
+        <a href="#38">VariableLengths</a> {
+            type_var_len: <a href="#48">inner</a>.<a href="mod.rs.html#186">type_variables</a>().<a href="type_variable.rs.html#273">num_vars</a>(),
+            const_var_len: <a href="#48">inner</a>.<a href="mod.rs.html#222-230">const_unification_table</a>().len(),
+            int_var_len: <a href="#48">inner</a>.<a href="mod.rs.html#196-204">int_unification_table</a>().len(),
+            float_var_len: <a href="#48">inner</a>.<a href="mod.rs.html#209-217">float_unification_table</a>().len(),
+            region_constraints_len: <a href="#48">inner</a>.<a href="mod.rs.html#235">unwrap_region_constraints</a>().<a href="region_constraints/mod.rs.html#365">num_region_vars</a>(),
+        }
+    }
+
+    <span class="doccomment">/// This rather funky routine is used while processing expected
+    /// types. What happens here is that we want to propagate a
+    /// coercion through the return type of a fn to its
+    /// argument. Consider the type of `Option::Some`, which is
+    /// basically `for&lt;T&gt; fn(T) -&gt; Option&lt;T&gt;`. So if we have an
+    /// expression `Some(&amp;[1, 2, 3])`, and that has the expected type
+    /// `Option&lt;&amp;[u32]&gt;`, we would like to type check `&amp;[1, 2, 3]`
+    /// with the expectation of `&amp;[u32]`. This will cause us to coerce
+    /// from `&amp;[u32; 3]` to `&amp;[u32]` and make the users life more
+    /// pleasant.
+    ///
+    /// The way we do this is using `fudge_inference_if_ok`. What the
+    /// routine actually does is to start a snapshot and execute the
+    /// closure `f`. In our example above, what this closure will do
+    /// is to unify the expectation (`Option&lt;&amp;[u32]&gt;`) with the actual
+    /// return type (`Option&lt;?T&gt;`, where `?T` represents the variable
+    /// instantiated for `T`). This will cause `?T` to be unified
+    /// with `&amp;?a [u32]`, where `?a` is a fresh lifetime variable. The
+    /// input type (`?T`) is then returned by `f()`.
+    ///
+    /// At this point, `fudge_inference_if_ok` will normalize all type
+    /// variables, converting `?T` to `&amp;?a [u32]` and end the
+    /// snapshot. The problem is that we can&#39;t just return this type
+    /// out, because it references the region variable `?a`, and that
+    /// region variable was popped when we popped the snapshot.
+    ///
+    /// So what we do is to keep a list (`region_vars`, in the code below)
+    /// of region variables created during the snapshot (here, `?a`). We
+    /// fold the return value and replace any such regions with a *new*
+    /// region variable (e.g., `?b`) and return the result (`&amp;?b [u32]`).
+    /// This can then be used as the expectation for the fn argument.
+    ///
+    /// The important point here is that, for soundness purposes, the
+    /// regions in question are not particularly important. We will
+    /// use the expected types to guide coercions, but we will still
+    /// type-check the resulting types from those coercions against
+    /// the actual types (`?T`, `Option&lt;?T&gt;`) -- and remember that
+    /// after the snapshot is popped, the variable `?T` is no longer
+    /// unified.
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>, f), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>fudge_inference_if_ok&lt;T, E, F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, f: F) -&gt; <span class="prelude-ty">Result</span>&lt;T, E&gt;
+    <span class="kw">where
+        </span>F: FnOnce() -&gt; <span class="prelude-ty">Result</span>&lt;T, E&gt;,
+        T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span>variable_lengths = <span class="self">self</span>.variable_lengths();
+        <span class="kw">let </span>(<span class="kw-2">mut </span>fudger, value) = <span class="self">self</span>.probe(|<span class="kw">_</span>| {
+            <span class="kw">match </span>f() {
+                <span class="prelude-val">Ok</span>(value) =&gt; {
+                    <span class="kw">let </span>value = <span class="self">self</span>.resolve_vars_if_possible(value);
+
+                    <span class="comment">// At this point, `value` could in principle refer
+                    // to inference variables that have been created during
+                    // the snapshot. Once we exit `probe()`, those are
+                    // going to be popped, so we will have to
+                    // eliminate any references to them.
+
+                    </span><span class="kw">let </span><span class="kw-2">mut </span>inner = <span class="self">self</span>.inner.borrow_mut();
+                    <span class="kw">let </span>type_vars =
+                        inner.type_variables().vars_since_snapshot(variable_lengths.type_var_len);
+                    <span class="kw">let </span>int_vars = vars_since_snapshot(
+                        <span class="kw-2">&amp;mut </span>inner.int_unification_table(),
+                        variable_lengths.int_var_len,
+                    );
+                    <span class="kw">let </span>float_vars = vars_since_snapshot(
+                        <span class="kw-2">&amp;mut </span>inner.float_unification_table(),
+                        variable_lengths.float_var_len,
+                    );
+                    <span class="kw">let </span>region_vars = inner
+                        .unwrap_region_constraints()
+                        .vars_since_snapshot(variable_lengths.region_constraints_len);
+                    <span class="kw">let </span>const_vars = const_vars_since_snapshot(
+                        <span class="kw-2">&amp;mut </span>inner.const_unification_table(),
+                        variable_lengths.const_var_len,
+                    );
+
+                    <span class="kw">let </span>fudger = InferenceFudger {
+                        infcx: <span class="self">self</span>,
+                        type_vars,
+                        int_vars,
+                        float_vars,
+                        region_vars,
+                        const_vars,
+                    };
+
+                    <span class="prelude-val">Ok</span>((fudger, value))
+                }
+                <span class="prelude-val">Err</span>(e) =&gt; <span class="prelude-val">Err</span>(e),
+            }
+        })<span class="question-mark">?</span>;
+
+        <span class="comment">// At this point, we need to replace any of the now-popped
+        // type/region variables that appear in `value` with a fresh
+        // variable of the appropriate kind. We can&#39;t do this during
+        // the probe because they would just get popped then too. =)
+
+        // Micro-optimization: if no variables have been created, then
+        // `value` can&#39;t refer to any of them. =) So we can just return it.
+        </span><span class="kw">if </span>fudger.type_vars.<span class="number">0</span>.is_empty()
+            &amp;&amp; fudger.int_vars.is_empty()
+            &amp;&amp; fudger.float_vars.is_empty()
+            &amp;&amp; fudger.region_vars.<span class="number">0</span>.is_empty()
+            &amp;&amp; fudger.const_vars.<span class="number">0</span>.is_empty()
+        {
+            <span class="prelude-val">Ok</span>(value)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(value.fold_with(<span class="kw-2">&amp;mut </span>fudger))
+        }
+    }
+}
+
+<span class="kw">pub struct </span>InferenceFudger&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    infcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>InferCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    type_vars: (Range&lt;<a href="../../../rustc_type_ir/struct.TyVid.html">TyVid</a>&gt;, Vec&lt;<a href="type_variable.rs.html#114">TypeVariableOrigin</a>&gt;),
+    int_vars: Range&lt;<a href="../../../rustc_type_ir/struct.IntVid.html">IntVid</a>&gt;,
+    float_vars: Range&lt;<a href="../../../rustc_type_ir/struct.FloatVid.html">FloatVid</a>&gt;,
+    region_vars: (Range&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>&gt;, Vec&lt;<a href="mod.rs.html#442">RegionVariableOrigin</a>&gt;),
+    const_vars: (Range&lt;ConstVid&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/struct.ConstVariableOrigin.html">ConstVariableOrigin</a>&gt;),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>InferenceFudger&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#179">self</a>.infcx.tcx
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#183">ty</a>.kind() {
+            ty::Infer(ty::InferTy::TyVar(vid)) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.type_vars.<span class="number">0</span>.contains(<span class="kw-2">&amp;</span>vid) {
+                    <span class="comment">// This variable was created during the fudging.
+                    // Recreate it with a fresh variable here.
+                    </span><span class="kw">let </span>idx = (<a href="#185">vid</a>.as_usize() - <a class="self" href="#183">self</a>.type_vars.<span class="number">0</span>.start.as_usize()) <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+                    <span class="kw">let </span>origin = <a class="self" href="#183">self</a>.type_vars.<span class="number">1</span>[<a href="#189">idx</a>];
+                    <a class="self" href="#183">self</a>.infcx.<a href="mod.rs.html#1076">next_ty_var</a>(<a href="#190">origin</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// This variable was created before the
+                    // &quot;fudging&quot;. Since we refresh all type
+                    // variables to their binding anyhow, we know
+                    // that it is unbound, so we can just return
+                    // it.
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert.html">debug_assert!</a>(
+                        <span class="self">self</span>.infcx.inner.borrow_mut().type_variables().probe(vid).is_unknown()
+                    );
+                    <a href="#183">ty</a>
+                }
+            }
+            ty::Infer(ty::InferTy::IntVar(vid)) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.int_vars.contains(<span class="kw-2">&amp;</span>vid) {
+                    <a class="self" href="#183">self</a>.infcx.<a href="mod.rs.html#1126">next_int_var</a>()
+                } <span class="kw">else </span>{
+                    <a href="#183">ty</a>
+                }
+            }
+            ty::Infer(ty::InferTy::FloatVar(vid)) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.float_vars.contains(<span class="kw-2">&amp;</span>vid) {
+                    <a class="self" href="#183">self</a>.infcx.<a href="mod.rs.html#1134">next_float_var</a>()
+                } <span class="kw">else </span>{
+                    <a href="#183">ty</a>
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a href="#183">ty</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeSuperFoldable.html">super_fold_with</a>(<a class="self" href="#183">self</a>),
+        }
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span>ty::ReVar(vid) = <span class="kw-2">*</span><a href="#222">r</a> &amp;&amp; <a class="self" href="#222">self</a>.region_vars.<span class="number">0</span>.contains(<span class="kw-2">&amp;</span><a href="#223">vid</a>) {
+            <span class="kw">let </span>idx = <a href="#223">vid</a>.index() - <a class="self" href="#222">self</a>.region_vars.<span class="number">0</span>.start.index();
+            <span class="kw">let </span>origin = <a class="self" href="#222">self</a>.region_vars.<span class="number">1</span>[<a href="#224">idx</a>];
+            <span class="kw">return </span><a class="self" href="#222">self</a>.infcx.<a href="mod.rs.html#1141">next_region_var</a>(<a href="#225">origin</a>);
+        }
+        <a href="#222">r</a>
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span>ty::ConstKind::Infer(ty::InferConst::Var(vid)) = <a href="#231">ct</a>.kind() {
+            <span class="kw">if </span><span class="self">self</span>.const_vars.<span class="number">0</span>.contains(<span class="kw-2">&amp;</span>vid) {
+                <span class="comment">// This variable was created during the fudging.
+                // Recreate it with a fresh variable here.
+                </span><span class="kw">let </span>idx = (<a href="#232">vid</a>.index - <a class="self" href="#231">self</a>.const_vars.<span class="number">0</span>.start.index) <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+                <span class="kw">let </span>origin = <a class="self" href="#231">self</a>.const_vars.<span class="number">1</span>[<a href="#236">idx</a>];
+                <a class="self" href="#231">self</a>.infcx.<a href="mod.rs.html#1097">next_const_var</a>(<a href="#231">ct</a>.ty(), <a href="#237">origin</a>)
+            } <span class="kw">else </span>{
+                <a href="#231">ct</a>
+            }
+        } <span class="kw">else </span>{
+            <a href="#231">ct</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeSuperFoldable.html">super_fold_with</a>(<a class="self" href="#231">self</a>)
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

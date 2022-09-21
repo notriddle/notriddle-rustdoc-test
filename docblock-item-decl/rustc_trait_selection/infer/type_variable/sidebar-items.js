@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["TypeVariableOriginKind","Reasons to create a type inference variable"],["TypeVariableValue",""]],"struct":[["TypeVariableOrigin",""],["TypeVariableStorage",""],["TypeVariableTable",""]]};

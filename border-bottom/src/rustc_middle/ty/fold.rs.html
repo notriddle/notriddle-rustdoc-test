@@ -1,0 +1,1610 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/ty/fold.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>fold.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+</pre><pre class="rust"><code><span class="doccomment">//! A folding traversal mechanism for complex data structures that contain type
+//! information.
+//!
+//! This is a modifying traversal. It consumes the data structure, producing a
+//! (possibly) modified version of it. Both fallible and infallible versions are
+//! available. The name is potentially confusing, because this traversal is more
+//! like `Iterator::map` than `Iterator::fold`.
+//!
+//! This traversal has limited flexibility. Only a small number of &quot;types of
+//! interest&quot; within the complex data structures can receive custom
+//! modification. These are the ones containing the most important type-related
+//! information, such as `Ty`, `Predicate`, `Region`, and `Const`.
+//!
+//! There are three groups of traits involved in each traversal.
+//! - `TypeFoldable`. This is implemented once for many types, including:
+//!   - Types of interest, for which the the methods delegate to the
+//!     folder.
+//!   - All other types, including generic containers like `Vec` and `Option`.
+//!     It defines a &quot;skeleton&quot; of how they should be folded.
+//! - `TypeSuperFoldable`. This is implemented only for each type of interest,
+//!   and defines the folding &quot;skeleton&quot; for these types.
+//! - `TypeFolder`/`FallibleTypeFolder. One of these is implemented for each
+//!   folder. This defines how types of interest are folded.
+//!
+//! This means each fold is a mixture of (a) generic folding operations, and (b)
+//! custom fold operations that are specific to the folder.
+//! - The `TypeFoldable` impls handle most of the traversal, and call into
+//!   `TypeFolder`/`FallibleTypeFolder` when they encounter a type of interest.
+//! - A `TypeFolder`/`FallibleTypeFolder` may call into another `TypeFoldable`
+//!   impl, because some of the types of interest are recursive and can contain
+//!   other types of interest.
+//! - A `TypeFolder`/`FallibleTypeFolder` may also call into a `TypeSuperFoldable`
+//!   impl, because each folder might provide custom handling only for some types
+//!   of interest, or only for some variants of each type of interest, and then
+//!   use default traversal for the remaining cases.
+//!
+//! For example, if you have `struct S(Ty, U)` where `S: TypeFoldable` and `U:
+//! TypeFoldable`, and an instance `s = S(ty, u)`, it would be folded like so:
+//! ```text
+//! s.fold_with(folder) calls
+//! - ty.fold_with(folder) calls
+//!   - folder.fold_ty(ty) may call
+//!     - ty.super_fold_with(folder)
+//! - u.fold_with(folder)
+//! ```
+</span><span class="kw">use </span><a href="../lib.rs.html#95"><span class="kw">crate</span>::mir</a>;
+<span class="kw">use </span><span class="kw">crate</span>::ty::{<a class="self" href="../lib.rs.html#98">self</a>, <a href="sty.rs.html#1027">Binder</a>, <a href="sty.rs.html#1418">BoundTy</a>, <a href="mod.rs.html#484">Ty</a>, <a href="context.rs.html#1029">TyCtxt</a>, <a href="visit.rs.html#56">TypeVisitable</a>};
+<span class="kw">use </span><a href="../../../rustc_data_structures/fx/type.FxIndexMap.html">rustc_data_structures::fx::FxIndexMap</a>;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">std::collections::BTreeMap</a>;
+
+<span class="doccomment">/// This trait is implemented for every type that can be folded,
+/// providing the skeleton of the traversal.
+///
+/// To implement this conveniently, use the derive macro located in
+/// `rustc_macros`.
+</span><span class="kw">pub trait </span>TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;: TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The entry point for folding. To fold a value `t` with a folder `f`
+    /// call: `t.try_fold_with(f)`.
+    ///
+    /// For most types, this just traverses the value, calling `try_fold_with`
+    /// on each field/element.
+    ///
+    /// For types of interest (such as `Ty`), the implementation of method
+    /// calls a folder method specifically for that type (such as
+    /// `F::try_fold_ty`). This is where control transfers from `TypeFoldable`
+    /// to `TypeFolder`.
+    </span><span class="kw">fn </span>try_fold_with&lt;F: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, F::Error&gt;;
+
+    <span class="doccomment">/// A convenient alternative to `try_fold_with` for use with infallible
+    /// folders. Do not override this method, to ensure coherence with
+    /// `try_fold_with`.
+    </span><span class="kw">fn </span>fold_with&lt;F: TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="self">Self </span>{
+        <a class="self" href="#74">self</a>.<a href="#69">try_fold_with</a>(<a href="#74">folder</a>).into_ok()
+    }
+}
+
+<span class="comment">// This trait is implemented for types of interest.
+</span><span class="kw">pub trait </span>TypeSuperFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Provides a default fold for a type of interest. This should only be
+    /// called within `TypeFolder` methods, when a non-custom traversal is
+    /// desired for the value of the type of interest passed to that method.
+    /// For example, in `MyFolder::try_fold_ty(ty)`, it is valid to call
+    /// `ty.try_super_fold_with(self)`, but any other folding should be done
+    /// with `xyz.try_fold_with(self)`.
+    </span><span class="kw">fn </span>try_super_fold_with&lt;F: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="self">self</span>,
+        folder: <span class="kw-2">&amp;mut </span>F,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, F::Error&gt;;
+
+    <span class="doccomment">/// A convenient alternative to `try_super_fold_with` for use with
+    /// infallible folders. Do not override this method, to ensure coherence
+    /// with `try_super_fold_with`.
+    </span><span class="kw">fn </span>super_fold_with&lt;F: TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="self">Self </span>{
+        <a class="self" href="#95">self</a>.<a href="#87-90">try_super_fold_with</a>(<a href="#95">folder</a>).into_ok()
+    }
+}
+
+<span class="doccomment">/// This trait is implemented for every infallible folding traversal. There is
+/// a fold method defined for every type of interest. Each such method has a
+/// default that does an &quot;identity&quot; fold. Implementations of these methods
+/// often fall back to a `super_fold_with` method if the primary argument
+/// doesn&#39;t satisfy a particular condition.
+///
+/// A blanket implementation of [`FallibleTypeFolder`] will defer to
+/// the infallible methods of this trait to ensure that the two APIs
+/// are coherent.
+</span><span class="kw">pub trait </span>TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>, Error = !&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="kw">fn </span>fold_binder&lt;T&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a href="#112">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#112">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#119">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#119">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#123">r</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#123">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#127">c</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#127">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_unevaluated(<span class="kw-2">&amp;mut </span><span class="self">self</span>, uv: ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#131">uv</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#131">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_predicate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#135">p</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#135">self</a>)
+    }
+
+    <span class="kw">fn </span>fold_mir_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;most type folders should not be folding MIR datastructures: {:?}&quot;</span>, c)
+    }
+}
+
+<span class="doccomment">/// This trait is implemented for every folding traversal. There is a fold
+/// method defined for every type of interest. Each such method has a default
+/// that does an &quot;identity&quot; fold.
+///
+/// A blanket implementation of this trait (that defers to the relevant
+/// method of [`TypeFolder`]) is provided for all infallible folders in
+/// order to ensure the two APIs are coherent.
+</span><span class="kw">pub trait </span>FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {
+    <span class="kw">type </span>Error;
+
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="kw">fn </span>try_fold_binder&lt;T&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;, <span class="self">Self</span>::Error&gt;
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a href="#156">t</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#156">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a href="#163">t</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#163">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a href="#167">r</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#167">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a href="#171">c</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#171">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_unevaluated(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        c: ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a href="#177">c</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#176">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_predicate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        p: ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a href="#184">p</a>.<a href="#87-90">try_super_fold_with</a>(<a class="self" href="#183">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_mir_const(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        c: mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="self">Self</span>::Error&gt; {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;most type folders should not be folding MIR datastructures: {:?}&quot;</span>, c)
+    }
+}
+
+<span class="comment">// This blanket implementation of the fallible trait for infallible folders
+// delegates to infallible methods to ensure coherence.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, F&gt; FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>F
+<span class="kw">where
+    </span>F: TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">type </span>Error = !;
+
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#110">TypeFolder::tcx</a>(<a class="self" href="#205">self</a>)
+    }
+
+    <span class="kw">fn </span>try_fold_binder&lt;T&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;, !&gt;
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#209">self</a>.<a href="#112-114">fold_binder</a>(<a href="#209">t</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#216">self</a>.<a href="#119">fold_ty</a>(<a href="#216">t</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#220">self</a>.<a href="#123">fold_region</a>(<a href="#220">r</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#224">self</a>.<a href="#127">fold_const</a>(<a href="#224">c</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_unevaluated(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        c: ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Unevaluated&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#229">self</a>.<a href="#131">fold_unevaluated</a>(<a href="#230">c</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_predicate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#235">self</a>.<a href="#135">fold_predicate</a>(<a href="#235">p</a>))
+    }
+
+    <span class="kw">fn </span>try_fold_mir_const(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        c: mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;, !&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#240">self</a>.<a href="#139">fold_mir_const</a>(<a href="#241">c</a>))
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Some sample folders
+
+</span><span class="kw">pub struct </span>BottomUpFolder&lt;<span class="lifetime">&#39;tcx</span>, F, G, H&gt;
+<span class="kw">where
+    </span>F: FnMut(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    G: FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    H: FnMut(ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">pub </span>tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>ty_op: F,
+    <span class="kw">pub </span>lt_op: G,
+    <span class="kw">pub </span>ct_op: H,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, F, G, H&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>BottomUpFolder&lt;<span class="lifetime">&#39;tcx</span>, F, G, H&gt;
+<span class="kw">where
+    </span>F: FnMut(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    G: FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    H: FnMut(ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#268">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>t = <a href="#272">ty</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#272">self</a>);
+        (<a class="self" href="#272">self</a>.ty_op)(<a href="#273">t</a>)
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>r = <a href="#277">r</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#277">self</a>);
+        (<a class="self" href="#277">self</a>.lt_op)(<a href="#278">r</a>)
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>ct = <a href="#282">ct</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#282">self</a>);
+        (<a class="self" href="#282">self</a>.ct_op)(<a href="#283">ct</a>)
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Region folder
+
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Folds the escaping and free regions in `value` using `f`, and
+    /// sets `skipped_regions` to true if any late-bound region was found
+    /// and skipped.
+    </span><span class="kw">pub fn </span>fold_regions&lt;T&gt;(
+        <span class="self">self</span>,
+        value: T,
+        <span class="kw-2">mut </span>f: <span class="kw">impl </span>FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; T
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a href="#297">value</a>.<a href="#74">fold_with</a>(<span class="kw-2">&amp;mut </span>RegionFolder::new(<a class="self" href="#296">self</a>, <span class="kw-2">&amp;mut </span><a href="#298">f</a>))
+    }
+
+    <span class="kw">pub fn </span>super_fold_regions&lt;T&gt;(
+        <span class="self">self</span>,
+        value: T,
+        <span class="kw-2">mut </span>f: <span class="kw">impl </span>FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; T
+    <span class="kw">where
+        </span>T: TypeSuperFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a href="#308">value</a>.<a href="#95">super_fold_with</a>(<span class="kw-2">&amp;mut </span>RegionFolder::new(<a class="self" href="#307">self</a>, <span class="kw-2">&amp;mut </span><a href="#309">f</a>))
+    }
+}
+
+<span class="doccomment">/// Folds over the substructure of a type, visiting its component
+/// types and all regions that occur *free* within it.
+///
+/// That is, `Ty` can contain function or method types that bind
+/// regions at the call site (`ReLateBound`), and occurrences of
+/// regions (aka &quot;lifetimes&quot;) that are bound within a type are not
+/// visited by this folder; only regions that occur free will be
+/// visited by `fld_r`.
+
+</span><span class="kw">pub struct </span>RegionFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Stores the index of a binder *just outside* the stuff we have
+    /// visited.  So this begins as INNERMOST; when we pass through a
+    /// binder, it is incremented (via `shift_in`).
+    </span>current_index: <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>,
+
+    <span class="doccomment">/// Callback invokes for each free region. The `DebruijnIndex`
+    /// points to the binder *just outside* the ones we have passed
+    /// through.
+    </span>fold_region_fn:
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>(<span class="kw">dyn </span>FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; RegionFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>new(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        fold_region_fn: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="kw">dyn </span>FnMut(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; RegionFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#327">RegionFolder</a> { <a href="#345">tcx</a>, current_index: <a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#346">fold_region_fn</a> }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>RegionFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#353">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_binder&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a class="self" href="#358">self</a>.current_index.shift_in(<span class="number">1</span>);
+        <span class="kw">let </span>t = <a href="#359">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#358">self</a>);
+        <a class="self" href="#358">self</a>.current_index.shift_out(<span class="number">1</span>);
+        <a href="#362">t</a>
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>, ret)]
+    </span><span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span>r {
+            ty::ReLateBound(debruijn, <span class="kw">_</span>) <span class="kw">if </span>debruijn &lt; <span class="self">self</span>.current_index =&gt; {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span><span class="self">self</span>.current_index, <span class="string">&quot;skipped bound region&quot;</span>);
+                r
+            }
+            <span class="kw">_ </span>=&gt; {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span><span class="self">self</span>.current_index, <span class="string">&quot;folding free region&quot;</span>);
+                (<span class="self">self</span>.fold_region_fn)(r, <span class="self">self</span>.current_index)
+            }
+        }
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Bound vars replacer
+
+</span><span class="kw">pub trait </span>BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>replace_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, br: <a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+    <span class="kw">fn </span>replace_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bt: <a href="sty.rs.html#1418">ty::BoundTy</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+    <span class="kw">fn </span>replace_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bv: <a href="sty.rs.html#1411-1414">ty::BoundVar</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+}
+
+<span class="kw">pub struct </span>FnMutDelegate&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>regions: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>(<span class="kw">dyn </span>FnMut(<a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+    <span class="kw">pub </span>types: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>(<span class="kw">dyn </span>FnMut(<a href="sty.rs.html#1418">ty::BoundTy</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+    <span class="kw">pub </span>consts: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>(<span class="kw">dyn </span>FnMut(<a href="sty.rs.html#1411-1414">ty::BoundVar</a>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>FnMutDelegate&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>replace_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, br: <a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        (<a class="self" href="#398">self</a>.regions)(<a href="#398">br</a>)
+    }
+    <span class="kw">fn </span>replace_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bt: <a href="sty.rs.html#1418">ty::BoundTy</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        (<a class="self" href="#401">self</a>.types)(<a href="#401">bt</a>)
+    }
+    <span class="kw">fn </span>replace_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bv: <a href="sty.rs.html#1411-1414">ty::BoundVar</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        (<a class="self" href="#404">self</a>.consts)(<a href="#404">bv</a>, <a href="#404">ty</a>)
+    }
+}
+
+<span class="doccomment">/// Replaces the escaping bound vars (late bound regions or bound types) in a type.
+</span><span class="kw">struct </span>BoundVarReplacer&lt;<span class="lifetime">&#39;tcx</span>, D&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// As with `RegionFolder`, represents the index of a binder *just outside*
+    /// the ones we have visited.
+    </span>current_index: <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>,
+
+    delegate: D,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, D: BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; BoundVarReplacer&lt;<span class="lifetime">&#39;tcx</span>, D&gt; {
+    <span class="kw">fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, delegate: D) -&gt; <span class="self">Self </span>{
+        <a href="#410">BoundVarReplacer</a> { <a href="#421">tcx</a>, current_index: <a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#421">delegate</a> }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, D&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>BoundVarReplacer&lt;<span class="lifetime">&#39;tcx</span>, D&gt;
+<span class="kw">where
+    </span>D: BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#430">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_binder&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a class="self" href="#435">self</a>.current_index.shift_in(<span class="number">1</span>);
+        <span class="kw">let </span>t = <a href="#436">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#435">self</a>);
+        <a class="self" href="#435">self</a>.current_index.shift_out(<span class="number">1</span>);
+        <a href="#439">t</a>
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#444">t</a>.<a href="sty.rs.html#1639">kind</a>() {
+            ty::Bound(debruijn, bound_ty) <span class="kw">if </span><a href="#446">debruijn</a> == <a class="self" href="#444">self</a>.current_index =&gt; {
+                <span class="kw">let </span>ty = <a class="self" href="#444">self</a>.delegate.<a href="#387">replace_ty</a>(<a href="#446">bound_ty</a>);
+                <a href="#797-799">ty::fold::shift_vars</a>(<a class="self" href="#444">self</a>.tcx, <a href="#447">ty</a>, <a class="self" href="#444">self</a>.current_index.as_u32())
+            }
+            <span class="kw">_ if </span><a href="#444">t</a>.<a href="visit.rs.html#73">has_vars_bound_at_or_above</a>(<a class="self" href="#444">self</a>.current_index) =&gt; <a href="#444">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#444">self</a>),
+            <span class="kw">_ </span>=&gt; <a href="#444">t</a>,
+        }
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#455">r</a> {
+            ty::ReLateBound(debruijn, br) <span class="kw">if </span><a href="#457">debruijn</a> == <a class="self" href="#455">self</a>.current_index =&gt; {
+                <span class="kw">let </span>region = <a class="self" href="#455">self</a>.delegate.<a href="#386">replace_region</a>(<a href="#457">br</a>);
+                <span class="kw">if let </span>ty::ReLateBound(debruijn1, br) = <span class="kw-2">*</span><a href="#458">region</a> {
+                    <span class="comment">// If the callback returns a late-bound region,
+                    // that region should always use the INNERMOST
+                    // debruijn index. Then we adjust it to the
+                    // correct depth.
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(debruijn1, ty::INNERMOST);
+                    <a class="self" href="#455">self</a>.tcx.<a href="context.rs.html#2359">reuse_or_mk_region</a>(<a href="#458">region</a>, ty::ReLateBound(<a href="#457">debruijn</a>, <a href="#459">br</a>))
+                } <span class="kw">else </span>{
+                    <a href="#458">region</a>
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a href="#455">r</a>,
+        }
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a href="#474">ct</a>.<a href="consts.rs.html#53">kind</a>() {
+            <a href="consts/kind.rs.html#63">ty::ConstKind::Bound</a>(debruijn, bound_const) <span class="kw">if </span><a href="#476">debruijn</a> == <a class="self" href="#474">self</a>.current_index =&gt; {
+                <span class="kw">let </span>ct = <a class="self" href="#474">self</a>.delegate.<a href="#388">replace_const</a>(<a href="#476">bound_const</a>, <a href="#474">ct</a>.<a href="consts.rs.html#48">ty</a>());
+                <a href="#797-799">ty::fold::shift_vars</a>(<a class="self" href="#474">self</a>.tcx, <a href="#477">ct</a>, <a class="self" href="#474">self</a>.current_index.as_u32())
+            }
+            <span class="kw">_ </span>=&gt; <a href="#474">ct</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#474">self</a>),
+        }
+    }
+
+    <span class="kw">fn </span>fold_predicate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span>p.has_vars_bound_at_or_above(<span class="self">self</span>.current_index) { <a href="#484">p</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#484">self</a>) } <span class="kw">else </span>{ <a href="#484">p</a> }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Replaces all regions bound by the given `Binder` with the
+    /// results returned by the closure; the closure is expected to
+    /// return a free region (relative to this binder), and hence the
+    /// binder is removed in the return type. The closure is invoked
+    /// once for each unique `BoundRegionKind`; multiple references to the
+    /// same `BoundRegionKind` will reuse the previous result. A map is
+    /// returned at the end with each bound region and the free region
+    /// that replaced it.
+    ///
+    /// # Panics
+    ///
+    /// This method only replaces late bound regions. Any types or
+    /// constants bound by `value` will cause an ICE.
+    </span><span class="kw">pub fn </span>replace_late_bound_regions&lt;T, F&gt;(
+        <span class="self">self</span>,
+        value: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+        <span class="kw-2">mut </span>fld_r: F,
+    ) -&gt; (T, BTreeMap&lt;<a href="sty.rs.html#76">ty::BoundRegion</a>, ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;)
+    <span class="kw">where
+        </span>F: FnMut(<a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span><span class="kw-2">mut </span>region_map = BTreeMap::new();
+        <span class="kw">let </span>real_fld_r = |br: <a href="sty.rs.html#76">ty::BoundRegion</a>| <span class="kw-2">*</span><a href="#512">region_map</a>.entry(<a href="#513">br</a>).or_insert_with(|| <a href="#506">fld_r</a>(<a href="#513">br</a>));
+        <span class="kw">let </span>value = <a class="self" href="#504">self</a>.<a href="#518-525">replace_late_bound_regions_uncached</a>(<a href="#505">value</a>, <a href="#513">real_fld_r</a>);
+        (<a href="#514">value</a>, <a href="#512">region_map</a>)
+    }
+
+    <span class="kw">pub fn </span>replace_late_bound_regions_uncached&lt;T, F&gt;(
+        <span class="self">self</span>,
+        value: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+        <span class="kw-2">mut </span>replace_regions: F,
+    ) -&gt; T
+    <span class="kw">where
+        </span>F: FnMut(<a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span>value = <a href="#520">value</a>.<a href="sty.rs.html#1068">skip_binder</a>();
+        <span class="kw">if </span>!value.has_escaping_bound_vars() {
+            <a href="#527">value</a>
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>delegate = <a href="#391">FnMutDelegate</a> {
+                regions: <span class="kw-2">&amp;mut </span><a href="#521">replace_regions</a>,
+                types: <span class="kw-2">&amp;mut </span>|b| <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;unexpected bound ty in binder: {b:?}&quot;</span>),
+                consts: <span class="kw-2">&amp;mut </span>|b, ty| <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;unexpected bound ct in binder: {b:?} {ty}&quot;</span>),
+            };
+            <span class="kw">let </span><span class="kw-2">mut </span>replacer = BoundVarReplacer::new(<a class="self" href="#519">self</a>, <a href="#531">delegate</a>);
+            <a href="#527">value</a>.<a href="#74">fold_with</a>(<span class="kw-2">&amp;mut </span><a href="#536">replacer</a>)
+        }
+    }
+
+    <span class="doccomment">/// Replaces all escaping bound vars. The `fld_r` closure replaces escaping
+    /// bound regions; the `fld_t` closure replaces escaping bound types and the `fld_c`
+    /// closure replaces escaping bound consts.
+    </span><span class="kw">pub fn </span>replace_escaping_bound_vars_uncached&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="self">self</span>,
+        value: T,
+        delegate: <span class="kw">impl </span>BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; T {
+        <span class="kw">if </span>!value.has_escaping_bound_vars() {
+            <a href="#546">value</a>
+        } <span class="kw">else </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>replacer = BoundVarReplacer::new(<a class="self" href="#545">self</a>, <a href="#547">delegate</a>);
+            <a href="#546">value</a>.<a href="#74">fold_with</a>(<span class="kw-2">&amp;mut </span><a href="#552">replacer</a>)
+        }
+    }
+
+    <span class="doccomment">/// Replaces all types or regions bound by the given `Binder`. The `fld_r`
+    /// closure replaces bound regions, the `fld_t` closure replaces bound
+    /// types, and `fld_c` replaces bound constants.
+    </span><span class="kw">pub fn </span>replace_bound_vars_uncached&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="self">self</span>,
+        value: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+        delegate: <span class="kw">impl </span>BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; T {
+        <a class="self" href="#561">self</a>.<a href="#544-548">replace_escaping_bound_vars_uncached</a>(<a href="#562">value</a>.<a href="sty.rs.html#1068">skip_binder</a>(), <a href="#563">delegate</a>)
+    }
+
+    <span class="doccomment">/// Replaces any late-bound regions bound in `value` with
+    /// free variants attached to `all_outlive_scope`.
+    </span><span class="kw">pub fn </span>liberate_late_bound_regions&lt;T&gt;(
+        <span class="self">self</span>,
+        all_outlive_scope: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        value: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; T
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a class="self" href="#571">self</a>.<a href="#518-525">replace_late_bound_regions_uncached</a>(<a href="#573">value</a>, |br| {
+            <a class="self" href="#571">self</a>.<a href="context.rs.html#2245-2251">mk_region</a>(ty::ReFree(<a href="sty.rs.html#52">ty::FreeRegion</a> {
+                scope: <a href="#572">all_outlive_scope</a>,
+                bound_region: <a href="#578">br</a>.kind,
+            }))
+        })
+    }
+
+    <span class="kw">pub fn </span>shift_bound_var_indices&lt;T&gt;(<span class="self">self</span>, bound_vars: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, value: T) -&gt; T
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span>shift_bv = |bv: <a href="sty.rs.html#1411-1414">ty::BoundVar</a>| ty::BoundVar::from_usize(<a href="#590">bv</a>.<a href="sty.rs.html#1411-1414">as_usize</a>() + <a href="#586">bound_vars</a>);
+        <a class="self" href="#586">self</a>.<a href="#544-548">replace_escaping_bound_vars_uncached</a>(
+            <a href="#586">value</a>,
+            <a href="#391">FnMutDelegate</a> {
+                regions: <span class="kw-2">&amp;mut </span>|r: <a href="sty.rs.html#76">ty::BoundRegion</a>| {
+                    <a class="self" href="#586">self</a>.<a href="context.rs.html#2245-2251">mk_region</a>(ty::ReLateBound(
+                        <a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>,
+                        <a href="sty.rs.html#76">ty::BoundRegion</a> { var: <a href="#590">shift_bv</a>(<a href="#594">r</a>.var), kind: <a href="#594">r</a>.kind },
+                    ))
+                },
+                types: <span class="kw-2">&amp;mut </span>|t: <a href="sty.rs.html#1418">ty::BoundTy</a>| {
+                    <a class="self" href="#586">self</a>.<a href="context.rs.html#2365">mk_ty</a>(ty::Bound(
+                        <a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>,
+                        <a href="sty.rs.html#1418">ty::BoundTy</a> { var: <a href="#590">shift_bv</a>(<a href="#600">t</a>.var), kind: <a href="#600">t</a>.kind },
+                    ))
+                },
+                consts: <span class="kw-2">&amp;mut </span>|c, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;| {
+                    <a class="self" href="#586">self</a>.<a href="context.rs.html#2245-2251">mk_const</a>(<a href="consts.rs.html#38">ty::ConstS</a> {
+                        kind: <a href="consts/kind.rs.html#63">ty::ConstKind::Bound</a>(<a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#590">shift_bv</a>(<a href="#606">c</a>)),
+                        <a href="#606">ty</a>,
+                    })
+                },
+            },
+        )
+    }
+
+    <span class="doccomment">/// Replaces any late-bound regions bound in `value` with `&#39;erased`. Useful in codegen but also
+    /// method lookup and a few other places where precise region relationships are not required.
+    </span><span class="kw">pub fn </span>erase_late_bound_regions&lt;T&gt;(<span class="self">self</span>, value: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; T
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a class="self" href="#618">self</a>.<a href="#503-510">replace_late_bound_regions</a>(<a href="#618">value</a>, |<span class="kw">_</span>| <a class="self" href="#618">self</a>.lifetimes.re_erased).<span class="number">0
+    </span>}
+
+    <span class="doccomment">/// Rewrite any late-bound regions so that they are anonymous. Region numbers are
+    /// assigned starting at 0 and increasing monotonically in the order traversed
+    /// by the fold operation.
+    ///
+    /// The chief purpose of this function is to canonicalize regions so that two
+    /// `FnSig`s or `TraitRef`s which are equivalent up to region naming will become
+    /// structurally identical. For example, `for&lt;&#39;a, &#39;b&gt; fn(&amp;&#39;a isize, &amp;&#39;b isize)` and
+    /// `for&lt;&#39;a, &#39;b&gt; fn(&amp;&#39;b isize, &amp;&#39;a isize)` will become identical after anonymization.
+    </span><span class="kw">pub fn </span>anonymize_late_bound_regions&lt;T&gt;(<span class="self">self</span>, sig: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span><span class="kw-2">mut </span>counter = <span class="number">0</span>;
+        <span class="kw">let </span>inner = <span class="self"><a href="#633">self</a>
+            </span>.<a href="#503-510">replace_late_bound_regions</a>(<a href="#633">sig</a>, |<span class="kw">_</span>| {
+                <span class="kw">let </span>br = <a href="sty.rs.html#76">ty::BoundRegion</a> {
+                    var: ty::BoundVar::from_u32(<a href="#637">counter</a>),
+                    kind: <a href="sty.rs.html#61">ty::BrAnon</a>(<a href="#637">counter</a>),
+                };
+                <span class="kw">let </span>r = <a class="self" href="#633">self</a>.<a href="context.rs.html#2245-2251">mk_region</a>(ty::ReLateBound(<a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#640">br</a>));
+                <a href="#637">counter</a> += <span class="number">1</span>;
+                <a href="#644">r</a>
+            })
+            .<span class="number">0</span>;
+        <span class="kw">let </span>bound_vars = <a class="self" href="#633">self</a>.<a href="context.rs.html#2806-2811">mk_bound_variable_kinds</a>(
+            (<span class="number">0</span>..<a href="#637">counter</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|i| <a href="sty.rs.html#989">ty::BoundVariableKind::Region</a>(<a href="sty.rs.html#61">ty::BrAnon</a>(<a href="#650">i</a>))),
+        );
+        Binder::bind_with_vars(<a href="#638">inner</a>, <a href="#649">bound_vars</a>)
+    }
+
+    <span class="doccomment">/// Anonymize all bound variables in `value`, this is mostly used to improve caching.
+    </span><span class="kw">pub fn </span>anonymize_bound_vars&lt;T&gt;(<span class="self">self</span>, value: Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;) -&gt; Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;
+    <span class="kw">where
+        </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">struct </span>Anonymize&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+            tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+            map: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>FxIndexMap&lt;<a href="sty.rs.html#1411-1414">ty::BoundVar</a>, <a href="sty.rs.html#987">ty::BoundVariableKind</a>&gt;,
+        }
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; BoundVarReplacerDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Anonymize&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">fn </span>replace_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, br: <a href="sty.rs.html#76">ty::BoundRegion</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <span class="kw">let </span>entry = <a class="self" href="#665">self</a>.map.entry(<a href="#665">br</a>.var);
+                <span class="kw">let </span>index = <a href="#666">entry</a>.index();
+                <span class="kw">let </span>var = ty::BoundVar::from_usize(<a href="#667">index</a>);
+                <span class="kw">let </span>kind = <a href="#666">entry</a>
+                    .or_insert_with(|| <a href="sty.rs.html#989">ty::BoundVariableKind::Region</a>(<a href="sty.rs.html#61">ty::BrAnon</a>(<a href="#667">index</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>)))
+                    .<a href="sty.rs.html#994">expect_region</a>();
+                <span class="kw">let </span>br = <a href="sty.rs.html#76">ty::BoundRegion</a> { <a href="#668">var</a>, <a href="#669">kind</a> };
+                <a class="self" href="#665">self</a>.tcx.<a href="context.rs.html#2245-2251">mk_region</a>(ty::ReLateBound(<a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#672">br</a>))
+            }
+            <span class="kw">fn </span>replace_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bt: <a href="sty.rs.html#1418">ty::BoundTy</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <span class="kw">let </span>entry = <a class="self" href="#675">self</a>.map.entry(<a href="#675">bt</a>.var);
+                <span class="kw">let </span>index = <a href="#676">entry</a>.index();
+                <span class="kw">let </span>var = ty::BoundVar::from_usize(<a href="#677">index</a>);
+                <span class="kw">let </span>kind = <a href="#676">entry</a>
+                    .or_insert_with(|| <a href="sty.rs.html#988">ty::BoundVariableKind::Ty</a>(<a href="sty.rs.html#1426">ty::BoundTyKind::Anon</a>))
+                    .<a href="sty.rs.html#1001">expect_ty</a>();
+                <a class="self" href="#675">self</a>.tcx.<a href="context.rs.html#2365">mk_ty</a>(ty::Bound(<a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="sty.rs.html#1418">BoundTy</a> { <a href="#678">var</a>, <a href="#679">kind</a> }))
+            }
+            <span class="kw">fn </span>replace_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bv: <a href="sty.rs.html#1411-1414">ty::BoundVar</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+                <span class="kw">let </span>entry = <a class="self" href="#684">self</a>.map.entry(<a href="#684">bv</a>);
+                <span class="kw">let </span>index = <a href="#685">entry</a>.index();
+                <span class="kw">let </span>var = ty::BoundVar::from_usize(<a href="#686">index</a>);
+                <span class="kw">let </span>() = <a href="#685">entry</a>.or_insert_with(|| <a href="sty.rs.html#990">ty::BoundVariableKind::Const</a>).<a href="sty.rs.html#1008">expect_const</a>();
+                <a class="self" href="#684">self</a>.tcx.<a href="context.rs.html#2245-2251">mk_const</a>(<a href="consts.rs.html#38">ty::ConstS</a> { <a href="#684">ty</a>, kind: <a href="consts/kind.rs.html#63">ty::ConstKind::Bound</a>(<a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#687">var</a>) })
+            }
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>map = <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>();
+        <span class="kw">let </span>delegate = <a href="#660">Anonymize</a> { tcx: <a class="self" href="#656">self</a>, map: <span class="kw-2">&amp;mut </span><a href="#693">map</a> };
+        <span class="kw">let </span>inner = <a class="self" href="#656">self</a>.<a href="#544-548">replace_escaping_bound_vars_uncached</a>(<a href="#656">value</a>.<a href="sty.rs.html#1068">skip_binder</a>(), <a href="#694">delegate</a>);
+        <span class="kw">let </span>bound_vars = <a class="self" href="#656">self</a>.<a href="context.rs.html#2806-2811">mk_bound_variable_kinds</a>(<a href="#693">map</a>.into_values());
+        Binder::bind_with_vars(<a href="#695">inner</a>, <a href="#696">bound_vars</a>)
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// Shifter
+//
+// Shifts the De Bruijn indices on all escaping bound vars by a
+// fixed amount. Useful in substitution or when otherwise introducing
+// a binding level that is not intended to capture the existing bound
+// vars. See comment on `shift_vars_through_binders` method in
+// `subst.rs` for more details.
+
+</span><span class="kw">struct </span>Shifter&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    current_index: <a href="../../../rustc_middle/ty/struct.DebruijnIndex.html">ty::DebruijnIndex</a>,
+    amount: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Shifter&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, amount: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) -&gt; <span class="self">Self </span>{
+        <a href="#710">Shifter</a> { <a href="#717">tcx</a>, current_index: <a href="../../../rustc_middle/ty/constant.INNERMOST.html">ty::INNERMOST</a>, <a href="#717">amount</a> }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Shifter&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#723">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_binder&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a class="self" href="#728">self</a>.current_index.shift_in(<span class="number">1</span>);
+        <span class="kw">let </span>t = <a href="#729">t</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#728">self</a>);
+        <a class="self" href="#728">self</a>.current_index.shift_out(<span class="number">1</span>);
+        <a href="#732">t</a>
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#737">r</a> {
+            ty::ReLateBound(debruijn, br) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.amount == <span class="number">0 </span>|| debruijn &lt; <span class="self">self</span>.current_index {
+                    <a href="#737">r</a>
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>debruijn = <a href="#739">debruijn</a>.shifted_in(<a class="self" href="#737">self</a>.amount);
+                    <span class="kw">let </span>shifted = ty::ReLateBound(<a href="#743">debruijn</a>, <a href="#739">br</a>);
+                    <a class="self" href="#737">self</a>.tcx.<a href="context.rs.html#2245-2251">mk_region</a>(<a href="#744">shifted</a>)
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a href="#737">r</a>,
+        }
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#752">ty</a>.<a href="sty.rs.html#1639">kind</a>() {
+            ty::Bound(debruijn, bound_ty) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.amount == <span class="number">0 </span>|| debruijn &lt; <span class="self">self</span>.current_index {
+                    <a href="#752">ty</a>
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>debruijn = <a href="#754">debruijn</a>.shifted_in(<a class="self" href="#752">self</a>.amount);
+                    <a class="self" href="#752">self</a>.tcx.<a href="context.rs.html#2365">mk_ty</a>(ty::Bound(<a href="#758">debruijn</a>, <a href="#754">bound_ty</a>))
+                }
+            }
+
+            <span class="kw">_ </span>=&gt; <a href="#752">ty</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#752">self</a>),
+        }
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><a href="consts/kind.rs.html#63">ty::ConstKind::Bound</a>(debruijn, bound_ct) = <a href="#767">ct</a>.<a href="consts.rs.html#53">kind</a>() {
+            <span class="kw">if </span><span class="self">self</span>.amount == <span class="number">0 </span>|| debruijn &lt; <span class="self">self</span>.current_index {
+                <a href="#767">ct</a>
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>debruijn = <a href="#768">debruijn</a>.shifted_in(<a class="self" href="#767">self</a>.amount);
+                <a class="self" href="#767">self</a>.tcx.<a href="context.rs.html#2245-2251">mk_const</a>(<a href="consts.rs.html#38">ty::ConstS</a> {
+                    kind: <a href="consts/kind.rs.html#63">ty::ConstKind::Bound</a>(<a href="#772">debruijn</a>, <a href="#768">bound_ct</a>),
+                    ty: <a href="#767">ct</a>.<a href="consts.rs.html#48">ty</a>(),
+                })
+            }
+        } <span class="kw">else </span>{
+            <a href="#767">ct</a>.<a href="#95">super_fold_with</a>(<a class="self" href="#767">self</a>)
+        }
+    }
+}
+
+<span class="kw">pub fn </span>shift_region&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    amount: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#786">region</a> {
+        ty::ReLateBound(debruijn, br) <span class="kw">if </span><a href="#787">amount</a> &gt; <span class="number">0 </span>=&gt; {
+            <a href="#785">tcx</a>.<a href="context.rs.html#2245-2251">mk_region</a>(ty::ReLateBound(<a href="#790">debruijn</a>.shifted_in(<a href="#787">amount</a>), <a href="#790">br</a>))
+        }
+        <span class="kw">_ </span>=&gt; <a href="#786">region</a>,
+    }
+}
+
+<span class="kw">pub fn </span>shift_vars&lt;<span class="lifetime">&#39;tcx</span>, T&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, value: T, amount: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) -&gt; T
+<span class="kw">where
+    </span>T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;shift_vars(value={:?}, amount={})&quot;</span>, value, amount);
+
+    <a href="#797">value</a>.<a href="#74">fold_with</a>(<span class="kw-2">&amp;mut </span>Shifter::new(<a href="#797">tcx</a>, <a href="#797">amount</a>))
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,466 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/generator_interior/drop_ranges/record_consumed_borrow.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>record_consumed_borrow.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../../normalize.css"><link rel="stylesheet" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../../dark.css" disabled><link rel="stylesheet" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../drop_ranges.rs.html#112"><span class="kw">super</span>::TrackedValue</a>;
+<span class="kw">use crate</span>::{
+    <a href="../../fn_ctxt/mod.rs.html#40">check::FnCtxt</a>,
+    expr_use_visitor::{<a class="self" href="../../../lib.rs.html#87">self</a>, <a href="../../../expr_use_visitor.rs.html#104">ExprUseVisitor</a>},
+};
+<span class="kw">use </span>hir::{<a href="../../../../../rustc_span/def_id/struct.DefId.html">def_id::DefId</a>, <a href="../../../../../rustc_hir/hir/struct.Body.html">Body</a>, <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../../../../rustc_hir/hir_id/type.HirIdMap.html">HirIdMap</a>};
+<span class="kw">use </span>rustc_data_structures::fx::FxHashSet;
+<span class="kw">use </span><a href="../../../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_middle::hir::place::{<a href="../../../../../rustc_typeck/expr_use_visitor/enum.PlaceBase.html">PlaceBase</a>, <a href="../../../../../rustc_typeck/expr_use_visitor/struct.Projection.html">Projection</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/hir/place/enum.ProjectionKind.html">ProjectionKind</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.ParamEnv.html">ParamEnv</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>find_consumed_and_borrowed&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    fcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <a href="#22">ConsumedAndBorrowedPlaces</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>expr_use_visitor = ExprUseDelegate::new(<a href="#13">fcx</a>.tcx, <a href="#13">fcx</a>.param_env);
+    <a href="#17">expr_use_visitor</a>.<a href="#62">consume_body</a>(<a href="#13">fcx</a>, <a href="#14">def_id</a>, <a href="#15">body</a>);
+    <a href="#17">expr_use_visitor</a>.places
+}
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>ConsumedAndBorrowedPlaces {
+    <span class="doccomment">/// Records the variables/expressions that are dropped by a given expression.
+    ///
+    /// The key is the hir-id of the expression, and the value is a set or hir-ids for variables
+    /// or values that are consumed by that expression.
+    ///
+    /// Note that this set excludes &quot;partial drops&quot; -- for example, a statement like `drop(x.y)` is
+    /// not considered a drop of `x`, although it would be a drop of `x.y`.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) consumed: HirIdMap&lt;FxHashSet&lt;<a href="../drop_ranges.rs.html#112">TrackedValue</a>&gt;&gt;,
+
+    <span class="doccomment">/// A set of hir-ids of values or variables that are borrowed at some point within the body.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) borrowed: FxHashSet&lt;<a href="../drop_ranges.rs.html#112">TrackedValue</a>&gt;,
+
+    <span class="doccomment">/// A set of hir-ids of values or variables that are borrowed at some point within the body.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) borrowed_temporaries: FxHashSet&lt;<a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>&gt;,
+}
+
+<span class="doccomment">/// Works with ExprUseVisitor to find interesting values for the drop range analysis.
+///
+/// Interesting values are those that are either dropped or borrowed. For dropped values, we also
+/// record the parent expression, which is the point where the drop actually takes place.
+</span><span class="kw">struct </span>ExprUseDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    param_env: ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    places: <a href="#22">ConsumedAndBorrowedPlaces</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; ExprUseDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, param_env: ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#50">tcx</a>,
+            <a href="#50">param_env</a>,
+            places: <a href="#22">ConsumedAndBorrowedPlaces</a> {
+                consumed: &lt;<span class="kw">_</span>&gt;::default(),
+                borrowed: &lt;<span class="kw">_</span>&gt;::default(),
+                borrowed_temporaries: &lt;<span class="kw">_</span>&gt;::default(),
+            },
+        }
+    }
+
+    <span class="kw">fn </span>consume_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, fcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>FnCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="comment">// Run ExprUseVisitor to find where values are consumed.
+        </span>ExprUseVisitor::new(
+            <a class="self" href="#62">self</a>,
+            <span class="kw-2">&amp;</span><a href="#62">fcx</a>.infcx,
+            <a href="#62">def_id</a>.expect_local(),
+            <a href="#62">fcx</a>.param_env,
+            <span class="kw-2">&amp;</span><a href="#62">fcx</a>.typeck_results.borrow(),
+        )
+        .<a href="../../../expr_use_visitor.rs.html#149">consume_body</a>(<a href="#62">body</a>);
+    }
+
+    <span class="kw">fn </span>mark_consumed(<span class="kw-2">&amp;mut </span><span class="self">self</span>, consumer: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, target: <a href="../drop_ranges.rs.html#112">TrackedValue</a>) {
+        <a class="self" href="#74">self</a>.places.consumed.entry(<a href="#74">consumer</a>).or_insert_with(|| &lt;<span class="kw">_</span>&gt;::default());
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>consumer, <span class="question-mark">?</span>target, <span class="string">&quot;mark_consumed&quot;</span>);
+        <a class="self" href="#74">self</a>.places.consumed.get_mut(<span class="kw-2">&amp;</span><a href="#74">consumer</a>).map(|places| <a href="#78">places</a>.insert(<a href="#74">target</a>));
+    }
+
+    <span class="kw">fn </span>borrow_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, place_with_id: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="self" href="#81">self</a>.places
+            .borrowed
+            .insert(TrackedValue::from_place_with_projections_allowed(<a href="#81">place_with_id</a>));
+
+        <span class="comment">// Ordinarily a value is consumed by it&#39;s parent, but in the special case of a
+        // borrowed RValue, we create a reference that lives as long as the temporary scope
+        // for that expression (typically, the innermost statement, but sometimes the enclosing
+        // block). We record this fact here so that later in generator_interior
+        // we can use the correct scope.
+        //
+        // We special case borrows through a dereference (`&amp;*x`, `&amp;mut *x` where `x` is
+        // some rvalue expression), since these are essentially a copy of a pointer.
+        // In other words, this borrow does not refer to the
+        // temporary (`*x`), but to the referent (whatever `x` is a borrow of).
+        //
+        // We were considering that we might encounter problems down the line if somehow,
+        // some part of the compiler were to look at this result and try to use it to
+        // drive a borrowck-like analysis (this does not currently happen, as of this writing).
+        // But even this should be fine, because the lifetime of the dereferenced reference
+        // found in the rvalue is only significant as an intermediate &#39;link&#39; to the value we
+        // are producing, and we separately track whether that value is live over a yield.
+        // Example:
+        //
+        // ```notrust
+        // fn identity&lt;T&gt;(x: &amp;mut T) -&gt; &amp;mut T { x }
+        // let a: A = ...;
+        // let y: &amp;&#39;y mut A = &amp;mut *identity(&amp;&#39;a mut a);
+        //                    ^^^^^^^^^^^^^^^^^^^^^^^^^ the borrow we are talking about
+        // ```
+        //
+        // The expression `*identity(...)` is a deref of an rvalue,
+        // where the `identity(...)` (the rvalue) produces a return type
+        // of `&amp;&#39;rv mut A`, where `&#39;a: &#39;rv`. We then assign this result to
+        // `&#39;y`, resulting in (transitively) `&#39;a: &#39;y` (i.e., while `y` is in use,
+        // `a` will be considered borrowed).  Other parts of the code will ensure
+        // that if `y` is live over a yield, `&amp;&#39;y mut A` appears in the generator
+        // state. If `&#39;y` is live, then any sound region analysis must conclude
+        // that `&#39;a` is also live. So if this causes a bug, blame some other
+        // part of the code!
+        </span><span class="kw">let </span>is_deref = <a href="#81">place_with_id</a>
+            .place
+            .projections
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|<a href="../../../../../rustc_typeck/expr_use_visitor/struct.Projection.html">Projection</a> { kind, .. }| <span class="kw-2">*</span><a href="#125">kind</a> == ProjectionKind::Deref);
+
+        <span class="kw">if let </span>(<span class="bool-val">false</span>, PlaceBase::Rvalue) = (<a href="#121">is_deref</a>, <a href="#81">place_with_id</a>.place.base) {
+            <a class="self" href="#81">self</a>.places.borrowed_temporaries.insert(<a href="#81">place_with_id</a>.hir_id);
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; expr_use_visitor::Delegate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ExprUseDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>consume(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    ) {
+        <span class="kw">let </span>hir = <a class="self" href="#135">self</a>.tcx.hir();
+        <span class="kw">let </span>parent = <span class="kw">match </span><a href="#139">hir</a>.find_parent_node(<a href="#136">place_with_id</a>.hir_id) {
+            <span class="prelude-val">Some</span>(parent) =&gt; <a href="#141">parent</a>,
+            <span class="prelude-val">None </span>=&gt; <a href="#136">place_with_id</a>.hir_id,
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;consume {:?}; diag_expr_id={}, using parent {}&quot;</span>,
+            place_with_id,
+            hir.node_to_string(diag_expr_id),
+            hir.node_to_string(parent)
+        );
+        <a href="#136">place_with_id</a>
+            .<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>()
+            .map_or((), |tracked_value| <a class="self" href="#135">self</a>.<a href="#74">mark_consumed</a>(<a href="#140">parent</a>, <a href="#152">tracked_value</a>));
+    }
+
+    <span class="kw">fn </span>borrow(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        bk: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/closure/enum.BorrowKind.html">rustc_middle::ty::BorrowKind</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;borrow: place_with_id = {place_with_id:#?}, diag_expr_id={diag_expr_id:#?}, \
+            borrow_kind={bk:#?}&quot;
+        </span>);
+
+        <a class="self" href="#156">self</a>.<a href="#81">borrow_place</a>(<a href="#157">place_with_id</a>);
+    }
+
+    <span class="kw">fn </span>copy(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        _diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;copy: place_with_id = {place_with_id:?}&quot;</span>);
+
+        <a class="self" href="#170">self</a>.places
+            .borrowed
+            .insert(TrackedValue::from_place_with_projections_allowed(<a href="#171">place_with_id</a>));
+
+        <span class="comment">// For copied we treat this mostly like a borrow except that we don&#39;t add the place
+        // to borrowed_temporaries because the copy is consumed.
+    </span>}
+
+    <span class="kw">fn </span>mutate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        assignee_place: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;mutate {assignee_place:?}; diag_expr_id={diag_expr_id:?}&quot;</span>);
+
+        <span class="kw">if </span>assignee_place.place.base == PlaceBase::Rvalue
+            &amp;&amp; assignee_place.place.projections.is_empty()
+        {
+            <span class="comment">// Assigning to an Rvalue is illegal unless done through a dereference. We would have
+            // already gotten a type error, so we will just return here.
+            </span><span class="kw">return</span>;
+        }
+
+        <span class="comment">// If the type being assigned needs dropped, then the mutation counts as a borrow
+        // since it is essentially doing `Drop::drop(&amp;mut x); x = new_value;`.
+        </span><span class="kw">if </span>assignee_place.place.base_ty.needs_drop(<span class="self">self</span>.tcx, <span class="self">self</span>.param_env) {
+            <a class="self" href="#185">self</a>.places
+                .borrowed
+                .insert(TrackedValue::from_place_with_projections_allowed(<a href="#186">assignee_place</a>));
+        }
+    }
+
+    <span class="kw">fn </span>bind(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        binding_place: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;bind {binding_place:?}; diag_expr_id={diag_expr_id:?}&quot;</span>);
+    }
+
+    <span class="kw">fn </span>fake_read(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>expr_use_visitor::PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cause: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.FakeReadCause.html">rustc_middle::mir::FakeReadCause</a>,
+        diag_expr_id: <a href="../../../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;fake_read place_with_id={place_with_id:?}; cause={cause:?}; diag_expr_id={diag_expr_id:?}&quot;
+        </span>);
+
+        <span class="comment">// fake reads happen in places like the scrutinee of a match expression.
+        // we treat those as a borrow, much like a copy: the idea is that we are
+        // transiently creating a `&amp;T` ref that we can read from to observe the current
+        // value (this `&amp;T` is immediately dropped afterwards).
+        </span><a class="self" href="#217">self</a>.<a href="#81">borrow_place</a>(<a href="#218">place_with_id</a>);
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

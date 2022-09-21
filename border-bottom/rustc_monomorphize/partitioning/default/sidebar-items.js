@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["characteristic_def_id_of_mono_item",""],["compute_codegen_unit_name",""],["default_visibility",""],["fallback_cgu_name",""],["mono_item_linkage_and_visibility",""],["mono_item_visibility",""]],"struct":[["DefaultPartitioning",""]],"type":[["CguNameCache",""]]};

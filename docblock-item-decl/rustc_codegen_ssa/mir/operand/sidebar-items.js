@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["OperandValue","The representation of a Rust value. The enum variant is in fact uniquely determined by the value’s type, but is kept as a safety check."]],"struct":[["OperandRef","An `OperandRef` is an “SSA” reference to a Rust value, along with its type."]]};

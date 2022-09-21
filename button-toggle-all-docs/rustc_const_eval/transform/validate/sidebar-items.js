@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["EdgeKind",""]],"fn":[["equal_up_to_regions","Returns whether the two types are equal up to lifetimes. All lifetimes, including higher-ranked ones, get ignored for this comparison. (This is unlike the `erasing_regions` methods, which keep higher-ranked lifetimes for soundness reasons.)"]],"struct":[["TypeChecker",""],["Validator",""]]};

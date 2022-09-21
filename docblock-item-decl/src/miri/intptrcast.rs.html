@@ -1,0 +1,522 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/intptrcast.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intptrcast.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../miri/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefCell.html">std::cell::RefCell</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cmp/fn.max.html">std::cmp::max</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/collections/hash/map/enum.Entry.html">std::collections::hash_map::Entry</a>;
+
+<span class="kw">use </span><a href="https://docs.rs/log/0.4.14/log/macro.trace.html">log::trace</a>;
+<span class="kw">use </span><a href="https://rust-random.github.io/rand/rand/rng/trait.Rng.html">rand::Rng</a>;
+
+<span class="kw">use </span>rustc_data_structures::fx::{FxHashMap, FxHashSet};
+<span class="kw">use </span><a href="../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+<span class="kw">use </span>rustc_target::abi::{<a href="../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>, <a href="../../rustc_target/abi/struct.Size.html">Size</a>};
+
+<span class="kw">use crate</span>::<span class="kw-2">*</span>;
+
+<span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+</span><span class="kw">pub enum </span>ProvenanceMode {
+    <span class="doccomment">/// We support `expose_addr`/`from_exposed_addr` via &quot;wildcard&quot; provenance.
+    /// However, we want on `from_exposed_addr` to alert the user of the precision loss.
+    </span>Default,
+    <span class="doccomment">/// Like `Default`, but without the warning.
+    </span>Permissive,
+    <span class="doccomment">/// We error on `from_exposed_addr`, ensuring no precision loss.
+    </span>Strict,
+}
+
+<span class="kw">pub type </span>GlobalState = RefCell&lt;<a href="#28">GlobalStateInner</a>&gt;;
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>GlobalStateInner {
+    <span class="doccomment">/// This is used as a map between the address of each allocation and its `AllocId`.
+    /// It is always sorted
+    </span>int_to_ptr_map: Vec&lt;(<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>, <a href="../../miri/struct.AllocId.html">AllocId</a>)&gt;,
+    <span class="doccomment">/// The base address for each allocation.  We cannot put that into
+    /// `AllocExtra` because function pointers also have a base address, and
+    /// they do not have an `AllocExtra`.
+    /// This is the inverse of `int_to_ptr_map`.
+    </span>base_addr: FxHashMap&lt;<a href="../../miri/struct.AllocId.html">AllocId</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt;,
+    <span class="doccomment">/// Whether an allocation has been exposed or not. This cannot be put
+    /// into `AllocExtra` for the same reason as `base_addr`.
+    </span>exposed: FxHashSet&lt;<a href="../../miri/struct.AllocId.html">AllocId</a>&gt;,
+    <span class="doccomment">/// This is used as a memory address when a new pointer is casted to an integer. It
+    /// is always larger than any address that was previously made part of a block.
+    </span>next_base_addr: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    <span class="doccomment">/// The provenance to use for int2ptr casts
+    </span>provenance_mode: <a href="#15">ProvenanceMode</a>,
+}
+
+<span class="kw">impl </span><a href="#28">GlobalStateInner</a> {
+    <span class="kw">pub fn </span>new(config: <span class="kw-2">&amp;</span><a href="eval.rs.html#75">MiriConfig</a>) -&gt; <span class="self">Self </span>{
+        <a href="#28">GlobalStateInner</a> {
+            int_to_ptr_map: Vec::default(),
+            base_addr: FxHashMap::default(),
+            exposed: FxHashSet::default(),
+            next_base_addr: <a href="machine.rs.html#37">STACK_ADDR</a>,
+            provenance_mode: <a href="#48">config</a>.provenance_mode,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <a href="#28">GlobalStateInner</a> {
+    <span class="comment">// Returns the exposed `AllocId` that corresponds to the specified addr,
+    // or `None` if the addr is out of bounds
+    </span><span class="kw">fn </span>alloc_id_from_addr(ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;, addr: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../miri/struct.AllocId.html">AllocId</a>&gt; {
+        <span class="kw">let </span>global_state = <a href="#62">ecx</a>.machine.intptrcast.borrow();
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(global_state.provenance_mode != ProvenanceMode::Strict);
+
+        <span class="kw">let </span>pos = <a href="#63">global_state</a>.int_to_ptr_map.binary_search_by_key(<span class="kw-2">&amp;</span><a href="#62">addr</a>, |(addr, <span class="kw">_</span>)| <span class="kw-2">*</span><a href="#66">addr</a>);
+
+        <span class="comment">// Determine the in-bounds provenance for this pointer.
+        // (This is only called on an actual access, so in-bounds is the only possible kind of provenance.)
+        </span><span class="kw">let </span>alloc_id = <span class="kw">match </span>pos {
+            <span class="prelude-val">Ok</span>(pos) =&gt; <span class="prelude-val">Some</span>(global_state.int_to_ptr_map[pos].<span class="number">1</span>),
+            <span class="prelude-val">Err</span>(<span class="number">0</span>) =&gt; <span class="prelude-val">None</span>,
+            <span class="prelude-val">Err</span>(pos) =&gt; {
+                <span class="comment">// This is the largest of the adresses smaller than `int`,
+                // i.e. the greatest lower bound (glb)
+                </span><span class="kw">let </span>(glb, alloc_id) = global_state.int_to_ptr_map[pos - <span class="number">1</span>];
+                <span class="comment">// This never overflows because `addr &gt;= glb`
+                </span><span class="kw">let </span>offset = addr - glb;
+                <span class="comment">// If the offset exceeds the size of the allocation, don&#39;t use this `alloc_id`.
+                </span><span class="kw">let </span>size = ecx.get_alloc_info(alloc_id).<span class="number">0</span>;
+                <span class="kw">if </span>offset &lt;= size.bytes() { <span class="prelude-val">Some</span>(alloc_id) } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+            }
+        }<span class="question-mark">?</span>;
+
+        <span class="comment">// We only use this provenance if it has been exposed, *and* is still live.
+        </span><span class="kw">if </span>global_state.exposed.contains(<span class="kw-2">&amp;</span>alloc_id) {
+            <span class="kw">let </span>(_size, _align, kind) = <a href="#62">ecx</a>.get_alloc_info(<a href="#70">alloc_id</a>);
+            <span class="kw">match </span><a href="#87">kind</a> {
+                AllocKind::LiveData | AllocKind::Function | AllocKind::VTable =&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#70">alloc_id</a>);
+                }
+                AllocKind::Dead =&gt; {}
+            }
+        }
+
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">pub fn </span>expose_ptr(
+        ecx: <span class="kw-2">&amp;mut </span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        alloc_id: <a href="../../miri/struct.AllocId.html">AllocId</a>,
+        sb: <a href="stacked_borrows/mod.rs.html#39">SbTag</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>global_state = <a href="#100">ecx</a>.machine.intptrcast.get_mut();
+        <span class="comment">// In strict mode, we don&#39;t need this, so we can save some cycles by not tracking it.
+        </span><span class="kw">if </span>global_state.provenance_mode != ProvenanceMode::Strict {
+            <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;Exposing allocation id {alloc_id:?}&quot;</span>);
+            <a href="#104">global_state</a>.exposed.insert(<a href="#101">alloc_id</a>);
+            <span class="kw">if </span>ecx.machine.stacked_borrows.is_some() {
+                ecx.expose_tag(alloc_id, sb)<span class="question-mark">?</span>;
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub fn </span>ptr_from_addr_transmute(
+        _ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        addr: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    ) -&gt; Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;Transmuting {:#x} to a pointer&quot;</span>, addr);
+
+        <span class="comment">// We consider transmuted pointers to be &quot;invalid&quot; (`None` provenance).
+        </span>Pointer::new(<span class="prelude-val">None</span>, Size::from_bytes(<a href="#118">addr</a>))
+    }
+
+    <span class="kw">pub fn </span>ptr_from_addr_cast(
+        ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        addr: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Pointer&lt;<span class="prelude-ty">Option</span>&lt;<a href="machine.rs.html#130">Provenance</a>&gt;&gt;&gt; {
+        <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(<span class="string">&quot;Casting {:#x} to a pointer&quot;</span>, addr);
+
+        <span class="kw">let </span>global_state = <a href="#127">ecx</a>.machine.intptrcast.borrow();
+
+        <span class="kw">match </span><a href="#132">global_state</a>.provenance_mode {
+            <a href="#18">ProvenanceMode::Default</a> =&gt; {
+                <span class="comment">// The first time this happens at a particular location, print a warning.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.thread_local.html">thread_local! </a>{
+                    <span class="comment">// `Span` is non-`Send`, so we use a thread-local instead.
+                    </span><span class="kw">static </span>PAST_WARNINGS: RefCell&lt;FxHashSet&lt;Span&gt;&gt; = RefCell::default();
+                }
+                <a href="#137-140">PAST_WARNINGS</a>.with_borrow_mut(|past_warnings| {
+                    <span class="kw">let </span>first = <a href="#141">past_warnings</a>.is_empty();
+                    <span class="kw">if </span>past_warnings.insert(ecx.cur_span()) {
+                        <span class="comment">// Newly inserted, so first time we see this span.
+                        </span><a href="diagnostics.rs.html#378">register_diagnostic</a>(<a href="diagnostics.rs.html#76">NonHaltingDiagnostic::Int2Ptr</a> { details: <a href="#142">first</a> });
+                    }
+                });
+            }
+            <a href="#22">ProvenanceMode::Strict</a> =&gt; {
+                <a class="macro" href="../../rustc_middle/rustc_middle/macro.throw_machine_stop.html">throw_machine_stop!</a>(TerminationInfo::Int2PtrWithStrictProvenance);
+            }
+            <a href="#20">ProvenanceMode::Permissive</a> =&gt; {}
+        }
+
+        <span class="comment">// This is how wildcard pointers are born.
+        </span><span class="prelude-val">Ok</span>(Pointer::new(<span class="prelude-val">Some</span>(<a href="machine.rs.html#136">Provenance::Wildcard</a>), Size::from_bytes(<a href="#128">addr</a>)))
+    }
+
+    <span class="kw">fn </span>alloc_base_addr(ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;, alloc_id: <a href="../../miri/struct.AllocId.html">AllocId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>global_state = <a href="#159">ecx</a>.machine.intptrcast.borrow_mut();
+        <span class="kw">let </span>global_state = <span class="kw-2">&amp;mut *</span><a href="#160">global_state</a>;
+
+        <span class="kw">match </span><a href="#161">global_state</a>.base_addr.entry(<a href="#159">alloc_id</a>) {
+            Entry::Occupied(entry) =&gt; <span class="kw-2">*</span><a href="#164">entry</a>.get(),
+            Entry::Vacant(entry) =&gt; {
+                <span class="comment">// There is nothing wrong with a raw pointer being cast to an integer only after
+                // it became dangling.  Hence we allow dead allocations.
+                </span><span class="kw">let </span>(size, align, _kind) = <a href="#159">ecx</a>.get_alloc_info(<a href="#159">alloc_id</a>);
+
+                <span class="comment">// This allocation does not have a base address yet, pick one.
+                // Leave some space to the previous allocation, to give it some chance to be less aligned.
+                </span><span class="kw">let </span>slack = {
+                    <span class="kw">let </span><span class="kw-2">mut </span>rng = <a href="#159">ecx</a>.machine.rng.borrow_mut();
+                    <span class="comment">// This means that `(global_state.next_base_addr + slack) % 16` is uniformly distributed.
+                    </span><a href="#173">rng</a>.<a href="https://rust-random.github.io/rand/rand/rng/trait.Rng.html">gen_range</a>(<span class="number">0</span>..<span class="number">16</span>)
+                };
+                <span class="comment">// From next_base_addr + slack, round up to adjust for alignment.
+                </span><span class="kw">let </span>base_addr = <a href="#161">global_state</a>.next_base_addr.checked_add(<a href="#172">slack</a>).unwrap();
+                <span class="kw">let </span>base_addr = <span class="self">Self</span>::align_addr(<a href="#178">base_addr</a>, <a href="#168">align</a>.bytes());
+                <a href="#165">entry</a>.insert(<a href="#179">base_addr</a>);
+                <a class="macro" href="https://docs.rs/log/0.4.14/log/macro.trace.html">trace!</a>(
+                    <span class="string">&quot;Assigning base address {:#x} to allocation {:?} (size: {}, align: {}, slack: {})&quot;</span>,
+                    base_addr,
+                    alloc_id,
+                    size.bytes(),
+                    align.bytes(),
+                    slack,
+                );
+
+                <span class="comment">// Remember next base address.  If this allocation is zero-sized, leave a gap
+                // of at least 1 to avoid two allocations having the same base address.
+                // (The logic in `alloc_id_from_addr` assumes unique addresses, and different
+                // function/vtable pointers need to be distinguishable!)
+                </span><a href="#161">global_state</a>.next_base_addr = <a href="#179">base_addr</a>.checked_add(<a href="https://doc.rust-lang.org/nightly/core/cmp/fn.max.html">max</a>(<a href="#168">size</a>.bytes(), <span class="number">1</span>)).unwrap();
+                <span class="comment">// Given that `next_base_addr` increases in each allocation, pushing the
+                // corresponding tuple keeps `int_to_ptr_map` sorted
+                </span><a href="#161">global_state</a>.int_to_ptr_map.push((<a href="#179">base_addr</a>, <a href="#159">alloc_id</a>));
+
+                <a href="#179">base_addr</a>
+            }
+        }
+    }
+
+    <span class="doccomment">/// Convert a relative (tcx) pointer to an absolute address.
+    </span><span class="kw">pub fn </span>rel_ptr_to_addr(ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;, ptr: Pointer&lt;<a href="../../miri/struct.AllocId.html">AllocId</a>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <span class="kw">let </span>(alloc_id, offset) = <a href="#205">ptr</a>.into_parts(); <span class="comment">// offset is relative (AllocId provenance)
+        </span><span class="kw">let </span>base_addr = GlobalStateInner::alloc_base_addr(<a href="#205">ecx</a>, <a href="#206">alloc_id</a>);
+
+        <span class="comment">// Add offset with the right kind of pointer-overflowing arithmetic.
+        </span><span class="kw">let </span>dl = <a href="#205">ecx</a>.<a href="../../rustc_target/abi/trait.HasDataLayout.html">data_layout</a>();
+        <a href="#210">dl</a>.<a href="../../miri/trait.PointerArithmetic.html">overflowing_offset</a>(<a href="#207">base_addr</a>, <a href="#206">offset</a>.bytes()).<span class="number">0
+    </span>}
+
+    <span class="doccomment">/// When a pointer is used for a memory access, this computes where in which allocation the
+    /// access is going.
+    </span><span class="kw">pub fn </span>abs_ptr_to_rel(
+        ecx: <span class="kw-2">&amp;</span>MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        ptr: Pointer&lt;<a href="machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="../../miri/struct.AllocId.html">AllocId</a>, <a href="../../rustc_target/abi/struct.Size.html">Size</a>)&gt; {
+        <span class="kw">let </span>(tag, addr) = <a href="#218">ptr</a>.into_parts(); <span class="comment">// addr is absolute (Tag provenance)
+
+        </span><span class="kw">let </span>alloc_id = <span class="kw">if let </span><a href="machine.rs.html#131">Provenance::Concrete</a> { alloc_id, .. } = <a href="#220">tag</a> {
+            <a href="#222">alloc_id</a>
+        } <span class="kw">else </span>{
+            <span class="comment">// A wildcard pointer.
+            </span>GlobalStateInner::alloc_id_from_addr(ecx, addr.bytes())<span class="question-mark">?
+        </span>};
+
+        <span class="kw">let </span>base_addr = GlobalStateInner::alloc_base_addr(<a href="#217">ecx</a>, <a href="#222">alloc_id</a>);
+
+        <span class="comment">// Wrapping &quot;addr - base_addr&quot;
+        </span><span class="kw">let </span>dl = <a href="#217">ecx</a>.<a href="../../rustc_target/abi/trait.HasDataLayout.html">data_layout</a>();
+        <span class="attribute">#[allow(clippy::cast_possible_wrap)] </span><span class="comment">// we want to wrap here
+        </span><span class="kw">let </span>neg_base_addr = (<a href="#229">base_addr</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>).wrapping_neg();
+        <span class="prelude-val">Some</span>((
+            <a href="#222">alloc_id</a>,
+            Size::from_bytes(<a href="#232">dl</a>.<a href="../../miri/trait.PointerArithmetic.html">overflowing_signed_offset</a>(<a href="#220">addr</a>.bytes(), <a href="#234">neg_base_addr</a>).<span class="number">0</span>),
+        ))
+    }
+
+    <span class="doccomment">/// Shifts `addr` to make it aligned with `align` by rounding `addr` to the smallest multiple
+    /// of `align` that is larger or equal to `addr`
+    </span><span class="kw">fn </span>align_addr(addr: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>, align: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <span class="kw">match </span><a href="#243">addr</a> % <a href="#243">align</a> {
+            <span class="number">0 </span>=&gt; <a href="#243">addr</a>,
+            rem =&gt; <a href="#243">addr</a>.checked_add(<a href="#243">align</a>).unwrap() - <a href="#246">rem</a>,
+        }
+    }
+}
+
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_align_addr() {
+        <span class="macro">assert_eq!</span>(GlobalStateInner::align_addr(<span class="number">37</span>, <span class="number">4</span>), <span class="number">40</span>);
+        <span class="macro">assert_eq!</span>(GlobalStateInner::align_addr(<span class="number">44</span>, <span class="number">4</span>), <span class="number">44</span>);
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

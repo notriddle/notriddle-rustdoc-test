@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["LLVMRustStringWriteImpl","Appending to a Rust string – used by RawRustStringOstream."],["initialize_available_targets","Initialize targets enabled by the build script via `cfg(llvm_component = \"...\")`. N.B., this function can’t be moved to `rustc_codegen_llvm` because of the `cfg`s."]],"struct":[["RustString",""]]};

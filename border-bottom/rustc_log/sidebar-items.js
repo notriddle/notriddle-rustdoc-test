@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Error",""]],"fn":[["init_env_logger","In contrast to `init_rustc_env_logger` this allows you to choose an env var other than `RUSTC_LOG`."],["init_rustc_env_logger",""],["stderr_isatty",""],["stdout_isatty",""]]};

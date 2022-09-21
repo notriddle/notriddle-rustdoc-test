@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["IsError","Sealed helper trait for statically checking that a `Level` is an error."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["All","Visits all nested things, including item-likes."],["OnlyBodies","Do not visit nested item-like things, but visit nested things that are inside of an item-like."]]};

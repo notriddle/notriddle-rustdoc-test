@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["FlowSensitiveAnalysis","The dataflow analysis used to propagate qualifs on arbitrary CFGs."],["State",""],["TransferFunction","A `Visitor` that propagates qualifs between locals. This defines the transfer function of `FlowSensitiveAnalysis`."]]};

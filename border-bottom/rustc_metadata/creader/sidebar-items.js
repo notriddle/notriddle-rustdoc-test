@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["LoadResult",""],["LoadedMacro",""]],"fn":[["global_allocator_spans",""]],"struct":[["CStore",""],["CrateDump",""],["CrateLoader",""],["CrateMetadataRef","A reference to `CrateMetadata` that can also give access to whole crate store when necessary."],["Library",""]]};

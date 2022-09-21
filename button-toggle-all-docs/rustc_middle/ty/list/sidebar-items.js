@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"foreigntype":[["OpaqueListContents","A dummy type used to force `List` to be unsized while not requiring references to it be wide pointers."]],"struct":[["List","`List<T>` is a bit like `&[T]`, but with some critical differences."]]};

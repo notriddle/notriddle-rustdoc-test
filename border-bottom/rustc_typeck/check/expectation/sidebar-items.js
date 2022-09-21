@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Expectation","When type-checking an expression, we propagate downward whatever type hint we are able in the form of an `Expectation`."]]};

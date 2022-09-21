@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_dataflow/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_mir_dataflow/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+</pre><pre class="rust"><code><span class="attribute">#![feature(associated_type_defaults)]
+#![feature(box_patterns)]
+#![feature(exact_size_is_empty)]
+#![cfg_attr(bootstrap, feature(let_else))]
+#![feature(min_specialization)]
+#![feature(once_cell)]
+#![feature(stmt_expr_attributes)]
+#![feature(trusted_step)]
+#![recursion_limit = <span class="string">&quot;256&quot;</span>]
+#![deny(rustc::untranslatable_diagnostic)]
+#![deny(rustc::diagnostic_outside_of_impl)]
+
+#[macro_use]
+</span><span class="kw">extern crate </span>tracing;
+<span class="attribute">#[macro_use]
+</span><span class="kw">extern crate </span>rustc_middle;
+
+<span class="kw">use </span><a href="../../rustc_ast/ast/struct.MetaItem.html">rustc_ast::MetaItem</a>;
+<span class="kw">use </span><a href="../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../rustc_middle/ty/index.html">self</a>, <a href="../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+
+<span class="kw">pub use </span><span class="self">self</span>::drop_flag_effects::{
+    <a href="drop_flag_effects.rs.html#164-170">drop_flag_effects_for_function_entry</a>, <a href="drop_flag_effects.rs.html#182-189">drop_flag_effects_for_location</a>,
+    <a href="drop_flag_effects.rs.html#10-16">move_path_children_matching</a>, <a href="drop_flag_effects.rs.html#99-106">on_all_children_bits</a>, <a href="drop_flag_effects.rs.html#141-148">on_all_drop_children_bits</a>,
+    <a href="drop_flag_effects.rs.html#82-89">on_lookup_result_bits</a>,
+};
+<span class="kw">pub use </span><span class="self">self</span>::framework::{
+    <a href="framework/mod.rs.html#43">fmt</a>, <a href="framework/mod.rs.html#44">graphviz</a>, <a href="framework/mod.rs.html#45">lattice</a>, <a href="framework/visitor.rs.html#7-13">visit_results</a>, <a href="framework/mod.rs.html#146">Analysis</a>, <a href="framework/mod.rs.html#103">AnalysisDomain</a>, <a href="framework/direction.rs.html#66">Backward</a>, <a href="framework/mod.rs.html#602">CallReturnPlaces</a>,
+    <a href="framework/direction.rs.html#11">Direction</a>, <a href="framework/engine.rs.html#75">Engine</a>, <a href="framework/direction.rs.html#334">Forward</a>, <a href="framework/mod.rs.html#439">GenKill</a>, <a href="framework/mod.rs.html#280">GenKillAnalysis</a>, <a href="framework/lattice.rs.html#51">JoinSemiLattice</a>, <a href="framework/engine.rs.html#30">Results</a>, <a href="framework/cursor.rs.html#26">ResultsCursor</a>,
+    <a href="framework/cursor.rs.html#15">ResultsRefCursor</a>, <a href="framework/visitor.rs.html#95">ResultsVisitable</a>, <a href="framework/visitor.rs.html#29">ResultsVisitor</a>, <a href="framework/mod.rs.html#594">SwitchIntEdgeEffects</a>,
+};
+
+<span class="kw">use </span><a href="move_paths/mod.rs.html#172"><span class="self">self</span>::move_paths::MoveData</a>;
+
+<span class="kw">pub mod </span><a href="drop_flag_effects.rs.html#1-268">drop_flag_effects</a>;
+<span class="kw">pub mod </span><a href="elaborate_drops.rs.html#1-1056">elaborate_drops</a>;
+<span class="kw">mod </span><a href="errors.rs.html#1-71">errors</a>;
+<span class="kw">mod </span><a href="framework/mod.rs.html#1-625">framework</a>;
+<span class="kw">pub mod </span><a href="impls/mod.rs.html#1-766">impls</a>;
+<span class="kw">pub mod </span><a href="move_paths/mod.rs.html#1-422">move_paths</a>;
+<span class="kw">pub mod </span><a href="rustc_peek.rs.html#1-283">rustc_peek</a>;
+<span class="kw">pub mod </span><a href="storage.rs.html#1-20">storage</a>;
+<span class="kw">pub mod </span><a href="un_derefer.rs.html#1-22">un_derefer</a>;
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>indexes {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><a href="move_paths/mod.rs.html#16-20"><span class="kw">super</span>::move_paths::MovePathIndex</a>;
+}
+
+<span class="kw">pub struct </span>MoveDataParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>move_data: MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw">pub </span>param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">pub fn </span>has_rustc_mir_with(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_ast/ast/struct.MetaItem.html">MetaItem</a>&gt; {
+    <span class="kw">for </span>attr <span class="kw">in </span>tcx.get_attrs(def_id, sym::rustc_mir) {
+        <span class="kw">let </span>items = attr.meta_item_list();
+        <span class="kw">for </span>item <span class="kw">in </span>items.iter().flat_map(|l| l.iter()) {
+            <span class="kw">match </span>item.meta_item() {
+                <span class="prelude-val">Some</span>(mi) <span class="kw">if </span>mi.has_name(name) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(mi.clone()),
+                <span class="kw">_ </span>=&gt; <span class="kw">continue</span>,
+            }
+        }
+    }
+    <span class="prelude-val">None
+</span>}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_mir_dataflow" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["AssocItemContainer",""],["AssocKind",""]],"struct":[["AssocItem","Information about an associated item"],["AssocItems","A list of `ty::AssocItem`s in definition order that allows for efficient lookup by name."]]};

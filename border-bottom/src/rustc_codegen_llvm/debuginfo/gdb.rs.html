@@ -1,0 +1,242 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_llvm/src/debuginfo/gdb.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>gdb.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_llvm/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+</pre><pre class="rust"><code><span class="comment">// .debug_gdb_scripts binary section.
+
+</span><span class="kw">use </span><a href="../lib.rs.html#71"><span class="kw">crate</span>::llvm</a>;
+
+<span class="kw">use </span><a href="../builder.rs.html#33"><span class="kw">crate</span>::builder::Builder</a>;
+<span class="kw">use </span><a href="../context.rs.html#42"><span class="kw">crate</span>::common::CodegenCx</a>;
+<span class="kw">use </span><a href="../llvm/ffi.rs.html#634"><span class="kw">crate</span>::value::Value</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/base/fn.collect_debugger_visualizers_transitive.html">rustc_codegen_ssa::base::collect_debugger_visualizers_transitive</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/index.html">rustc_codegen_ssa::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/constant.LOCAL_CRATE.html">rustc_hir::def_id::LOCAL_CRATE</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">rustc_middle::bug</a>;
+<span class="kw">use </span>rustc_session::config::{<a href="../../../rustc_session/config/enum.CrateType.html">CrateType</a>, <a href="../../../rustc_session/config/enum.DebugInfo.html">DebugInfo</a>};
+
+<span class="kw">use </span><a href="../../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+<span class="kw">use </span><a href="../../../rustc_span/enum.DebuggerVisualizerType.html">rustc_span::DebuggerVisualizerType</a>;
+
+<span class="doccomment">/// Inserts a side-effect free instruction sequence that makes sure that the
+/// .debug_gdb_scripts global is referenced, so it isn&#39;t removed by the linker.
+</span><span class="kw">pub fn </span>insert_reference_to_gdb_debug_scripts_section_global(bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;) {
+    <span class="kw">if </span>needs_gdb_debug_scripts_section(bx) {
+        <span class="kw">let </span>gdb_debug_scripts_section =
+            <a href="#19">bx</a>.<a href="../consts.rs.html#220">const_bitcast</a>(<a href="#34">get_or_insert_gdb_debug_scripts_section_global</a>(<a href="#19">bx</a>), <a href="#19">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.DerivedTypeMethods.html">type_i8p</a>());
+        <span class="comment">// Load just the first byte as that&#39;s all that&#39;s necessary to force
+        // LLVM to keep around the reference to the global.
+        </span><span class="kw">let </span>volative_load_instruction = <a href="#19">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">volatile_load</a>(<a href="#19">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_i8</a>(), <a href="#21">gdb_debug_scripts_section</a>);
+        <span class="kw">unsafe </span>{
+            <a href="../llvm/ffi.rs.html#1151">llvm::LLVMSetAlignment</a>(<a href="#25">volative_load_instruction</a>, <span class="number">1</span>);
+        }
+    }
+}
+
+<span class="doccomment">/// Allocates the global variable responsible for the .debug_gdb_scripts binary
+/// section.
+</span><span class="kw">pub fn </span>get_or_insert_gdb_debug_scripts_section_global&lt;<span class="lifetime">&#39;ll</span>&gt;(cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="../llvm/ffi.rs.html#634">Value</a> {
+    <span class="kw">let </span>c_section_var_name = <span class="string">&quot;__rustc_debug_gdb_scripts_section__\0&quot;</span>;
+    <span class="kw">let </span>section_var_name = <span class="kw-2">&amp;</span><a href="#35">c_section_var_name</a>[..<a href="#35">c_section_var_name</a>.len() - <span class="number">1</span>];
+
+    <span class="kw">let </span>section_var =
+        <span class="kw">unsafe </span>{ <a href="../llvm/ffi.rs.html#1157">llvm::LLVMGetNamedGlobal</a>(<a href="#34">cx</a>.llmod, <a href="#35">c_section_var_name</a>.as_ptr().cast()) };
+
+    <a href="#38">section_var</a>.unwrap_or_else(|| {
+        <span class="kw">let </span>section_name = <span class="string">b&quot;.debug_gdb_scripts\0&quot;</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>section_contents = Vec::new();
+
+        <span class="comment">// Add the pretty printers for the standard library first.
+        </span><a href="#43">section_contents</a>.extend_from_slice(<span class="string">b&quot;\x01gdb_load_rust_pretty_printers.py\0&quot;</span>);
+
+        <span class="comment">// Next, add the pretty printers that were specified via the `#[debugger_visualizer]` attribute.
+        </span><span class="kw">let </span>visualizers = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/base/fn.collect_debugger_visualizers_transitive.html">collect_debugger_visualizers_transitive</a>(
+            <a href="#34">cx</a>.tcx,
+            DebuggerVisualizerType::GdbPrettyPrinter,
+        );
+        <span class="kw">let </span>crate_name = <a href="#34">cx</a>.tcx.crate_name(<a href="../../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>);
+        <span class="kw">for </span>(index, visualizer) <span class="kw">in </span>visualizers.iter().enumerate() {
+            <span class="comment">// The initial byte `4` instructs GDB that the following pretty printer
+            // is defined inline as opposed to in a standalone file.
+            </span>section_contents.extend_from_slice(<span class="string">b&quot;\x04&quot;</span>);
+            <span class="kw">let </span>vis_name = <span class="macro">format!</span>(<span class="string">&quot;pretty-printer-{}-{}\n&quot;</span>, crate_name, index);
+            section_contents.extend_from_slice(vis_name.as_bytes());
+            section_contents.extend_from_slice(<span class="kw-2">&amp;</span>visualizer.src);
+
+            <span class="comment">// The final byte `0` tells GDB that the pretty printer has been
+            // fully defined and can continue searching for additional
+            // pretty printers.
+            </span>section_contents.extend_from_slice(<span class="string">b&quot;\0&quot;</span>);
+        }
+
+        <span class="kw">unsafe </span>{
+            <span class="kw">let </span>section_contents = <a href="#43">section_contents</a>.as_slice();
+            <span class="kw">let </span>llvm_type = <a href="#34">cx</a>.<a href="../type_.rs.html#131">type_array</a>(<a href="#34">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_i8</a>(), <a href="#69">section_contents</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>);
+
+            <span class="kw">let </span>section_var = <a href="#34">cx</a>
+                .<a href="../declare.rs.html#116">define_global</a>(<a href="#36">section_var_name</a>, <a href="#70">llvm_type</a>)
+                .unwrap_or_else(|| <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;symbol `{}` is already defined&quot;</span>, section_var_name));
+            <a href="../llvm/ffi.rs.html#1146">llvm::LLVMSetSection</a>(<a href="#72">section_var</a>, <a href="#42">section_name</a>.as_ptr().cast());
+            <a href="../llvm/ffi.rs.html#1169">llvm::LLVMSetInitializer</a>(<a href="#72">section_var</a>, <a href="#34">cx</a>.<a href="../common.rs.html#107">const_bytes</a>(<a href="#69">section_contents</a>));
+            <a href="../llvm/ffi.rs.html#1173">llvm::LLVMSetGlobalConstant</a>(<a href="#72">section_var</a>, <a href="../llvm/ffi.rs.html#22">llvm::True</a>);
+            <a href="../llvm/ffi.rs.html#2224">llvm::LLVMSetUnnamedAddress</a>(<a href="#72">section_var</a>, <a href="../llvm/ffi.rs.html#139">llvm::UnnamedAddr::Global</a>);
+            <a href="../llvm/ffi.rs.html#1145">llvm::LLVMRustSetLinkage</a>(<a href="#72">section_var</a>, <a href="../llvm/ffi.rs.html#115">llvm::Linkage::LinkOnceODRLinkage</a>);
+            <span class="comment">// This should make sure that the whole section is not larger than
+            // the string it contains. Otherwise we get a warning from GDB.
+            </span><a href="../llvm/ffi.rs.html#1151">llvm::LLVMSetAlignment</a>(<a href="#72">section_var</a>, <span class="number">1</span>);
+            <a href="#72">section_var</a>
+        }
+    })
+}
+
+<span class="kw">pub fn </span>needs_gdb_debug_scripts_section(cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>omit_gdb_pretty_printer_section =
+        <a href="#88">cx</a>.tcx.sess.contains_name(<a href="#88">cx</a>.tcx.hir().krate_attrs(), sym::omit_gdb_pretty_printer_section);
+
+    <span class="comment">// To ensure the section `__rustc_debug_gdb_scripts_section__` will not create
+    // ODR violations at link time, this section will not be emitted for rlibs since
+    // each rlib could produce a different set of visualizers that would be embedded
+    // in the `.debug_gdb_scripts` section. For that reason, we make sure that the
+    // section is only emitted for leaf crates.
+    </span><span class="kw">let </span>embed_visualizers = <a href="#88">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/misc/trait.MiscMethods.html">sess</a>().crate_types().iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|<span class="kw-2">&amp;</span>crate_type| <span class="kw">match </span><a href="#97">crate_type</a> {
+        CrateType::Executable | CrateType::Dylib | CrateType::Cdylib | CrateType::Staticlib =&gt; {
+            <span class="comment">// These are crate types for which we will embed pretty printers since they
+            // are treated as leaf crates.
+            </span><span class="bool-val">true
+        </span>}
+        CrateType::ProcMacro =&gt; {
+            <span class="comment">// We could embed pretty printers for proc macro crates too but it does not
+            // seem like a good default, since this is a rare use case and we don&#39;t
+            // want to slow down the common case.
+            </span><span class="bool-val">false
+        </span>}
+        CrateType::Rlib =&gt; {
+            <span class="comment">// As per the above description, embedding pretty printers for rlibs could
+            // lead to ODR violations so we skip this crate type as well.
+            </span><span class="bool-val">false
+        </span>}
+    });
+
+    !<a href="#89">omit_gdb_pretty_printer_section</a>
+        &amp;&amp; <a href="#88">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/misc/trait.MiscMethods.html">sess</a>().opts.debuginfo != DebugInfo::None
+        &amp;&amp; <a href="#88">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/misc/trait.MiscMethods.html">sess</a>().target.emit_debug_gdb_scripts
+        &amp;&amp; <a href="#97">embed_visualizers</a>
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_llvm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

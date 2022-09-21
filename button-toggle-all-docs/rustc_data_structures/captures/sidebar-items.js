@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["Captures","“Signaling” trait used in impl trait to tag lifetimes that you may need to capture but don’t really need for other reasons. Basically a workaround; see this comment for details."]]};

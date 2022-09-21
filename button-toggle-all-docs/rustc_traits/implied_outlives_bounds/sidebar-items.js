@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["compute_implied_outlives_bounds",""],["implied_bounds_from_components","When we have an implied bound that `T: 'a`, we can further break this down to determine what relationships would have to hold for `T: 'a` to hold. We get to assume that the caller has validated those relationships."],["implied_outlives_bounds",""],["provide",""]]};

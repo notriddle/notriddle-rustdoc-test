@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["entry_to_key","Adapter function used ot return result if SsoHashMap functions into result SsoHashSet should return."]],"struct":[["SsoHashSet","Small-storage-optimized implementation of a set."]]};

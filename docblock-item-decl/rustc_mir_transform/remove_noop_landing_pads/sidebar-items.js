@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["RemoveNoopLandingPads","A pass that removes noop landing pads and replaces jumps to them with `None`. This is important because otherwise LLVM generates terrible code for these."]]};

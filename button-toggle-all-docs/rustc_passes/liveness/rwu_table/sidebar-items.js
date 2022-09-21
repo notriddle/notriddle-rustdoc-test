@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["RWU",""],["RWUTable","Conceptually, this is like a `Vec<Vec<RWU>>`. But the number of RWU`s can get very large, so it uses a more compact representation."]]};

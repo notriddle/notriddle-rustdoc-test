@@ -1,0 +1,1294 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/generator_interior.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>generator_interior.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+</pre><pre class="rust"><code><span class="doccomment">//! This calculates the types which has storage which lives across a suspension point in a
+//! generator from the perspective of typeck. The actual types used at runtime
+//! is calculated in `rustc_mir_transform::generator` and may be a subset of the
+//! types computed here.
+
+</span><span class="kw">use </span><a href="generator_interior/drop_ranges.rs.html#186"><span class="self">self</span>::drop_ranges::DropRanges</a>;
+<span class="kw">use </span><a href="fn_ctxt/mod.rs.html#40"><span class="kw">super</span>::FnCtxt</a>;
+<span class="kw">use </span>rustc_data_structures::fx::{FxHashSet, <a href="../../../rustc_data_structures/fx/type.FxIndexSet.html">FxIndexSet</a>};
+<span class="kw">use </span><a href="../../../rustc_lint_defs/macro.pluralize.html">rustc_errors::pluralize</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../../rustc_hir/def/enum.CtorKind.html">CtorKind</a>, <a href="../../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/hir_id/type.HirIdSet.html">rustc_hir::hir_id::HirIdSet</a>;
+<span class="kw">use </span>rustc_hir::intravisit::{<a class="self" href="../../../rustc_hir/intravisit/index.html">self</a>, <a href="../../../rustc_hir/intravisit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_hir::{<a href="../../../rustc_hir/hir/struct.Arm.html">Arm</a>, <a href="../../../rustc_hir/hir/struct.Expr.html">Expr</a>, <a href="../../../rustc_hir/hir/enum.ExprKind.html">ExprKind</a>, <a href="../../../rustc_hir/hir/enum.Guard.html">Guard</a>, <a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../../rustc_hir/hir/struct.Pat.html">Pat</a>, <a href="../../../rustc_hir/hir/enum.PatKind.html">PatKind</a>};
+<span class="kw">use </span>rustc_middle::middle::region::{<a class="self" href="../../../rustc_middle/middle/region/index.html">self</a>, <a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a>, <a href="../../../rustc_middle/middle/region/enum.ScopeData.html">ScopeData</a>, <a href="../../../rustc_middle/middle/region/struct.YieldData.html">YieldData</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">RvalueScopes</a>, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="../../../rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>};
+<span class="kw">use </span><a href="../../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">mod </span><a href="generator_interior/drop_ranges.rs.html#1-309">drop_ranges</a>;
+
+<span class="kw">struct </span>InteriorVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    fcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    region_scope_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../rustc_middle/middle/region/struct.ScopeTree.html">region::ScopeTree</a>,
+    types: FxIndexSet&lt;ty::GeneratorInteriorTypeCause&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    rvalue_scopes: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">RvalueScopes</a>,
+    expr_count: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    kind: <a href="../../../rustc_hir/hir/enum.GeneratorKind.html">hir::GeneratorKind</a>,
+    prev_unresolved_span: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;,
+    linted_values: <a href="../../../rustc_hir/hir_id/type.HirIdSet.html">HirIdSet</a>,
+    drop_ranges: <a href="generator_interior/drop_ranges.rs.html#186">DropRanges</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; InteriorVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>record(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        hir_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+        scope: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_middle/middle/region/struct.Scope.html">region::Scope</a>&gt;,
+        expr: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        source_span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) {
+        <span class="kw">use </span><a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">rustc_span::DUMMY_SP</a>;
+
+        <span class="kw">let </span>ty = <a class="self" href="#37">self</a>.fcx.resolve_vars_if_possible(<a href="#38">ty</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;attempting to record type ty={:?}; hir_id={:?}; scope={:?}; expr={:?}; source_span={:?}; expr_count={:?}&quot;</span>,
+            ty, hir_id, scope, expr, source_span, <span class="self">self</span>.expr_count,
+        );
+
+        <span class="kw">let </span>live_across_yield = <a href="#40">scope</a>
+            .map(|s| {
+                <a class="self" href="#37">self</a>.region_scope_tree.yield_in_scope(<a href="#54">s</a>).and_then(|yield_data| {
+                    <span class="comment">// If we are recording an expression that is the last yield
+                    // in the scope, or that has a postorder CFG index larger
+                    // than the one of all of the yields, then its value can&#39;t
+                    // be storage-live (and therefore live) at any of the yields.
+                    //
+                    // See the mega-comment at `yield_in_scope` for a proof.
+
+                    </span><a href="#55">yield_data</a>
+                        .iter()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|yield_data| {
+                            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                                <span class="string">&quot;comparing counts yield: {} self: {}, source_span = {:?}&quot;</span>,
+                                yield_data.expr_and_pat_count, <span class="self">self</span>.expr_count, source_span
+                            );
+
+                            <span class="kw">if </span><span class="self">self</span>.fcx.sess().opts.unstable_opts.drop_tracking
+                                &amp;&amp; <span class="self">self
+                                    </span>.drop_ranges
+                                    .is_dropped_at(hir_id, yield_data.expr_and_pat_count)
+                            {
+                                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;value is dropped at yield point; not recording&quot;</span>);
+                                <span class="kw">return </span><span class="bool-val">false</span>;
+                            }
+
+                            <span class="comment">// If it is a borrowing happening in the guard,
+                            // it needs to be recorded regardless because they
+                            // do live across this yield point.
+                            </span><a href="#65">yield_data</a>.expr_and_pat_count &gt;= <a class="self" href="#37">self</a>.expr_count
+                        })
+                        .cloned()
+                })
+            })
+            .unwrap_or_else(|| {
+                <span class="prelude-val">Some</span>(<a href="../../../rustc_middle/middle/region/struct.YieldData.html">YieldData</a> { span: <a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>, expr_and_pat_count: <span class="number">0</span>, source: <a class="self" href="#37">self</a>.kind.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>() })
+            });
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(yield_data) = <a href="#53">live_across_yield</a> {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;type in expr = {:?}, scope = {:?}, type = {:?}, count = {}, yield_span = {:?}&quot;</span>,
+                expr, scope, ty, <span class="self">self</span>.expr_count, yield_data.span
+            );
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((unresolved_type, unresolved_type_span)) =
+                <a class="self" href="#37">self</a>.fcx.unresolved_type_vars(<span class="kw-2">&amp;</span><a href="#46">ty</a>)
+            {
+                <span class="comment">// If unresolved type isn&#39;t a ty_var then unresolved_type_span is None
+                </span><span class="kw">let </span>span = <span class="self"><a href="#37">self</a>
+                    </span>.prev_unresolved_span
+                    .unwrap_or_else(|| <a href="#98">unresolved_type_span</a>.unwrap_or(<a href="#42">source_span</a>));
+
+                <span class="comment">// If we encounter an int/float variable, then inference fallback didn&#39;t
+                // finish due to some other error. Don&#39;t emit spurious additional errors.
+                </span><span class="kw">if let </span>ty::Infer(ty::InferTy::IntVar(<span class="kw">_</span>) | ty::InferTy::FloatVar(<span class="kw">_</span>)) =
+                    <a href="#98">unresolved_type</a>.kind()
+                {
+                    <a class="self" href="#37">self</a>.fcx
+                        .tcx
+                        .sess
+                        .delay_span_bug(<a href="#102">span</a>, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;Encountered var {:?}&quot;</span>, unresolved_type));
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>note = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                        <span class="string">&quot;the type is part of the {} because of this {}&quot;</span>,
+                        <span class="self">self</span>.kind, yield_data.source
+                    );
+
+                    <a class="self" href="#37">self</a>.fcx
+                        .need_type_info_err_in_generator(<a class="self" href="#37">self</a>.kind, <a href="#102">span</a>, <a href="#98">unresolved_type</a>)
+                        .span_note(<a href="#92">yield_data</a>.span, <span class="kw-2">&amp;*</span><a href="#116">note</a>)
+                        .emit();
+                }
+            } <span class="kw">else </span>{
+                <span class="comment">// Insert the type into the ordered set.
+                </span><span class="kw">let </span>scope_span = <a href="#40">scope</a>.map(|s| <a href="#128">s</a>.span(<a class="self" href="#37">self</a>.fcx.tcx, <a class="self" href="#37">self</a>.region_scope_tree));
+
+                <span class="kw">if </span>!<span class="self">self</span>.linted_values.contains(<span class="kw-2">&amp;</span>hir_id) {
+                    <a href="#481-486">check_must_not_suspend_ty</a>(
+                        <a class="self" href="#37">self</a>.fcx,
+                        <a href="#46">ty</a>,
+                        <a href="#39">hir_id</a>,
+                        <a href="#466">SuspendCheckData</a> {
+                            <a href="#41">expr</a>,
+                            <a href="#42">source_span</a>,
+                            yield_span: <a href="#92">yield_data</a>.span,
+                            plural_len: <span class="number">1</span>,
+                            ..<a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>()
+                        },
+                    );
+                    <a class="self" href="#37">self</a>.linted_values.insert(<a href="#39">hir_id</a>);
+                }
+
+                <a class="self" href="#37">self</a>.types.insert(<a href="../../../rustc_middle/ty/context/struct.GeneratorInteriorTypeCause.html">ty::GeneratorInteriorTypeCause</a> {
+                    span: <a href="#42">source_span</a>,
+                    <a href="#46">ty</a>,
+                    <a href="#128">scope_span</a>,
+                    yield_span: <a href="#92">yield_data</a>.span,
+                    expr: <a href="#41">expr</a>.map(|e| <a href="#151">e</a>.hir_id),
+                });
+            }
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;no type in expr = {:?}, count = {:?}, span = {:?}&quot;</span>,
+                expr,
+                <span class="self">self</span>.expr_count,
+                expr.map(|e| e.span)
+            );
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((unresolved_type, unresolved_type_span)) =
+                <a class="self" href="#37">self</a>.fcx.unresolved_type_vars(<span class="kw-2">&amp;</span><a href="#46">ty</a>)
+            {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                    <span class="string">&quot;remained unresolved_type = {:?}, unresolved_type_span: {:?}&quot;</span>,
+                    unresolved_type, unresolved_type_span
+                );
+                <a class="self" href="#37">self</a>.prev_unresolved_span = <a href="#161">unresolved_type_span</a>;
+            }
+        }
+    }
+}
+
+<span class="kw">pub fn </span>resolve_interior&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    fcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    body_id: <a href="../../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a>,
+    interior: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    kind: <a href="../../../rustc_hir/hir/enum.GeneratorKind.html">hir::GeneratorKind</a>,
+) {
+    <span class="kw">let </span>body = <a href="#175">fcx</a>.tcx.hir().body(<a href="#177">body_id</a>);
+    <span class="kw">let </span>typeck_results = <a href="#175">fcx</a>.inh.typeck_results.borrow();
+    <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#23">InteriorVisitor</a> {
+        <a href="#175">fcx</a>,
+        types: FxIndexSet::default(),
+        region_scope_tree: <a href="#175">fcx</a>.tcx.region_scope_tree(<a href="#176">def_id</a>),
+        rvalue_scopes: <span class="kw-2">&amp;</span><a href="#182">typeck_results</a>.rvalue_scopes,
+        expr_count: <span class="number">0</span>,
+        <a href="#179">kind</a>,
+        prev_unresolved_span: <span class="prelude-val">None</span>,
+        linted_values: &lt;<span class="kw">_</span>&gt;::default(),
+        drop_ranges: <a href="generator_interior/drop_ranges.rs.html#35-39">drop_ranges::compute_drop_ranges</a>(<a href="#175">fcx</a>, <a href="#176">def_id</a>, <a href="#181">body</a>),
+    };
+    intravisit::walk_body(<span class="kw-2">&amp;mut </span><a href="#183">visitor</a>, <a href="#181">body</a>);
+
+    <span class="comment">// Check that we visited the same amount of expressions as the RegionResolutionVisitor
+    </span><span class="kw">let </span>region_expr_count = <a href="#175">fcx</a>.tcx.region_scope_tree(<a href="#176">def_id</a>).body_expr_count(<a href="#177">body_id</a>).unwrap();
+    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(region_expr_count, visitor.expr_count);
+
+    <span class="comment">// The types are already kept in insertion order.
+    </span><span class="kw">let </span>types = <a href="#183">visitor</a>.types;
+
+    <span class="comment">// The types in the generator interior contain lifetimes local to the generator itself,
+    // which should not be exposed outside of the generator. Therefore, we replace these
+    // lifetimes with existentially-bound lifetimes, which reflect the exact value of the
+    // lifetimes not being known by users.
+    //
+    // These lifetimes are used in auto trait impl checking (for example,
+    // if a Sync generator contains an &amp;&#39;α T, we need to check whether &amp;&#39;α T: Sync),
+    // so knowledge of the exact relationships between them isn&#39;t particularly important.
+
+    </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;types in generator {:?}, span = {:?}&quot;</span>, types, body.value.span);
+
+    <span class="kw">let </span><span class="kw-2">mut </span>counter = <span class="number">0</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>captured_tys = FxHashSet::default();
+    <span class="kw">let </span>type_causes: Vec&lt;<span class="kw">_</span>&gt; = <a href="#201">types</a>
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|<span class="kw-2">mut </span>cause| {
+            <span class="comment">// Erase regions and canonicalize late-bound regions to deduplicate as many types as we
+            // can.
+            </span><span class="kw">let </span>erased = <a href="#175">fcx</a>.tcx.erase_regions(<a href="#218">cause</a>.ty);
+            <span class="kw">if </span>captured_tys.insert(erased) {
+                <span class="comment">// Replace all regions inside the generator interior with late bound regions.
+                // Note that each region slot in the types gets a new fresh late bound region,
+                // which means that none of the regions inside relate to any other, even if
+                // typeck had previously found constraints that would cause them to be related.
+                </span><span class="kw">let </span>folded = <a href="#175">fcx</a>.tcx.fold_regions(<a href="#221">erased</a>, |<span class="kw">_</span>, current_depth| {
+                    <span class="kw">let </span>br = <a href="../../../rustc_middle/ty/sty/struct.BoundRegion.html">ty::BoundRegion</a> {
+                        var: ty::BoundVar::from_u32(<a href="#214">counter</a>),
+                        kind: ty::BrAnon(<a href="#214">counter</a>),
+                    };
+                    <span class="kw">let </span>r = <a href="#175">fcx</a>.tcx.mk_region(ty::ReLateBound(<a href="#227">current_depth</a>, <a href="#228">br</a>));
+                    <a href="#214">counter</a> += <span class="number">1</span>;
+                    <a href="#232">r</a>
+                });
+
+                <a href="#218">cause</a>.ty = <a href="#227">folded</a>;
+                <span class="prelude-val">Some</span>(<a href="#218">cause</a>)
+            } <span class="kw">else </span>{
+                <span class="prelude-val">None
+            </span>}
+        })
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+    <span class="comment">// Extract type components to build the witness type.
+    </span><span class="kw">let </span>type_list = <a href="#175">fcx</a>.tcx.mk_type_list(<a href="#216">type_causes</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|cause| <a href="#246">cause</a>.ty));
+    <span class="kw">let </span>bound_vars = <a href="#175">fcx</a>.tcx.mk_bound_variable_kinds(
+        (<span class="number">0</span>..<a href="#214">counter</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|i| ty::BoundVariableKind::Region(ty::BrAnon(<a href="#248">i</a>))),
+    );
+    <span class="kw">let </span>witness =
+        <a href="#175">fcx</a>.tcx.mk_generator_witness(ty::Binder::bind_with_vars(<a href="#246">type_list</a>, <a href="#247">bound_vars</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()));
+
+    <a href="https://doc.rust-lang.org/nightly/core/mem/fn.drop.html">drop</a>(<a href="#182">typeck_results</a>);
+    <span class="comment">// Store the generator types and spans into the typeck results for this generator.
+    </span><a href="#175">fcx</a>.inh.typeck_results.borrow_mut().generator_interior_types =
+        ty::Binder::bind_with_vars(<a href="#216">type_causes</a>, <a href="#247">bound_vars</a>);
+
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+        <span class="string">&quot;types in generator after region replacement {:?}, span = {:?}&quot;</span>,
+        witness, body.value.span
+    );
+
+    <span class="comment">// Unify the type variable inside the generator with the new witness
+    </span><span class="kw">match </span><a href="#175">fcx</a>.at(<span class="kw-2">&amp;</span><a href="#175">fcx</a>.<a href="fn_ctxt/mod.rs.html#163">misc</a>(<a href="#181">body</a>.value.span), <a href="#175">fcx</a>.param_env).eq(<a href="#178">interior</a>, <a href="#250">witness</a>) {
+        <span class="prelude-val">Ok</span>(ok) =&gt; <a href="#175">fcx</a>.<a href="inherited.rs.html#174">register_infer_ok_obligations</a>(<a href="#265">ok</a>),
+        <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(),
+    }
+}
+
+<span class="comment">// This visitor has to have the same visit_expr calls as RegionResolutionVisitor in
+// librustc_middle/middle/region.rs since `expr_count` is compared against the results
+// there.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>InteriorVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, arm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Arm&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span><a href="../../../rustc_hir/hir/struct.Arm.html">Arm</a> { guard, pat, body, .. } = <a href="#274">arm</a>;
+        <a class="self" href="#274">self</a>.<a href="../../../rustc_hir/intravisit/trait.Visitor.html">visit_pat</a>(<a href="#275">pat</a>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>g) = <a href="#275">guard</a> {
+            {
+                <span class="comment">// If there is a guard, we need to count all variables bound in the pattern as
+                // borrowed for the entire guard body, regardless of whether they are accessed.
+                // We do this by walking the pattern bindings and recording `&amp;T` for any `x: T`
+                // that is bound.
+
+                </span><span class="kw">struct </span>ArmPatCollector&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+                    interior_visitor: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>InteriorVisitor&lt;<span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+                    scope: <a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a>,
+                }
+
+                <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ArmPatCollector&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+                    <span class="kw">fn </span>visit_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Pat&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+                        intravisit::walk_pat(<a class="self" href="#290">self</a>, <a href="#290">pat</a>);
+                        <span class="kw">if let </span>PatKind::Binding(<span class="kw">_</span>, id, ident, ..) = <a href="#290">pat</a>.kind {
+                            <span class="kw">let </span>ty =
+                                <a class="self" href="#290">self</a>.interior_visitor.fcx.typeck_results.borrow().node_type(<a href="#292">id</a>);
+                            <span class="kw">let </span>tcx = <a class="self" href="#290">self</a>.interior_visitor.fcx.tcx;
+                            <span class="kw">let </span>ty = <a href="#295">tcx</a>.mk_ref(
+                                <span class="comment">// Use `ReErased` as `resolve_interior` is going to replace all the
+                                // regions anyway.
+                                </span><a href="#295">tcx</a>.mk_region(ty::ReErased),
+                                <a href="../../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { <a href="#293">ty</a>, mutbl: hir::Mutability::Not },
+                            );
+                            <a class="self" href="#290">self</a>.interior_visitor.<a href="#36-43">record</a>(
+                                <a href="#296">ty</a>,
+                                <a href="#292">id</a>,
+                                <span class="prelude-val">Some</span>(<a class="self" href="#290">self</a>.scope),
+                                <span class="prelude-val">None</span>,
+                                <a href="#292">ident</a>.span,
+                            );
+                        }
+                    }
+                }
+
+                <a href="#284">ArmPatCollector</a> {
+                    interior_visitor: <a class="self" href="#274">self</a>,
+                    scope: <a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a> { id: <a href="#277">g</a>.body().hir_id.local_id, data: ScopeData::Node },
+                }
+                .<a href="../../../rustc_hir/intravisit/trait.Visitor.html">visit_pat</a>(<a href="#275">pat</a>);
+            }
+
+            <span class="kw">match </span><a href="#277">g</a> {
+                Guard::If(<span class="kw-2">ref </span>e) =&gt; {
+                    <a class="self" href="#274">self</a>.<a href="../../../rustc_hir/intravisit/trait.Visitor.html">visit_expr</a>(<a href="#321">e</a>);
+                }
+                Guard::IfLet(<span class="kw-2">ref </span>l) =&gt; {
+                    <a class="self" href="#274">self</a>.<a href="../../../rustc_hir/intravisit/trait.Visitor.html">visit_let_expr</a>(<a href="#324">l</a>);
+                }
+            }
+        }
+        <a class="self" href="#274">self</a>.<a href="../../../rustc_hir/intravisit/trait.Visitor.html">visit_expr</a>(<a href="#275">body</a>);
+    }
+
+    <span class="kw">fn </span>visit_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Pat&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        intravisit::walk_pat(<a class="self" href="#332">self</a>, <a href="#332">pat</a>);
+
+        <a class="self" href="#332">self</a>.expr_count += <span class="number">1</span>;
+
+        <span class="kw">if let </span>PatKind::Binding(..) = <a href="#332">pat</a>.kind {
+            <span class="kw">let </span>scope = <a class="self" href="#332">self</a>.region_scope_tree.var_scope(<a href="#332">pat</a>.hir_id.local_id).unwrap();
+            <span class="kw">let </span>ty = <a class="self" href="#332">self</a>.fcx.typeck_results.borrow().pat_ty(<a href="#332">pat</a>);
+            <a class="self" href="#332">self</a>.<a href="#36-43">record</a>(<a href="#339">ty</a>, <a href="#332">pat</a>.hir_id, <span class="prelude-val">Some</span>(<a href="#338">scope</a>), <span class="prelude-val">None</span>, <a href="#332">pat</a>.span);
+        }
+    }
+
+    <span class="kw">fn </span>visit_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#344">expr</a>.kind {
+            ExprKind::Call(callee, args) =&gt; <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#346">callee</a>.kind {
+                ExprKind::Path(qpath) =&gt; {
+                    <span class="kw">let </span>res = <a class="self" href="#344">self</a>.fcx.typeck_results.borrow().qpath_res(<a href="#347">qpath</a>, <a href="#346">callee</a>.hir_id);
+                    <span class="kw">match </span><a href="#348">res</a> {
+                        <span class="comment">// Direct calls never need to keep the callee `ty::FnDef`
+                        // ZST in a temporary, so skip its type, just in case it
+                        // can significantly complicate the generator type.
+                        </span>Res::Def(
+                            DefKind::Fn | DefKind::AssocFn | DefKind::Ctor(<span class="kw">_</span>, CtorKind::Fn),
+                            <span class="kw">_</span>,
+                        ) =&gt; {
+                            <span class="comment">// NOTE(eddyb) this assumes a path expression has
+                            // no nested expressions to keep track of.
+                            </span><a class="self" href="#344">self</a>.expr_count += <span class="number">1</span>;
+
+                            <span class="comment">// Record the rest of the call expression normally.
+                            </span><span class="kw">for </span>arg <span class="kw">in </span><span class="kw-2">*</span>args {
+                                <span class="self">self</span>.visit_expr(arg);
+                            }
+                        }
+                        <span class="kw">_ </span>=&gt; intravisit::walk_expr(<a class="self" href="#344">self</a>, <a href="#344">expr</a>),
+                    }
+                }
+                <span class="kw">_ </span>=&gt; intravisit::walk_expr(<a class="self" href="#344">self</a>, <a href="#344">expr</a>),
+            },
+            <span class="kw">_ </span>=&gt; intravisit::walk_expr(<a class="self" href="#344">self</a>, <a href="#344">expr</a>),
+        }
+
+        <a class="self" href="#344">self</a>.expr_count += <span class="number">1</span>;
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;is_borrowed_temporary: {:?}&quot;</span>, <span class="self">self</span>.drop_ranges.is_borrowed_temporary(expr));
+
+        <span class="kw">let </span>ty = <a class="self" href="#344">self</a>.fcx.typeck_results.borrow().expr_ty_adjusted_opt(<a href="#344">expr</a>);
+        <span class="kw">let </span>may_need_drop = |ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;| {
+            <span class="comment">// Avoid ICEs in needs_drop.
+            </span><span class="kw">let </span>ty = <a class="self" href="#344">self</a>.fcx.resolve_vars_if_possible(<a href="#379">ty</a>);
+            <span class="kw">let </span>ty = <a class="self" href="#344">self</a>.fcx.tcx.erase_regions(<a href="#381">ty</a>);
+            <span class="kw">if </span>ty.needs_infer() {
+                <span class="kw">return </span><span class="bool-val">true</span>;
+            }
+            <a href="#382">ty</a>.needs_drop(<a class="self" href="#344">self</a>.fcx.tcx, <a class="self" href="#344">self</a>.fcx.param_env)
+        };
+
+        <span class="comment">// Typically, the value produced by an expression is consumed by its parent in some way,
+        // so we only have to check if the parent contains a yield (note that the parent may, for
+        // example, store the value into a local variable, but then we already consider local
+        // variables to be live across their scope).
+        //
+        // However, in the case of temporary values, we are going to store the value into a
+        // temporary on the stack that is live for the current temporary scope and then return a
+        // reference to it. That value may be live across the entire temporary scope.
+        //
+        // There&#39;s another subtlety: if the type has an observable drop, it must be dropped after
+        // the yield, even if it&#39;s not borrowed or referenced after the yield. Ideally this would
+        // *only* happen for types with observable drop, not all types which wrap them, but that
+        // doesn&#39;t match the behavior of MIR borrowck and causes ICEs. See the FIXME comment in
+        // src/test/ui/generator/drop-tracking-parent-expression.rs.
+        </span><span class="kw">let </span>scope = <span class="kw">if </span><span class="self">self</span>.drop_ranges.is_borrowed_temporary(expr)
+            || ty.map_or(<span class="bool-val">true</span>, |ty| {
+                <span class="kw">let </span>needs_drop = may_need_drop(ty);
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>needs_drop, <span class="question-mark">?</span>ty);
+                needs_drop
+            }) {
+            <a class="self" href="#344">self</a>.rvalue_scopes.temporary_scope(<a class="self" href="#344">self</a>.region_scope_tree, <a href="#344">expr</a>.hir_id.local_id)
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>parent_expr = <span class="self"><a href="#344">self</a>
+                </span>.fcx
+                .tcx
+                .hir()
+                .parent_iter(<a href="#344">expr</a>.hir_id)
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|(<span class="kw">_</span>, node)| <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(node, hir::Node::Expr(<span class="kw">_</span>)))
+                .map(|(id, <span class="kw">_</span>)| <a href="#417">id</a>);
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;parent_expr: {:?}&quot;</span>, parent_expr);
+            <span class="kw">match </span><a href="#411">parent_expr</a> {
+                <span class="prelude-val">Some</span>(parent) =&gt; <span class="prelude-val">Some</span>(<a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a> { id: <a href="#420">parent</a>.local_id, data: ScopeData::Node }),
+                <span class="prelude-val">None </span>=&gt; {
+                    <a class="self" href="#344">self</a>.rvalue_scopes.temporary_scope(<a class="self" href="#344">self</a>.region_scope_tree, <a href="#344">expr</a>.hir_id.local_id)
+                }
+            }
+        };
+
+        <span class="comment">// If there are adjustments, then record the final type --
+        // this is the actual value that is being produced.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(adjusted_ty) = <a href="#378">ty</a> {
+            <a class="self" href="#344">self</a>.<a href="#36-43">record</a>(<a href="#429">adjusted_ty</a>, <a href="#344">expr</a>.hir_id, <a href="#403">scope</a>, <span class="prelude-val">Some</span>(<a href="#344">expr</a>), <a href="#344">expr</a>.span);
+        }
+
+        <span class="comment">// Also record the unadjusted type (which is the only type if
+        // there are no adjustments). The reason for this is that the
+        // unadjusted value is sometimes a &quot;temporary&quot; that would wind
+        // up in a MIR temporary.
+        //
+        // As an example, consider an expression like `vec![].push(x)`.
+        // Here, the `vec![]` would wind up MIR stored into a
+        // temporary variable `t` which we can borrow to invoke
+        // `&lt;Vec&lt;_&gt;&gt;::push(&amp;mut t, x)`.
+        //
+        // Note that an expression can have many adjustments, and we
+        // are just ignoring those intermediate types. This is because
+        // those intermediate values are always linearly &quot;consumed&quot; by
+        // the other adjustments, and hence would never be directly
+        // captured in the MIR.
+        //
+        // (Note that this partly relies on the fact that the `Deref`
+        // traits always return references, which means their content
+        // can be reborrowed without needing to spill to a temporary.
+        // If this were not the case, then we could conceivably have
+        // to create intermediate temporaries.)
+        //
+        // The type table might not have information for this expression
+        // if it is in a malformed scope. (#66387)
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(ty) = <a class="self" href="#344">self</a>.fcx.typeck_results.borrow().expr_ty_opt(<a href="#344">expr</a>) {
+            <a class="self" href="#344">self</a>.<a href="#36-43">record</a>(<a href="#457">ty</a>, <a href="#344">expr</a>.hir_id, <a href="#403">scope</a>, <span class="prelude-val">Some</span>(<a href="#344">expr</a>), <a href="#344">expr</a>.span);
+        } <span class="kw">else </span>{
+            <a class="self" href="#344">self</a>.fcx.tcx.sess.delay_span_bug(<a href="#344">expr</a>.span, <span class="string">&quot;no type for node&quot;</span>);
+        }
+    }
+}
+
+<span class="attribute">#[derive(Default)]
+</span><span class="kw">struct </span>SuspendCheckData&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    expr: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Expr&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    source_span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    yield_span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    descr_pre: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    descr_post: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    plural_len: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="comment">// Returns whether it emitted a diagnostic or not
+// Note that this fn and the proceeding one are based on the code
+// for creating must_use diagnostics
+//
+// Note that this technique was chosen over things like a `Suspend` marker trait
+// as it is simpler and has precedent in the compiler
+</span><span class="kw">fn </span>check_must_not_suspend_ty&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    fcx: <span class="kw-2">&amp;</span>FnCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    hir_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    data: SuspendCheckData&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">if </span>ty.is_unit()
+    <span class="comment">// FIXME: should this check `is_ty_uninhabited_from`. This query is not available in this stage
+    // of typeck (before ReVar and RePlaceholder are removed), but may remove noise, like in
+    // `must_use`
+    // || fcx.tcx.is_ty_uninhabited_from(fcx.tcx.parent_module(hir_id).to_def_id(), ty, fcx.param_env)
+    </span>{
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="kw">let </span>plural_suffix = <a class="macro" href="../../../rustc_lint_defs/macro.pluralize.html">pluralize!</a>(data.plural_len);
+
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;Checking must_not_suspend for {}&quot;</span>, ty);
+
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#483">ty</a>.kind() {
+        ty::Adt(..) <span class="kw">if </span><a href="#483">ty</a>.is_box() =&gt; {
+            <span class="kw">let </span>boxed_ty = <a href="#483">ty</a>.boxed_ty();
+            <span class="kw">let </span>descr_pre = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}boxed &quot;</span>, data.descr_pre);
+            <a href="#481-486">check_must_not_suspend_ty</a>(<a href="#482">fcx</a>, <a href="#502">boxed_ty</a>, <a href="#484">hir_id</a>, <a href="#466">SuspendCheckData</a> { <a href="#503">descr_pre</a>, ..<a href="#485">data</a> })
+        }
+        ty::Adt(def, <span class="kw">_</span>) =&gt; <a href="#601-606">check_must_not_suspend_def</a>(<a href="#482">fcx</a>.tcx, <a href="#506">def</a>.did(), <a href="#484">hir_id</a>, <a href="#485">data</a>),
+        <span class="comment">// FIXME: support adding the attribute to TAITs
+        </span>ty::Opaque(def, <span class="kw">_</span>) =&gt; {
+            <span class="kw">let </span><span class="kw-2">mut </span>has_emitted = <span class="bool-val">false</span>;
+            <span class="kw">for </span><span class="kw-2">&amp;</span>(predicate, <span class="kw">_</span>) <span class="kw">in </span>fcx.tcx.explicit_item_bounds(def) {
+                <span class="comment">// We only look at the `DefId`, so it is safe to skip the binder here.
+                </span><span class="kw">if let </span>ty::PredicateKind::Trait(<span class="kw-2">ref </span>poly_trait_predicate) =
+                    predicate.kind().skip_binder()
+                {
+                    <span class="kw">let </span>def_id = poly_trait_predicate.trait_ref.def_id;
+                    <span class="kw">let </span>descr_pre = <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{}implementer{} of &quot;</span>, data.descr_pre, plural_suffix);
+                    <span class="kw">if </span>check_must_not_suspend_def(
+                        fcx.tcx,
+                        def_id,
+                        hir_id,
+                        SuspendCheckData { descr_pre, ..data },
+                    ) {
+                        has_emitted = <span class="bool-val">true</span>;
+                        <span class="kw">break</span>;
+                    }
+                }
+            }
+            <a href="#509">has_emitted</a>
+        }
+        ty::Dynamic(binder, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+            <span class="kw">let </span><span class="kw-2">mut </span>has_emitted = <span class="bool-val">false</span>;
+            <span class="kw">for </span>predicate <span class="kw">in </span>binder.iter() {
+                <span class="kw">if let </span>ty::ExistentialPredicate::Trait(<span class="kw-2">ref </span>trait_ref) = predicate.skip_binder() {
+                    <span class="kw">let </span>def_id = trait_ref.def_id;
+                    <span class="kw">let </span>descr_post = <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot; trait object{}{}&quot;</span>, plural_suffix, data.descr_post);
+                    <span class="kw">if </span>check_must_not_suspend_def(
+                        fcx.tcx,
+                        def_id,
+                        hir_id,
+                        SuspendCheckData { descr_post, ..data },
+                    ) {
+                        has_emitted = <span class="bool-val">true</span>;
+                        <span class="kw">break</span>;
+                    }
+                }
+            }
+            <a href="#531">has_emitted</a>
+        }
+        ty::Tuple(fields) =&gt; {
+            <span class="kw">let </span><span class="kw-2">mut </span>has_emitted = <span class="bool-val">false</span>;
+            <span class="kw">let </span>comps = <span class="kw">match </span><a href="#485">data</a>.expr.map(|e| <span class="kw-2">&amp;</span><a href="#551">e</a>.kind) {
+                <span class="prelude-val">Some</span>(hir::ExprKind::Tup(comps)) =&gt; {
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(comps.len(), fields.len());
+                    <span class="prelude-val">Some</span>(<a href="#552">comps</a>)
+                }
+                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+            };
+            <span class="kw">for </span>(i, ty) <span class="kw">in </span>fields.iter().enumerate() {
+                <span class="kw">let </span>descr_post = <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot; in tuple element {i}&quot;</span>);
+                <span class="kw">let </span>span = comps.and_then(|c| c.get(i)).map(|e| e.span).unwrap_or(data.source_span);
+                <span class="kw">if </span>check_must_not_suspend_ty(
+                    fcx,
+                    ty,
+                    hir_id,
+                    SuspendCheckData {
+                        descr_post,
+                        expr: comps.and_then(|comps| comps.get(i)),
+                        source_span: span,
+                        ..data
+                    },
+                ) {
+                    has_emitted = <span class="bool-val">true</span>;
+                }
+            }
+            <a href="#550">has_emitted</a>
+        }
+        ty::Array(ty, len) =&gt; {
+            <span class="kw">let </span>descr_pre = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}array{} of &quot;</span>, data.descr_pre, plural_suffix);
+            <a href="#481-486">check_must_not_suspend_ty</a>(
+                <a href="#482">fcx</a>,
+                <a href="#577">ty</a>,
+                <a href="#484">hir_id</a>,
+                <a href="#466">SuspendCheckData</a> {
+                    <a href="#578">descr_pre</a>,
+                    plural_len: <a href="#577">len</a>.try_eval_usize(<a href="#482">fcx</a>.tcx, <a href="#482">fcx</a>.param_env).unwrap_or(<span class="number">0</span>) <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>
+                        + <span class="number">1</span>,
+                    ..<a href="#485">data</a>
+                },
+            )
+        }
+        <span class="comment">// If drop tracking is enabled, we want to look through references, since the referrent
+        // may not be considered live across the await point.
+        </span>ty::Ref(_region, ty, _mutability) <span class="kw">if </span><a href="#482">fcx</a>.<a href="fn_ctxt/mod.rs.html#167">sess</a>().opts.unstable_opts.drop_tracking =&gt; {
+            <span class="kw">let </span>descr_pre = <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}reference{} to &quot;</span>, data.descr_pre, plural_suffix);
+            <a href="#481-486">check_must_not_suspend_ty</a>(<a href="#482">fcx</a>, <a href="#593">ty</a>, <a href="#484">hir_id</a>, <a href="#466">SuspendCheckData</a> { <a href="#594">descr_pre</a>, ..<a href="#485">data</a> })
+        }
+        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+    }
+}
+
+<span class="kw">fn </span>check_must_not_suspend_def(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    hir_id: <a href="../../../rustc_hir/hir_id/struct.HirId.html">HirId</a>,
+    data: SuspendCheckData&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(attr) = <a href="#602">tcx</a>.get_attr(<a href="#603">def_id</a>, sym::must_not_suspend) {
+        <a href="#602">tcx</a>.struct_span_lint_hir(
+            rustc_session::lint::builtin::MUST_NOT_SUSPEND,
+            <a href="#604">hir_id</a>,
+            <a href="#605">data</a>.source_span,
+            |lint| {
+                <span class="kw">let </span>msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;{}`{}`{} held across a suspend point, but should not be&quot;</span>,
+                    data.descr_pre,
+                    tcx.def_path_str(def_id),
+                    data.descr_post,
+                );
+                <span class="kw">let </span><span class="kw-2">mut </span>err = <a href="#612">lint</a>.build(<span class="kw-2">&amp;</span><a href="#613">msg</a>);
+
+                <span class="comment">// add span pointing to the offending yield/await
+                </span><a href="#619">err</a>.span_label(<a href="#605">data</a>.yield_span, <span class="string">&quot;the value is held across this suspend point&quot;</span>);
+
+                <span class="comment">// Add optional reason note
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(note) = <a href="#607">attr</a>.value_str() {
+                    <span class="comment">// FIXME(guswynn): consider formatting this better
+                    </span><a href="#619">err</a>.span_note(<a href="#605">data</a>.source_span, <a href="#625">note</a>.as_str());
+                }
+
+                <span class="comment">// Add some quick suggestions on what to do
+                // FIXME: can `drop` work as a suggestion here as well?
+                </span><a href="#619">err</a>.span_help(
+                    <a href="#605">data</a>.source_span,
+                    <span class="string">&quot;consider using a block (`{ ... }`) \
+                    to shrink the value&#39;s scope, ending before the suspend point&quot;</span>,
+                );
+
+                <a href="#619">err</a>.emit();
+            },
+        );
+
+        <span class="bool-val">true
+    </span>} <span class="kw">else </span>{
+        <span class="bool-val">false
+    </span>}
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

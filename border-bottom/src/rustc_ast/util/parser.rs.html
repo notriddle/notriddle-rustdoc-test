@@ -1,0 +1,814 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_ast/src/util/parser.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>parser.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_ast/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_ast/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_ast/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::ast::{<a class="self" href="../lib.rs.html#41">self</a>, <a href="../ast.rs.html#816">BinOpKind</a>};
+<span class="kw">use </span><span class="kw">crate</span>::token::{<a class="self" href="../lib.rs.html#49">self</a>, <a href="../token.rs.html#26">BinOpToken</a>, <a href="../token.rs.html#264">Token</a>};
+<span class="kw">use </span><a href="../../../rustc_span/symbol/kw/index.html">rustc_span::symbol::kw</a>;
+
+<span class="doccomment">/// Associative operator with precedence.
+///
+/// This is the enum which specifies operator precedence and fixity to the parser.
+</span><span class="attribute">#[derive(Copy, Clone, PartialEq, Debug)]
+</span><span class="kw">pub enum </span>AssocOp {
+    <span class="doccomment">/// `+`
+    </span>Add,
+    <span class="doccomment">/// `-`
+    </span>Subtract,
+    <span class="doccomment">/// `*`
+    </span>Multiply,
+    <span class="doccomment">/// `/`
+    </span>Divide,
+    <span class="doccomment">/// `%`
+    </span>Modulus,
+    <span class="doccomment">/// `&amp;&amp;`
+    </span>LAnd,
+    <span class="doccomment">/// `||`
+    </span>LOr,
+    <span class="doccomment">/// `^`
+    </span>BitXor,
+    <span class="doccomment">/// `&amp;`
+    </span>BitAnd,
+    <span class="doccomment">/// `|`
+    </span>BitOr,
+    <span class="doccomment">/// `&lt;&lt;`
+    </span>ShiftLeft,
+    <span class="doccomment">/// `&gt;&gt;`
+    </span>ShiftRight,
+    <span class="doccomment">/// `==`
+    </span>Equal,
+    <span class="doccomment">/// `&lt;`
+    </span>Less,
+    <span class="doccomment">/// `&lt;=`
+    </span>LessEqual,
+    <span class="doccomment">/// `!=`
+    </span>NotEqual,
+    <span class="doccomment">/// `&gt;`
+    </span>Greater,
+    <span class="doccomment">/// `&gt;=`
+    </span>GreaterEqual,
+    <span class="doccomment">/// `=`
+    </span>Assign,
+    <span class="doccomment">/// `?=` where ? is one of the BinOpToken
+    </span>AssignOp(<a href="../token.rs.html#26">BinOpToken</a>),
+    <span class="doccomment">/// `as`
+    </span>As,
+    <span class="doccomment">/// `..` range
+    </span>DotDot,
+    <span class="doccomment">/// `..=` range
+    </span>DotDotEq,
+    <span class="doccomment">/// `:`
+    </span>Colon,
+}
+
+<span class="attribute">#[derive(PartialEq, Debug)]
+</span><span class="kw">pub enum </span>Fixity {
+    <span class="doccomment">/// The operator is left-associative
+    </span>Left,
+    <span class="doccomment">/// The operator is right-associative
+    </span>Right,
+    <span class="doccomment">/// The operator is not associative
+    </span><span class="prelude-val">None</span>,
+}
+
+<span class="kw">impl </span><a href="#9">AssocOp</a> {
+    <span class="doccomment">/// Creates a new AssocOP from a token
+    </span><span class="kw">pub fn </span>from_token(t: <span class="kw-2">&amp;</span><a href="../token.rs.html#264">Token</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#9">AssocOp</a>&gt; {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><a href="#72">t</a>.kind {
+            <a href="../token.rs.html#201">token::BinOpEq</a>(k) =&gt; <span class="prelude-val">Some</span>(<a href="#49">AssignOp</a>(<a href="#75">k</a>)),
+            <a href="../token.rs.html#189">token::Eq</a> =&gt; <span class="prelude-val">Some</span>(<a href="#47">Assign</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#29">BinOpToken::Star</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#15">Multiply</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#30">BinOpToken::Slash</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#17">Divide</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#31">BinOpToken::Percent</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#19">Modulus</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#27">BinOpToken::Plus</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#11">Add</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#28">BinOpToken::Minus</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#13">Subtract</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#35">BinOpToken::Shl</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#31">ShiftLeft</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#36">BinOpToken::Shr</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#33">ShiftRight</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#33">BinOpToken::And</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#27">BitAnd</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#32">BinOpToken::Caret</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#25">BitXor</a>),
+            <a href="../token.rs.html#200">token::BinOp</a>(<a href="../token.rs.html#34">BinOpToken::Or</a>) =&gt; <span class="prelude-val">Some</span>(<a href="#29">BitOr</a>),
+            <a href="../token.rs.html#190">token::Lt</a> =&gt; <span class="prelude-val">Some</span>(<a href="#37">Less</a>),
+            <a href="../token.rs.html#191">token::Le</a> =&gt; <span class="prelude-val">Some</span>(<a href="#39">LessEqual</a>),
+            <a href="../token.rs.html#194">token::Ge</a> =&gt; <span class="prelude-val">Some</span>(<a href="#45">GreaterEqual</a>),
+            <a href="../token.rs.html#195">token::Gt</a> =&gt; <span class="prelude-val">Some</span>(<a href="#43">Greater</a>),
+            <a href="../token.rs.html#192">token::EqEq</a> =&gt; <span class="prelude-val">Some</span>(<a href="#35">Equal</a>),
+            <a href="../token.rs.html#193">token::Ne</a> =&gt; <span class="prelude-val">Some</span>(<a href="#41">NotEqual</a>),
+            <a href="../token.rs.html#196">token::AndAnd</a> =&gt; <span class="prelude-val">Some</span>(<a href="#21">LAnd</a>),
+            <a href="../token.rs.html#197">token::OrOr</a> =&gt; <span class="prelude-val">Some</span>(<a href="#23">LOr</a>),
+            <a href="../token.rs.html#206">token::DotDot</a> =&gt; <span class="prelude-val">Some</span>(<a href="#53">DotDot</a>),
+            <a href="../token.rs.html#208">token::DotDotEq</a> =&gt; <span class="prelude-val">Some</span>(<a href="#55">DotDotEq</a>),
+            <span class="comment">// DotDotDot is no longer supported, but we need some way to display the error
+            </span><a href="../token.rs.html#207">token::DotDotDot</a> =&gt; <span class="prelude-val">Some</span>(<a href="#55">DotDotEq</a>),
+            <a href="../token.rs.html#211">token::Colon</a> =&gt; <span class="prelude-val">Some</span>(<a href="#57">Colon</a>),
+            <span class="comment">// `&lt;-` should probably be `&lt; -`
+            </span><a href="../token.rs.html#214">token::LArrow</a> =&gt; <span class="prelude-val">Some</span>(<a href="#37">Less</a>),
+            <span class="kw">_ if </span><a href="#72">t</a>.<a href="../token.rs.html#626">is_keyword</a>(kw::As) =&gt; <span class="prelude-val">Some</span>(<a href="#51">As</a>),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Creates a new AssocOp from ast::BinOpKind.
+    </span><span class="kw">pub fn </span>from_ast_binop(op: <a href="../ast.rs.html#816">BinOpKind</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><a href="#108">op</a> {
+            <a href="../ast.rs.html#844">BinOpKind::Lt</a> =&gt; <a href="#37">Less</a>,
+            <a href="../ast.rs.html#852">BinOpKind::Gt</a> =&gt; <a href="#43">Greater</a>,
+            <a href="../ast.rs.html#846">BinOpKind::Le</a> =&gt; <a href="#39">LessEqual</a>,
+            <a href="../ast.rs.html#850">BinOpKind::Ge</a> =&gt; <a href="#45">GreaterEqual</a>,
+            <a href="../ast.rs.html#842">BinOpKind::Eq</a> =&gt; <a href="#35">Equal</a>,
+            <a href="../ast.rs.html#848">BinOpKind::Ne</a> =&gt; <a href="#41">NotEqual</a>,
+            <a href="../ast.rs.html#822">BinOpKind::Mul</a> =&gt; <a href="#15">Multiply</a>,
+            <a href="../ast.rs.html#824">BinOpKind::Div</a> =&gt; <a href="#17">Divide</a>,
+            <a href="../ast.rs.html#826">BinOpKind::Rem</a> =&gt; <a href="#19">Modulus</a>,
+            <a href="../ast.rs.html#818">BinOpKind::Add</a> =&gt; <a href="#11">Add</a>,
+            <a href="../ast.rs.html#820">BinOpKind::Sub</a> =&gt; <a href="#13">Subtract</a>,
+            <a href="../ast.rs.html#838">BinOpKind::Shl</a> =&gt; <a href="#31">ShiftLeft</a>,
+            <a href="../ast.rs.html#840">BinOpKind::Shr</a> =&gt; <a href="#33">ShiftRight</a>,
+            <a href="../ast.rs.html#834">BinOpKind::BitAnd</a> =&gt; <a href="#27">BitAnd</a>,
+            <a href="../ast.rs.html#832">BinOpKind::BitXor</a> =&gt; <a href="#25">BitXor</a>,
+            <a href="../ast.rs.html#836">BinOpKind::BitOr</a> =&gt; <a href="#29">BitOr</a>,
+            <a href="../ast.rs.html#828">BinOpKind::And</a> =&gt; <a href="#21">LAnd</a>,
+            <a href="../ast.rs.html#830">BinOpKind::Or</a> =&gt; <a href="#23">LOr</a>,
+        }
+    }
+
+    <span class="doccomment">/// Gets the precedence of this operator
+    </span><span class="kw">pub fn </span>precedence(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#133">self</a> </span>{
+            <a href="#51">As</a> | <a href="#57">Colon</a> =&gt; <span class="number">14</span>,
+            <a href="#15">Multiply</a> | <a href="#17">Divide</a> | <a href="#19">Modulus</a> =&gt; <span class="number">13</span>,
+            <a href="#11">Add</a> | <a href="#13">Subtract</a> =&gt; <span class="number">12</span>,
+            <a href="#31">ShiftLeft</a> | <a href="#33">ShiftRight</a> =&gt; <span class="number">11</span>,
+            <a href="#27">BitAnd</a> =&gt; <span class="number">10</span>,
+            <a href="#25">BitXor</a> =&gt; <span class="number">9</span>,
+            <a href="#29">BitOr</a> =&gt; <span class="number">8</span>,
+            <a href="#37">Less</a> | <a href="#43">Greater</a> | <a href="#39">LessEqual</a> | <a href="#45">GreaterEqual</a> | <a href="#35">Equal</a> | <a href="#41">NotEqual</a> =&gt; <span class="number">7</span>,
+            <a href="#21">LAnd</a> =&gt; <span class="number">6</span>,
+            <a href="#23">LOr</a> =&gt; <span class="number">5</span>,
+            <a href="#53">DotDot</a> | <a href="#55">DotDotEq</a> =&gt; <span class="number">4</span>,
+            <a href="#47">Assign</a> | <a href="#49">AssignOp</a>(<span class="kw">_</span>) =&gt; <span class="number">2</span>,
+        }
+    }
+
+    <span class="doccomment">/// Gets the fixity of this operator
+    </span><span class="kw">pub fn </span>fixity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#61">Fixity</a> {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="comment">// NOTE: it is a bug to have an operators that has same precedence but different fixities!
+        </span><span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#152">self</a> </span>{
+            <a href="#47">Assign</a> | <a href="#49">AssignOp</a>(<span class="kw">_</span>) =&gt; <a href="#65">Fixity::Right</a>,
+            <a href="#51">As</a> | <a href="#15">Multiply</a> | <a href="#17">Divide</a> | <a href="#19">Modulus</a> | <a href="#11">Add</a> | <a href="#13">Subtract</a> | <a href="#31">ShiftLeft</a> | <a href="#33">ShiftRight</a> | <a href="#27">BitAnd</a>
+            | <a href="#25">BitXor</a> | <a href="#29">BitOr</a> | <a href="#37">Less</a> | <a href="#43">Greater</a> | <a href="#39">LessEqual</a> | <a href="#45">GreaterEqual</a> | <a href="#35">Equal</a> | <a href="#41">NotEqual</a>
+            | <a href="#21">LAnd</a> | <a href="#23">LOr</a> | <a href="#57">Colon</a> =&gt; <a href="#63">Fixity::Left</a>,
+            <a href="#53">DotDot</a> | <a href="#55">DotDotEq</a> =&gt; <a href="#67">Fixity::None</a>,
+        }
+    }
+
+    <span class="kw">pub fn </span>is_comparison(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#164">self</a> </span>{
+            <a href="#37">Less</a> | <a href="#43">Greater</a> | <a href="#39">LessEqual</a> | <a href="#45">GreaterEqual</a> | <a href="#35">Equal</a> | <a href="#41">NotEqual</a> =&gt; <span class="bool-val">true</span>,
+            <a href="#47">Assign</a> | <a href="#49">AssignOp</a>(<span class="kw">_</span>) | <a href="#51">As</a> | <a href="#15">Multiply</a> | <a href="#17">Divide</a> | <a href="#19">Modulus</a> | <a href="#11">Add</a> | <a href="#13">Subtract</a>
+            | <a href="#31">ShiftLeft</a> | <a href="#33">ShiftRight</a> | <a href="#27">BitAnd</a> | <a href="#25">BitXor</a> | <a href="#29">BitOr</a> | <a href="#21">LAnd</a> | <a href="#23">LOr</a> | <a href="#53">DotDot</a> | <a href="#55">DotDotEq</a>
+            | <a href="#57">Colon</a> =&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>is_assign_like(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#174">self</a> </span>{
+            <a href="#47">Assign</a> | <a href="#49">AssignOp</a>(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            <a href="#37">Less</a> | <a href="#43">Greater</a> | <a href="#39">LessEqual</a> | <a href="#45">GreaterEqual</a> | <a href="#35">Equal</a> | <a href="#41">NotEqual</a> | <a href="#51">As</a> | <a href="#15">Multiply</a>
+            | <a href="#17">Divide</a> | <a href="#19">Modulus</a> | <a href="#11">Add</a> | <a href="#13">Subtract</a> | <a href="#31">ShiftLeft</a> | <a href="#33">ShiftRight</a> | <a href="#27">BitAnd</a> | <a href="#25">BitXor</a>
+            | <a href="#29">BitOr</a> | <a href="#21">LAnd</a> | <a href="#23">LOr</a> | <a href="#53">DotDot</a> | <a href="#55">DotDotEq</a> | <a href="#57">Colon</a> =&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>to_ast_binop(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../ast.rs.html#816">BinOpKind</a>&gt; {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#184">self</a> </span>{
+            <a href="#37">Less</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#844">BinOpKind::Lt</a>),
+            <a href="#43">Greater</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#852">BinOpKind::Gt</a>),
+            <a href="#39">LessEqual</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#846">BinOpKind::Le</a>),
+            <a href="#45">GreaterEqual</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#850">BinOpKind::Ge</a>),
+            <a href="#35">Equal</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#842">BinOpKind::Eq</a>),
+            <a href="#41">NotEqual</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#848">BinOpKind::Ne</a>),
+            <a href="#15">Multiply</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#822">BinOpKind::Mul</a>),
+            <a href="#17">Divide</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#824">BinOpKind::Div</a>),
+            <a href="#19">Modulus</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#826">BinOpKind::Rem</a>),
+            <a href="#11">Add</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#818">BinOpKind::Add</a>),
+            <a href="#13">Subtract</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#820">BinOpKind::Sub</a>),
+            <a href="#31">ShiftLeft</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#838">BinOpKind::Shl</a>),
+            <a href="#33">ShiftRight</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#840">BinOpKind::Shr</a>),
+            <a href="#27">BitAnd</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#834">BinOpKind::BitAnd</a>),
+            <a href="#25">BitXor</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#832">BinOpKind::BitXor</a>),
+            <a href="#29">BitOr</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#836">BinOpKind::BitOr</a>),
+            <a href="#21">LAnd</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#828">BinOpKind::And</a>),
+            <a href="#23">LOr</a> =&gt; <span class="prelude-val">Some</span>(<a href="../ast.rs.html#830">BinOpKind::Or</a>),
+            <a href="#47">Assign</a> | <a href="#49">AssignOp</a>(<span class="kw">_</span>) | <a href="#51">As</a> | <a href="#53">DotDot</a> | <a href="#55">DotDotEq</a> | <a href="#57">Colon</a> =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// This operator could be used to follow a block unambiguously.
+    ///
+    /// This is used for error recovery at the moment, providing a suggestion to wrap blocks with
+    /// parentheses while having a high degree of confidence on the correctness of the suggestion.
+    </span><span class="kw">pub fn </span>can_continue_expr_unambiguously(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">use </span><a href="#9">AssocOp</a>::<span class="kw-2">*</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+            <span class="self">self</span>,
+            BitXor | <span class="comment">// `{ 42 } ^ 3`
+            </span>Assign | <span class="comment">// `{ 42 } = { 42 }`
+            </span>Divide | <span class="comment">// `{ 42 } / 42`
+            </span>Modulus | <span class="comment">// `{ 42 } % 2`
+            </span>ShiftRight | <span class="comment">// `{ 42 } &gt;&gt; 2`
+            </span>LessEqual | <span class="comment">// `{ 42 } &lt;= 3`
+            </span>Greater | <span class="comment">// `{ 42 } &gt; 3`
+            </span>GreaterEqual | <span class="comment">// `{ 42 } &gt;= 3`
+            </span>AssignOp(<span class="kw">_</span>) | <span class="comment">// `{ 42 } +=`
+            </span>As | <span class="comment">// `{ 42 } as usize`
+            // Equal | // `{ 42 } == { 42 }`    Accepting these here would regress incorrect
+            // NotEqual | // `{ 42 } != { 42 }  struct literals parser recovery.
+            </span>Colon, <span class="comment">// `{ 42 }: usize`
+        </span>)
+    }
+}
+
+<span class="kw">pub const </span>PREC_CLOSURE: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = -<span class="number">40</span>;
+<span class="kw">pub const </span>PREC_JUMP: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = -<span class="number">30</span>;
+<span class="kw">pub const </span>PREC_RANGE: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = -<span class="number">10</span>;
+<span class="comment">// The range 2..=14 is reserved for AssocOp binary operator precedences.
+</span><span class="kw">pub const </span>PREC_PREFIX: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = <span class="number">50</span>;
+<span class="kw">pub const </span>PREC_POSTFIX: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = <span class="number">60</span>;
+<span class="kw">pub const </span>PREC_PAREN: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = <span class="number">99</span>;
+<span class="kw">pub const </span>PREC_FORCE_PAREN: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> = <span class="number">100</span>;
+
+<span class="attribute">#[derive(Debug, Clone, Copy)]
+</span><span class="kw">pub enum </span>ExprPrecedence {
+    Closure,
+    Break,
+    Continue,
+    Ret,
+    Yield,
+    Yeet,
+
+    Range,
+
+    Binary(<a href="../ast.rs.html#816">BinOpKind</a>),
+
+    Cast,
+    Type,
+
+    Assign,
+    AssignOp,
+
+    Box,
+    AddrOf,
+    Let,
+    Unary,
+
+    Call,
+    MethodCall,
+    Field,
+    Index,
+    Try,
+    InlineAsm,
+    Mac,
+
+    Array,
+    Repeat,
+    Tup,
+    Lit,
+    Path,
+    Paren,
+    If,
+    While,
+    ForLoop,
+    Loop,
+    Match,
+    ConstBlock,
+    Block,
+    TryBlock,
+    Struct,
+    Async,
+    Await,
+    <span class="prelude-val">Err</span>,
+}
+
+<span class="kw">impl </span><a href="#244">ExprPrecedence</a> {
+    <span class="kw">pub fn </span>order(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a> {
+        <span class="kw">match </span><span class="self"><a href="#296">self</a> </span>{
+            <a href="#245">ExprPrecedence::Closure</a> =&gt; <a href="#234">PREC_CLOSURE</a>,
+
+            <a href="#246">ExprPrecedence::Break</a>
+            | <a href="#247">ExprPrecedence::Continue</a>
+            | <a href="#248">ExprPrecedence::Ret</a>
+            | <a href="#249">ExprPrecedence::Yield</a>
+            | <a href="#250">ExprPrecedence::Yeet</a> =&gt; <a href="#235">PREC_JUMP</a>,
+
+            <span class="comment">// `Range` claims to have higher precedence than `Assign`, but `x .. x = x` fails to
+            // parse, instead of parsing as `(x .. x) = x`.  Giving `Range` a lower precedence
+            // ensures that `pprust` will add parentheses in the right places to get the desired
+            // parse.
+            </span><a href="#252">ExprPrecedence::Range</a> =&gt; <a href="#236">PREC_RANGE</a>,
+
+            <span class="comment">// Binop-like expr kinds, handled by `AssocOp`.
+            </span><a href="#254">ExprPrecedence::Binary</a>(op) =&gt; AssocOp::from_ast_binop(<a href="#313">op</a>).<a href="#133">precedence</a>() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>,
+            <a href="#256">ExprPrecedence::Cast</a> =&gt; <a href="#51">AssocOp::As</a>.<a href="#133">precedence</a>() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>,
+            <a href="#257">ExprPrecedence::Type</a> =&gt; <a href="#57">AssocOp::Colon</a>.<a href="#133">precedence</a>() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>,
+
+            <a href="#259">ExprPrecedence::Assign</a> |
+            <a href="#260">ExprPrecedence::AssignOp</a> =&gt; <a href="#47">AssocOp::Assign</a>.<a href="#133">precedence</a>() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>,
+
+            <span class="comment">// Unary, prefix
+            </span><a href="#262">ExprPrecedence::Box</a>
+            | <a href="#263">ExprPrecedence::AddrOf</a>
+            <span class="comment">// Here `let pats = expr` has `let pats =` as a &quot;unary&quot; prefix of `expr`.
+            // However, this is not exactly right. When `let _ = a` is the LHS of a binop we
+            // need parens sometimes. E.g. we can print `(let _ = a) &amp;&amp; b` as `let _ = a &amp;&amp; b`
+            // but we need to print `(let _ = a) &lt; b` as-is with parens.
+            </span>| <a href="#264">ExprPrecedence::Let</a>
+            | <a href="#265">ExprPrecedence::Unary</a> =&gt; <a href="#238">PREC_PREFIX</a>,
+
+            <span class="comment">// Unary, postfix
+            </span><a href="#291">ExprPrecedence::Await</a>
+            | <a href="#267">ExprPrecedence::Call</a>
+            | <a href="#268">ExprPrecedence::MethodCall</a>
+            | <a href="#269">ExprPrecedence::Field</a>
+            | <a href="#270">ExprPrecedence::Index</a>
+            | <a href="#271">ExprPrecedence::Try</a>
+            | <a href="#272">ExprPrecedence::InlineAsm</a>
+            | <a href="#273">ExprPrecedence::Mac</a> =&gt; <a href="#239">PREC_POSTFIX</a>,
+
+            <span class="comment">// Never need parens
+            </span><a href="#275">ExprPrecedence::Array</a>
+            | <a href="#276">ExprPrecedence::Repeat</a>
+            | <a href="#277">ExprPrecedence::Tup</a>
+            | <a href="#278">ExprPrecedence::Lit</a>
+            | <a href="#279">ExprPrecedence::Path</a>
+            | <a href="#280">ExprPrecedence::Paren</a>
+            | <a href="#281">ExprPrecedence::If</a>
+            | <a href="#282">ExprPrecedence::While</a>
+            | <a href="#283">ExprPrecedence::ForLoop</a>
+            | <a href="#284">ExprPrecedence::Loop</a>
+            | <a href="#285">ExprPrecedence::Match</a>
+            | <a href="#286">ExprPrecedence::ConstBlock</a>
+            | <a href="#287">ExprPrecedence::Block</a>
+            | <a href="#288">ExprPrecedence::TryBlock</a>
+            | <a href="#290">ExprPrecedence::Async</a>
+            | <a href="#289">ExprPrecedence::Struct</a>
+            | <a href="#292">ExprPrecedence::Err</a> =&gt; <a href="#240">PREC_PAREN</a>,
+        }
+    }
+}
+
+<span class="doccomment">/// In `let p = e`, operators with precedence `&lt;=` this one requires parentheses in `e`.
+</span><span class="kw">pub fn </span>prec_let_scrutinee_needs_par() -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+    <a href="#21">AssocOp::LAnd</a>.<a href="#133">precedence</a>()
+}
+
+<span class="doccomment">/// Suppose we have `let _ = e` and the `order` of `e`.
+/// Is the `order` such that `e` in `let _ = e` needs parentheses when it is on the RHS?
+///
+/// Conversely, suppose that we have `(let _ = a) OP b` and `order` is that of `OP`.
+/// Can we print this as `let _ = a OP b`?
+</span><span class="kw">pub fn </span>needs_par_as_let_scrutinee(order: <a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#372">order</a> &lt;= <a href="#363">prec_let_scrutinee_needs_par</a>() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.i8.html">i8</a>
+}
+
+<span class="doccomment">/// Expressions that syntactically contain an &quot;exterior&quot; struct literal i.e., not surrounded by any
+/// parens or other delimiters, e.g., `X { y: 1 }`, `X { y: 1 }.method()`, `foo == X { y: 1 }` and
+/// `X { y: 1 } == foo` all do, but `(X { y: 1 }) == foo` does not.
+</span><span class="kw">pub fn </span>contains_exterior_struct_lit(value: <span class="kw-2">&amp;</span><a href="../ast.rs.html#1106">ast::Expr</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">match </span><a href="#379">value</a>.kind {
+        <a href="../ast.rs.html#1446">ast::ExprKind::Struct</a>(..) =&gt; <span class="bool-val">true</span>,
+
+        <a href="../ast.rs.html#1408">ast::ExprKind::Assign</a>(<span class="kw-2">ref </span>lhs, <span class="kw-2">ref </span>rhs, <span class="kw">_</span>)
+        | <a href="../ast.rs.html#1412">ast::ExprKind::AssignOp</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>lhs, <span class="kw-2">ref </span>rhs)
+        | <a href="../ast.rs.html#1351">ast::ExprKind::Binary</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>lhs, <span class="kw-2">ref </span>rhs) =&gt; {
+            <span class="comment">// X { y: 1 } + X { y: 2 }
+            </span><a href="#379">contains_exterior_struct_lit</a>(<span class="kw-2">&amp;</span><a href="#383">lhs</a>) || <a href="#379">contains_exterior_struct_lit</a>(<span class="kw-2">&amp;</span><a href="#383">rhs</a>)
+        }
+        <a href="../ast.rs.html#1401">ast::ExprKind::Await</a>(<span class="kw-2">ref </span>x)
+        | <a href="../ast.rs.html#1353">ast::ExprKind::Unary</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>x)
+        | <a href="../ast.rs.html#1357">ast::ExprKind::Cast</a>(<span class="kw-2">ref </span>x, <span class="kw">_</span>)
+        | <a href="../ast.rs.html#1359">ast::ExprKind::Type</a>(<span class="kw-2">ref </span>x, <span class="kw">_</span>)
+        | <a href="../ast.rs.html#1414">ast::ExprKind::Field</a>(<span class="kw-2">ref </span>x, <span class="kw">_</span>)
+        | <a href="../ast.rs.html#1416">ast::ExprKind::Index</a>(<span class="kw-2">ref </span>x, <span class="kw">_</span>) =&gt; {
+            <span class="comment">// &amp;X { y: 1 }, X { y: 1 }.y
+            </span><a href="#379">contains_exterior_struct_lit</a>(<span class="kw-2">&amp;</span><a href="#389">x</a>)
+        }
+
+        <a href="../ast.rs.html#1347">ast::ExprKind::MethodCall</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>receiver, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+            <span class="comment">// X { y: 1 }.bar(...)
+            </span><a href="#379">contains_exterior_struct_lit</a>(<span class="kw-2">&amp;</span><a href="#399">receiver</a>)
+        }
+
+        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_ast" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

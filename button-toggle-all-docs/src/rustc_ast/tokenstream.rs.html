@@ -1,0 +1,1334 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_ast/src/tokenstream.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>tokenstream.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_ast/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_ast/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_ast/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+</pre><pre class="rust"><code><span class="doccomment">//! # Token Streams
+//!
+//! `TokenStream`s represent syntactic objects before they are converted into ASTs.
+//! A `TokenStream` is, roughly speaking, a sequence of [`TokenTree`]s,
+//! which are themselves a single [`Token`] or a `Delimited` subsequence of tokens.
+//!
+//! ## Ownership
+//!
+//! `TokenStream`s are persistent data structures constructed as ropes with reference
+//! counted-children. In general, this means that calling an operation on a `TokenStream`
+//! (such as `slice`) produces an entirely new `TokenStream` from the borrowed reference to
+//! the original. This essentially coerces `TokenStream`s into &quot;views&quot; of their subparts,
+//! and a borrowed `TokenStream` is sufficient to build an owned `TokenStream` without taking
+//! ownership of the original.
+
+</span><span class="kw">use </span><a href="ast.rs.html#967"><span class="kw">crate</span>::ast::StmtKind</a>;
+<span class="kw">use </span><span class="kw">crate</span>::ast_traits::{<a href="ast_traits.rs.html#263">HasAttrs</a>, <a href="ast_traits.rs.html#95">HasSpan</a>, <a href="ast_traits.rs.html#126">HasTokens</a>};
+<span class="kw">use </span><span class="kw">crate</span>::token::{<a class="self" href="lib.rs.html#49">self</a>, <a href="token.rs.html#46">Delimiter</a>, <a href="token.rs.html#743">Nonterminal</a>, <a href="token.rs.html#264">Token</a>, <a href="token.rs.html#187">TokenKind</a>};
+<span class="kw">use </span><a href="ast.rs.html#2540"><span class="kw">crate</span>::AttrVec</a>;
+
+<span class="kw">use </span>rustc_data_structures::stable_hasher::{<a href="../../rustc_data_structures/stable_hasher/trait.HashStable.html">HashStable</a>, <a href="../../rustc_data_structures/stable_hasher/struct.StableHasher.html">StableHasher</a>};
+<span class="kw">use </span>rustc_data_structures::sync::{<a class="self" href="../../rustc_data_structures/sync/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">Lrc</a>};
+<span class="kw">use </span><a href="../../rustc_macros/derive.HashStable_Generic.html">rustc_macros::HashStable_Generic</a>;
+<span class="kw">use </span>rustc_serialize::{<a href="../../rustc_serialize/serialize/trait.Decodable.html">Decodable</a>, <a href="../../rustc_serialize/serialize/trait.Decoder.html">Decoder</a>, <a href="../../rustc_serialize/serialize/trait.Encodable.html">Encodable</a>, <a href="../../rustc_serialize/serialize/trait.Encoder.html">Encoder</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+<span class="kw">use </span>smallvec::{<a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec</a>, <a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">SmallVec</a>};
+
+<span class="kw">use </span>std::{<a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">fmt</a>, <a href="https://doc.rust-lang.org/nightly/core/iter/index.html">iter</a>};
+
+<span class="doccomment">/// When the main Rust parser encounters a syntax-extension invocation, it
+/// parses the arguments to the invocation as a token tree. This is a very
+/// loose structure, such that all sorts of different AST fragments can
+/// be passed to syntax extensions using a uniform type.
+///
+/// If the syntax extension is an MBE macro, it will attempt to match its
+/// LHS token tree against the provided token tree, and if it finds a
+/// match, will transcribe the RHS token tree, splicing in any captured
+/// `macro_parser::matched_nonterminals` into the `SubstNt`s it finds.
+///
+/// The RHS of an MBE macro is the only place `SubstNt`s are substituted.
+/// Nothing special happens to misnamed or misplaced `SubstNt`s.
+</span><span class="attribute">#[derive(Debug, Clone, PartialEq, Encodable, Decodable, HashStable_Generic)]
+</span><span class="kw">pub enum </span>TokenTree {
+    <span class="doccomment">/// A single token.
+    </span>Token(<a href="token.rs.html#264">Token</a>, <a href="#316">Spacing</a>),
+    <span class="doccomment">/// A delimited sequence of token trees.
+    </span>Delimited(<a href="#645">DelimSpan</a>, <a href="token.rs.html#46">Delimiter</a>, <a href="#309">TokenStream</a>),
+}
+
+<span class="comment">// This type is used a lot. Make sure it doesn&#39;t unintentionally get bigger.
+</span><span class="attribute">#[cfg(all(target_arch = <span class="string">&quot;x86_64&quot;</span>, target_pointer_width = <span class="string">&quot;64&quot;</span>))]
+</span><a class="macro" href="../../rustc_index/macro.static_assert_size.html">rustc_data_structures::static_assert_size!</a>(TokenTree, <span class="number">32</span>);
+
+<span class="comment">// Ensure all fields of `TokenTree` is `Send` and `Sync`.
+</span><span class="attribute">#[cfg(parallel_compiler)]
+</span><span class="kw">fn </span>_dummy()
+<span class="kw">where
+    </span>Token: Send + Sync,
+    DelimSpan: Send + Sync,
+    Delimiter: Send + Sync,
+    TokenStream: Send + Sync,
+{
+}
+
+<span class="kw">impl </span><a href="#43">TokenTree</a> {
+    <span class="doccomment">/// Checks if this `TokenTree` is equal to the other, regardless of span information.
+    </span><span class="kw">pub fn </span>eq_unspanned(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><a href="#43">TokenTree</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a class="self" href="#67">self</a>, <a href="#67">other</a>) {
+            (<a href="#45">TokenTree::Token</a>(token, <span class="kw">_</span>), <a href="#45">TokenTree::Token</a>(token2, <span class="kw">_</span>)) =&gt; <a href="#69">token</a>.kind == <a href="#69">token2</a>.kind,
+            (<a href="#47">TokenTree::Delimited</a>(<span class="kw">_</span>, delim, tts), <a href="#47">TokenTree::Delimited</a>(<span class="kw">_</span>, delim2, tts2)) =&gt; {
+                <a href="#70">delim</a> == <a href="#70">delim2</a> &amp;&amp; <a href="#70">tts</a>.<a href="#398">eq_unspanned</a>(<span class="kw-2">&amp;</span><a href="#70">tts2</a>)
+            }
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="doccomment">/// Retrieves the `TokenTree`&#39;s span.
+    </span><span class="kw">pub fn </span>span(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <span class="kw">match </span><span class="self"><a href="#78">self</a> </span>{
+            <a href="#45">TokenTree::Token</a>(token, <span class="kw">_</span>) =&gt; <a href="#80">token</a>.span,
+            <a href="#47">TokenTree::Delimited</a>(sp, ..) =&gt; <a href="#81">sp</a>.<a href="#663">entire</a>(),
+        }
+    }
+
+    <span class="doccomment">/// Modify the `TokenTree`&#39;s span in-place.
+    </span><span class="kw">pub fn </span>set_span(<span class="kw-2">&amp;mut </span><span class="self">self</span>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <span class="kw">match </span><span class="self"><a href="#86">self</a> </span>{
+            <a href="#45">TokenTree::Token</a>(token, <span class="kw">_</span>) =&gt; <a href="#88">token</a>.span = <a href="#86">span</a>,
+            <a href="#47">TokenTree::Delimited</a>(dspan, ..) =&gt; <span class="kw-2">*</span><a href="#89">dspan</a> = DelimSpan::from_single(<a href="#86">span</a>),
+        }
+    }
+
+    <span class="comment">// Create a `TokenTree::Token` with alone spacing.
+    </span><span class="kw">pub fn </span>token_alone(kind: <a href="token.rs.html#187">TokenKind</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#43">TokenTree</a> {
+        <a href="#45">TokenTree::Token</a>(Token::new(<a href="#94">kind</a>, <a href="#94">span</a>), <a href="#317">Spacing::Alone</a>)
+    }
+
+    <span class="comment">// Create a `TokenTree::Token` with joint spacing.
+    </span><span class="kw">pub fn </span>token_joint(kind: <a href="token.rs.html#187">TokenKind</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#43">TokenTree</a> {
+        <a href="#45">TokenTree::Token</a>(Token::new(<a href="#99">kind</a>, <a href="#99">span</a>), <a href="#318">Spacing::Joint</a>)
+    }
+
+    <span class="kw">pub fn </span>uninterpolate(<span class="self">self</span>) -&gt; <a href="#43">TokenTree</a> {
+        <span class="kw">match </span><span class="self"><a href="#103">self</a> </span>{
+            <a href="#45">TokenTree::Token</a>(token, spacing) =&gt; {
+                <a href="#45">TokenTree::Token</a>(<a href="#105">token</a>.<a href="token.rs.html#522">uninterpolate</a>().into_owned(), <a href="#105">spacing</a>)
+            }
+            tt =&gt; <a href="#108">tt</a>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;CTX&gt; HashStable&lt;CTX&gt; <span class="kw">for </span><a href="#309">TokenStream</a>
+<span class="kw">where
+    </span>CTX: <a href="lib.rs.html#61"><span class="kw">crate</span>::HashStableContext</a>,
+{
+    <span class="kw">fn </span>hash_stable(<span class="kw-2">&amp;</span><span class="self">self</span>, hcx: <span class="kw-2">&amp;mut </span>CTX, hasher: <span class="kw-2">&amp;mut </span><a href="../../rustc_data_structures/stable_hasher/struct.StableHasher.html">StableHasher</a>) {
+        <span class="kw">for </span>sub_tt <span class="kw">in </span><span class="self">self</span>.trees() {
+            sub_tt.hash_stable(hcx, hasher);
+        }
+    }
+}
+
+<span class="kw">pub trait </span>ToAttrTokenStream: <a href="../../rustc_data_structures/sync/trait.Send.html">sync::Send</a> + <a href="../../rustc_data_structures/sync/trait.Sync.html">sync::Sync</a> {
+    <span class="kw">fn </span>to_attr_token_stream(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#180">AttrTokenStream</a>;
+}
+
+<span class="kw">impl </span><a href="#124">ToAttrTokenStream</a> <span class="kw">for </span><a href="#180">AttrTokenStream</a> {
+    <span class="kw">fn </span>to_attr_token_stream(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#180">AttrTokenStream</a> {
+        <a class="self" href="#129">self</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+    }
+}
+
+<span class="doccomment">/// A lazy version of [`TokenStream`], which defers creation
+/// of an actual `TokenStream` until it is needed.
+/// `Box` is here only to reduce the structure size.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>LazyAttrTokenStream(Lrc&lt;Box&lt;<span class="kw">dyn </span><a href="#124">ToAttrTokenStream</a>&gt;&gt;);
+
+<span class="kw">impl </span><a href="#138">LazyAttrTokenStream</a> {
+    <span class="kw">pub fn </span>new(inner: <span class="kw">impl </span><a href="#124">ToAttrTokenStream</a> + <span class="lifetime">&#39;static</span>) -&gt; <a href="#138">LazyAttrTokenStream</a> {
+        <a href="#138">LazyAttrTokenStream</a>(Lrc::new(Box::new(<a href="#141">inner</a>)))
+    }
+
+    <span class="kw">pub fn </span>to_attr_token_stream(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#180">AttrTokenStream</a> {
+        <a class="self" href="#145">self</a>.<span class="number">0</span>.<a href="#125">to_attr_token_stream</a>()
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span><a href="#138">LazyAttrTokenStream</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#151">f</a>, <span class="string">&quot;LazyAttrTokenStream({:?})&quot;</span>, <span class="self">self</span>.to_attr_token_stream())
+    }
+}
+
+<span class="kw">impl</span>&lt;S: <a href="../../rustc_serialize/serialize/trait.Encoder.html">Encoder</a>&gt; Encodable&lt;S&gt; <span class="kw">for </span><a href="#138">LazyAttrTokenStream</a> {
+    <span class="kw">fn </span>encode(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;mut </span>S) {
+        <span class="comment">// Used by AST json printing.
+        </span><a href="../../rustc_serialize/serialize/trait.Encodable.html">Encodable::encode</a>(<span class="kw-2">&amp;</span><a class="self" href="#157">self</a>.<a href="#145">to_attr_token_stream</a>(), <a href="#157">s</a>);
+    }
+}
+
+<span class="kw">impl</span>&lt;D: <a href="../../rustc_serialize/serialize/trait.Decoder.html">Decoder</a>&gt; Decodable&lt;D&gt; <span class="kw">for </span><a href="#138">LazyAttrTokenStream</a> {
+    <span class="kw">fn </span>decode(_d: <span class="kw-2">&amp;mut </span>D) -&gt; <span class="self">Self </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;Attempted to decode LazyAttrTokenStream&quot;</span>);
+    }
+}
+
+<span class="kw">impl</span>&lt;CTX&gt; HashStable&lt;CTX&gt; <span class="kw">for </span><a href="#138">LazyAttrTokenStream</a> {
+    <span class="kw">fn </span>hash_stable(<span class="kw-2">&amp;</span><span class="self">self</span>, _hcx: <span class="kw-2">&amp;mut </span>CTX, _hasher: <span class="kw-2">&amp;mut </span><a href="../../rustc_data_structures/stable_hasher/struct.StableHasher.html">StableHasher</a>) {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;Attempted to compute stable hash for LazyAttrTokenStream&quot;</span>);
+    }
+}
+
+<span class="doccomment">/// An `AttrTokenStream` is similar to a `TokenStream`, but with extra
+/// information about the tokens for attribute targets. This is used
+/// during expansion to perform early cfg-expansion, and to process attributes
+/// during proc-macro invocations.
+</span><span class="attribute">#[derive(Clone, Debug, Default, Encodable, Decodable)]
+</span><span class="kw">pub struct </span>AttrTokenStream(<span class="kw">pub </span>Lrc&lt;Vec&lt;<a href="#184">AttrTokenTree</a>&gt;&gt;);
+
+<span class="doccomment">/// Like `TokenTree`, but for `AttrTokenStream`.
+</span><span class="attribute">#[derive(Clone, Debug, Encodable, Decodable)]
+</span><span class="kw">pub enum </span>AttrTokenTree {
+    Token(<a href="token.rs.html#264">Token</a>, <a href="#316">Spacing</a>),
+    Delimited(<a href="#645">DelimSpan</a>, <a href="token.rs.html#46">Delimiter</a>, <a href="#180">AttrTokenStream</a>),
+    <span class="doccomment">/// Stores the attributes for an attribute target,
+    /// along with the tokens for that attribute target.
+    /// See `AttributesData` for more information
+    </span>Attributes(<a href="#293">AttributesData</a>),
+}
+
+<span class="kw">impl </span><a href="#180">AttrTokenStream</a> {
+    <span class="kw">pub fn </span>new(tokens: Vec&lt;<a href="#184">AttrTokenTree</a>&gt;) -&gt; <a href="#180">AttrTokenStream</a> {
+        <a href="#180">AttrTokenStream</a>(Lrc::new(<a href="#194">tokens</a>))
+    }
+
+    <span class="doccomment">/// Converts this `AttrTokenStream` to a plain `TokenStream`.
+    /// During conversion, `AttrTokenTree::Attributes` get &#39;flattened&#39;
+    /// back to a `TokenStream` of the form `outer_attr attr_target`.
+    /// If there are inner attributes, they are inserted into the proper
+    /// place in the attribute target tokens.
+    </span><span class="kw">pub fn </span>to_tokenstream(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#309">TokenStream</a> {
+        <span class="kw">let </span>trees: Vec&lt;<span class="kw">_</span>&gt; = <span class="self"><a href="#203">self</a>
+            </span>.<span class="number">0
+            </span>.iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|tree| <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#207">tree</a> {
+                <a href="#185">AttrTokenTree::Token</a>(inner, spacing) =&gt; {
+                    <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[TokenTree::Token(inner.clone(), <span class="kw-2">*</span>spacing)].<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                }
+                <a href="#186">AttrTokenTree::Delimited</a>(span, delim, stream) =&gt; {
+                    <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[TokenTree::Delimited(<span class="kw-2">*</span>span, <span class="kw-2">*</span>delim, stream.to_tokenstream()),]
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                }
+                <a href="#190">AttrTokenTree::Attributes</a>(data) =&gt; {
+                    <span class="kw">let </span><span class="kw-2">mut </span>outer_attrs = Vec::new();
+                    <span class="kw">let </span><span class="kw-2">mut </span>inner_attrs = Vec::new();
+                    <span class="kw">for </span>attr <span class="kw">in </span><span class="kw-2">&amp;</span>data.attrs {
+                        <span class="kw">match </span>attr.style {
+                            <span class="kw">crate</span>::AttrStyle::Outer =&gt; outer_attrs.push(attr),
+                            <span class="kw">crate</span>::AttrStyle::Inner =&gt; inner_attrs.push(attr),
+                        }
+                    }
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>target_tokens: Vec&lt;<span class="kw">_</span>&gt; = <a href="#215">data</a>
+                        .tokens
+                        .<a href="#145">to_attr_token_stream</a>()
+                        .<a href="#203">to_tokenstream</a>()
+                        .<span class="number">0
+                        </span>.iter()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+                    <span class="kw">if </span>!inner_attrs.is_empty() {
+                        <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="bool-val">false</span>;
+                        <span class="comment">// Check the last two trees (to account for a trailing semi)
+                        </span><span class="kw">for </span>tree <span class="kw">in </span>target_tokens.iter_mut().rev().take(<span class="number">2</span>) {
+                            <span class="kw">if let </span>TokenTree::Delimited(span, delim, delim_tokens) = tree {
+                                <span class="comment">// Inner attributes are only supported on extern blocks, functions,
+                                // impls, and modules. All of these have their inner attributes
+                                // placed at the beginning of the rightmost outermost braced group:
+                                // e.g. fn foo() { #![my_attr} }
+                                //
+                                // Therefore, we can insert them back into the right location
+                                // without needing to do any extra position tracking.
+                                //
+                                // Note: Outline modules are an exception - they can
+                                // have attributes like `#![my_attr]` at the start of a file.
+                                // Support for custom attributes in this position is not
+                                // properly implemented - we always synthesize fake tokens,
+                                // so we never reach this code.
+
+                                </span><span class="kw">let </span><span class="kw-2">mut </span>builder = TokenStreamBuilder::new();
+                                <span class="kw">for </span>inner_attr <span class="kw">in </span>inner_attrs {
+                                    builder.push(inner_attr.tokens());
+                                }
+                                builder.push(delim_tokens.clone());
+                                <span class="kw-2">*</span>tree = TokenTree::Delimited(<span class="kw-2">*</span>span, <span class="kw-2">*</span>delim, builder.build());
+                                found = <span class="bool-val">true</span>;
+                                <span class="kw">break</span>;
+                            }
+                        }
+
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                            found,
+                            <span class="string">&quot;Failed to find trailing delimited group in: {:?}&quot;</span>,
+                            target_tokens
+                        );
+                    }
+                    <span class="kw">let </span><span class="kw-2">mut </span>flat: SmallVec&lt;[<span class="kw">_</span>; <span class="number">1</span>]&gt; = SmallVec::new();
+                    <span class="kw">for </span>attr <span class="kw">in </span>outer_attrs {
+                        <span class="comment">// FIXME: Make this more efficient
+                        </span>flat.extend(attr.tokens().<span class="number">0</span>.clone().iter().cloned());
+                    }
+                    <a href="#269">flat</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#225">target_tokens</a>);
+                    <a href="#269">flat</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+                }
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        TokenStream::new(<a href="#204">trees</a>)
+    }
+}
+
+<span class="doccomment">/// Stores the tokens for an attribute target, along
+/// with its attributes.
+///
+/// This is constructed during parsing when we need to capture
+/// tokens.
+///
+/// For example, `#[cfg(FALSE)] struct Foo {}` would
+/// have an `attrs` field containing the `#[cfg(FALSE)]` attr,
+/// and a `tokens` field storing the (unparsed) tokens `struct Foo {}`
+</span><span class="attribute">#[derive(Clone, Debug, Encodable, Decodable)]
+</span><span class="kw">pub struct </span>AttributesData {
+    <span class="doccomment">/// Attributes, both outer and inner.
+    /// These are stored in the original order that they were parsed in.
+    </span><span class="kw">pub </span>attrs: <a href="ast.rs.html#2540">AttrVec</a>,
+    <span class="doccomment">/// The underlying tokens for the attribute target that `attrs`
+    /// are applied to
+    </span><span class="kw">pub </span>tokens: <a href="#138">LazyAttrTokenStream</a>,
+}
+
+<span class="doccomment">/// A `TokenStream` is an abstract sequence of tokens, organized into [`TokenTree`]s.
+///
+/// The goal is for procedural macros to work with `TokenStream`s and `TokenTree`s
+/// instead of a representation of the abstract syntax tree.
+/// Today&#39;s `TokenTree`s can still contain AST via `token::Interpolated` for
+/// backwards compatibility.
+</span><span class="attribute">#[derive(Clone, Debug, Default, Encodable, Decodable)]
+</span><span class="kw">pub struct </span>TokenStream(<span class="kw">pub</span>(<span class="kw">crate</span>) Lrc&lt;Vec&lt;<a href="#43">TokenTree</a>&gt;&gt;);
+
+<span class="comment">// `TokenStream` is used a lot. Make sure it doesn&#39;t unintentionally get bigger.
+</span><span class="attribute">#[cfg(all(target_arch = <span class="string">&quot;x86_64&quot;</span>, target_pointer_width = <span class="string">&quot;64&quot;</span>))]
+</span><a class="macro" href="../../rustc_index/macro.static_assert_size.html">rustc_data_structures::static_assert_size!</a>(TokenStream, <span class="number">8</span>);
+
+<span class="attribute">#[derive(Clone, Copy, Debug, PartialEq, Encodable, Decodable, HashStable_Generic)]
+</span><span class="kw">pub enum </span>Spacing {
+    Alone,
+    Joint,
+}
+
+<span class="kw">impl </span><a href="#309">TokenStream</a> {
+    <span class="doccomment">/// Given a `TokenStream` with a `Stream` of only two arguments, return a new `TokenStream`
+    /// separating the two arguments with a comma for diagnostic suggestions.
+    </span><span class="kw">pub fn </span>add_comma(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="#309">TokenStream</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt; {
+        <span class="comment">// Used to suggest if a user writes `foo!(a b);`
+        </span><span class="kw">let </span><span class="kw-2">mut </span>suggestion = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <a class="self" href="#324">self</a>.<span class="number">0</span>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">peekable</a>();
+        <span class="kw">while let </span><span class="prelude-val">Some</span>((pos, ts)) = iter.next() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, next)) = iter.peek() {
+                <span class="kw">let </span>sp = <span class="kw">match </span>(<span class="kw-2">&amp;</span>ts, <span class="kw-2">&amp;</span>next) {
+                    (<span class="kw">_</span>, TokenTree::Token(Token { kind: token::Comma, .. }, <span class="kw">_</span>)) =&gt; <span class="kw">continue</span>,
+                    (
+                        TokenTree::Token(token_left, Spacing::Alone),
+                        TokenTree::Token(token_right, <span class="kw">_</span>),
+                    ) <span class="kw">if </span>((token_left.is_ident() &amp;&amp; !token_left.is_reserved_ident())
+                        || token_left.is_lit())
+                        &amp;&amp; ((token_right.is_ident() &amp;&amp; !token_right.is_reserved_ident())
+                            || token_right.is_lit()) =&gt;
+                    {
+                        token_left.span
+                    }
+                    (TokenTree::Delimited(sp, ..), <span class="kw">_</span>) =&gt; sp.entire(),
+                    <span class="kw">_ </span>=&gt; <span class="kw">continue</span>,
+                };
+                <span class="kw">let </span>sp = sp.shrink_to_hi();
+                <span class="kw">let </span>comma = TokenTree::token_alone(token::Comma, sp);
+                suggestion = <span class="prelude-val">Some</span>((pos, comma, sp));
+            }
+        }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((pos, comma, sp)) = <a href="#326">suggestion</a> {
+            <span class="kw">let </span><span class="kw-2">mut </span>new_stream = Vec::with_capacity(<a class="self" href="#324">self</a>.<span class="number">0</span>.len() + <span class="number">1</span>);
+            <span class="kw">let </span>parts = <a class="self" href="#324">self</a>.<span class="number">0</span>.split_at(<a href="#350">pos</a> + <span class="number">1</span>);
+            <a href="#351">new_stream</a>.extend_from_slice(<a href="#352">parts</a>.<span class="number">0</span>);
+            <a href="#351">new_stream</a>.push(<a href="#350">comma</a>);
+            <a href="#351">new_stream</a>.extend_from_slice(<a href="#352">parts</a>.<span class="number">1</span>);
+            <span class="kw">return </span><span class="prelude-val">Some</span>((TokenStream::new(<a href="#351">new_stream</a>), <a href="#350">sp</a>));
+        }
+        <span class="prelude-val">None
+    </span>}
+}
+
+<span class="kw">impl </span>iter::FromIterator&lt;<a href="#43">TokenTree</a>&gt; <span class="kw">for </span><a href="#309">TokenStream</a> {
+    <span class="kw">fn </span>from_iter&lt;I: IntoIterator&lt;Item = <a href="#43">TokenTree</a>&gt;&gt;(iter: I) -&gt; <span class="self">Self </span>{
+        TokenStream::new(<a href="#363">iter</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<a href="#43">TokenTree</a>&gt;&gt;())
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a> <span class="kw">for </span><a href="#309">TokenStream</a> {}
+
+<span class="kw">impl </span>PartialEq&lt;<a href="#309">TokenStream</a>&gt; <span class="kw">for </span><a href="#309">TokenStream</a> {
+    <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><a href="#309">TokenStream</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#371">self</a>.<a href="#389">trees</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">eq</a>(<a href="#371">other</a>.<a href="#389">trees</a>())
+    }
+}
+
+<span class="kw">impl </span><a href="#309">TokenStream</a> {
+    <span class="kw">pub fn </span>new(streams: Vec&lt;<a href="#43">TokenTree</a>&gt;) -&gt; <a href="#309">TokenStream</a> {
+        <a href="#309">TokenStream</a>(Lrc::new(<a href="#377">streams</a>))
+    }
+
+    <span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#381">self</a>.<span class="number">0</span>.is_empty()
+    }
+
+    <span class="kw">pub fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#385">self</a>.<span class="number">0</span>.len()
+    }
+
+    <span class="kw">pub fn </span>trees(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CursorRef&lt;<span class="lifetime">&#39;_</span>&gt; {
+        CursorRef::new(<a class="self" href="#389">self</a>)
+    }
+
+    <span class="kw">pub fn </span>into_trees(<span class="self">self</span>) -&gt; <a href="#610">Cursor</a> {
+        Cursor::new(<a class="self" href="#393">self</a>)
+    }
+
+    <span class="doccomment">/// Compares two `TokenStream`s, checking equality without regarding span information.
+    </span><span class="kw">pub fn </span>eq_unspanned(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><a href="#309">TokenStream</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>t1 = <a class="self" href="#398">self</a>.<a href="#389">trees</a>();
+        <span class="kw">let </span><span class="kw-2">mut </span>t2 = <a href="#398">other</a>.<a href="#389">trees</a>();
+        <span class="kw">for </span>(t1, t2) <span class="kw">in </span>iter::zip(<span class="kw-2">&amp;mut </span>t1, <span class="kw-2">&amp;mut </span>t2) {
+            <span class="kw">if </span>!t1.eq_unspanned(<span class="kw-2">&amp;</span>t2) {
+                <span class="kw">return </span><span class="bool-val">false</span>;
+            }
+        }
+        <a href="#399">t1</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().is_none() &amp;&amp; <a href="#400">t2</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().is_none()
+    }
+
+    <span class="kw">pub fn </span>map_enumerated&lt;F: FnMut(<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <span class="kw-2">&amp;</span><a href="#43">TokenTree</a>) -&gt; <a href="#43">TokenTree</a>&gt;(<span class="self">self</span>, <span class="kw-2">mut </span>f: F) -&gt; <a href="#309">TokenStream</a> {
+        <a href="#309">TokenStream</a>(Lrc::new(<a class="self" href="#409">self</a>.<span class="number">0</span>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(i, tree)| <a href="#409">f</a>(<a href="#410">i</a>, <a href="#410">tree</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()))
+    }
+
+    <span class="comment">// Create a token stream containing a single token with alone spacing.
+    </span><span class="kw">pub fn </span>token_alone(kind: <a href="token.rs.html#187">TokenKind</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#309">TokenStream</a> {
+        TokenStream::new(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[TokenTree::token_alone(kind, span)])
+    }
+
+    <span class="comment">// Create a token stream containing a single token with joint spacing.
+    </span><span class="kw">pub fn </span>token_joint(kind: <a href="token.rs.html#187">TokenKind</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="#309">TokenStream</a> {
+        TokenStream::new(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[TokenTree::token_joint(kind, span)])
+    }
+
+    <span class="comment">// Create a token stream containing a single `Delimited`.
+    </span><span class="kw">pub fn </span>delimited(span: <a href="#645">DelimSpan</a>, delim: <a href="token.rs.html#46">Delimiter</a>, tts: <a href="#309">TokenStream</a>) -&gt; <a href="#309">TokenStream</a> {
+        TokenStream::new(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[TokenTree::Delimited(span, delim, tts)])
+    }
+
+    <span class="kw">pub fn </span>from_ast(node: <span class="kw-2">&amp;</span>(<span class="kw">impl </span><a href="ast_traits.rs.html#263">HasAttrs</a> + <a href="ast_traits.rs.html#95">HasSpan</a> + <a href="ast_traits.rs.html#126">HasTokens</a> + <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a>)) -&gt; <a href="#309">TokenStream</a> {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(tokens) = <a href="#428">node</a>.<a href="ast_traits.rs.html#127">tokens</a>() <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;missing tokens for node at {:?}: {:?}&quot;</span>, node.span(), node);
+        };
+        <span class="kw">let </span>attrs = <a href="#428">node</a>.<a href="ast_traits.rs.html#272">attrs</a>();
+        <span class="kw">let </span>attr_stream = <span class="kw">if </span>attrs.is_empty() {
+            <a href="#429">tokens</a>.<a href="#145">to_attr_token_stream</a>()
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>attr_data =
+                <a href="#293">AttributesData</a> { attrs: <a href="#432">attrs</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(), tokens: <a href="#429">tokens</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>() };
+            AttrTokenStream::new(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[AttrTokenTree::Attributes(attr_data)])
+        };
+        <a href="#433">attr_stream</a>.<a href="#203">to_tokenstream</a>()
+    }
+
+    <span class="kw">pub fn </span>from_nonterminal_ast(nt: <span class="kw-2">&amp;</span><a href="token.rs.html#743">Nonterminal</a>) -&gt; <a href="#309">TokenStream</a> {
+        <span class="kw">match </span><a href="#443">nt</a> {
+            <a href="token.rs.html#750">Nonterminal::NtIdent</a>(ident, is_raw) =&gt; {
+                TokenStream::token_alone(<a href="token.rs.html#233">token::Ident</a>(<a href="#445">ident</a>.name, <span class="kw-2">*</span><a href="#445">is_raw</a>), <a href="#445">ident</a>.span)
+            }
+            <a href="token.rs.html#751">Nonterminal::NtLifetime</a>(ident) =&gt; {
+                TokenStream::token_alone(<a href="token.rs.html#238">token::Lifetime</a>(<a href="#448">ident</a>.name), <a href="#448">ident</a>.span)
+            }
+            <a href="token.rs.html#744">Nonterminal::NtItem</a>(item) =&gt; TokenStream::from_ast(<a href="#451">item</a>),
+            <a href="token.rs.html#745">Nonterminal::NtBlock</a>(block) =&gt; TokenStream::from_ast(<a href="#452">block</a>),
+            <a href="token.rs.html#746">Nonterminal::NtStmt</a>(stmt) <span class="kw">if let </span><a href="ast.rs.html#977">StmtKind::Empty</a> = <a href="#453">stmt</a>.kind =&gt; {
+                <span class="comment">// FIXME: Properly collect tokens for empty statements.
+                </span>TokenStream::token_alone(<a href="token.rs.html#210">token::Semi</a>, <a href="#453">stmt</a>.span)
+            }
+            <a href="token.rs.html#746">Nonterminal::NtStmt</a>(stmt) =&gt; TokenStream::from_ast(<a href="#457">stmt</a>),
+            <a href="token.rs.html#747">Nonterminal::NtPat</a>(pat) =&gt; TokenStream::from_ast(<a href="#458">pat</a>),
+            <a href="token.rs.html#749">Nonterminal::NtTy</a>(ty) =&gt; TokenStream::from_ast(<a href="#459">ty</a>),
+            <a href="token.rs.html#754">Nonterminal::NtMeta</a>(attr) =&gt; TokenStream::from_ast(<a href="#460">attr</a>),
+            <a href="token.rs.html#755">Nonterminal::NtPath</a>(path) =&gt; TokenStream::from_ast(<a href="#461">path</a>),
+            <a href="token.rs.html#756">Nonterminal::NtVis</a>(vis) =&gt; TokenStream::from_ast(<a href="#462">vis</a>),
+            <a href="token.rs.html#748">Nonterminal::NtExpr</a>(expr) | <a href="token.rs.html#752">Nonterminal::NtLiteral</a>(expr) =&gt; TokenStream::from_ast(<a href="#463">expr</a>),
+        }
+    }
+
+    <span class="kw">fn </span>flatten_token(token: <span class="kw-2">&amp;</span><a href="token.rs.html#264">Token</a>, spacing: <a href="#316">Spacing</a>) -&gt; <a href="#43">TokenTree</a> {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#467">token</a>.kind {
+            <a href="token.rs.html#249">token::Interpolated</a>(nt) <span class="kw">if let </span><a href="token.rs.html#750">token::NtIdent</a>(ident, is_raw) = <span class="kw-2">**</span><a href="#469">nt</a> =&gt; {
+                <a href="#45">TokenTree::Token</a>(Token::new(<a href="token.rs.html#233">token::Ident</a>(<a href="#469">ident</a>.name, <a href="#469">is_raw</a>), <a href="#469">ident</a>.span), <a href="#467">spacing</a>)
+            }
+            <a href="token.rs.html#249">token::Interpolated</a>(nt) =&gt; <a href="#47">TokenTree::Delimited</a>(
+                DelimSpan::from_single(<a href="#467">token</a>.span),
+                <a href="token.rs.html#58">Delimiter::Invisible</a>,
+                TokenStream::from_nonterminal_ast(<span class="kw-2">&amp;</span><a href="#472">nt</a>).<a href="#491">flattened</a>(),
+            ),
+            <span class="kw">_ </span>=&gt; <a href="#45">TokenTree::Token</a>(<a href="#467">token</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <a href="#467">spacing</a>),
+        }
+    }
+
+    <span class="kw">fn </span>flatten_token_tree(tree: <span class="kw-2">&amp;</span><a href="#43">TokenTree</a>) -&gt; <a href="#43">TokenTree</a> {
+        <span class="kw">match </span><a href="#481">tree</a> {
+            <a href="#45">TokenTree::Token</a>(token, spacing) =&gt; TokenStream::flatten_token(<a href="#483">token</a>, <span class="kw-2">*</span><a href="#483">spacing</a>),
+            <a href="#47">TokenTree::Delimited</a>(span, delim, tts) =&gt; {
+                <a href="#47">TokenTree::Delimited</a>(<span class="kw-2">*</span><a href="#484">span</a>, <span class="kw-2">*</span><a href="#484">delim</a>, <a href="#484">tts</a>.<a href="#491">flattened</a>())
+            }
+        }
+    }
+
+    <span class="attribute">#[must_use]
+    </span><span class="kw">pub fn </span>flattened(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="#309">TokenStream</a> {
+        <span class="kw">fn </span>can_skip(stream: <span class="kw-2">&amp;</span><a href="#309">TokenStream</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+            <a href="#492">stream</a>.<a href="#389">trees</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">all</a>(|tree| <span class="kw">match </span><a href="#493">tree</a> {
+                <a href="#45">TokenTree::Token</a>(token, <span class="kw">_</span>) =&gt; !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(token.kind, token::Interpolated(<span class="kw">_</span>)),
+                <a href="#47">TokenTree::Delimited</a>(<span class="kw">_</span>, <span class="kw">_</span>, inner) =&gt; <a href="#492">can_skip</a>(<a href="#495">inner</a>),
+            })
+        }
+
+        <span class="kw">if </span>can_skip(<span class="self">self</span>) {
+            <span class="kw">return </span><a class="self" href="#491">self</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+        }
+
+        <a class="self" href="#491">self</a>.<a href="#389">trees</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|tree| TokenStream::flatten_token_tree(<a href="#503">tree</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+}
+
+<span class="comment">// 99.5%+ of the time we have 1 or 2 elements in this vector.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>TokenStreamBuilder(SmallVec&lt;[<a href="#309">TokenStream</a>; <span class="number">2</span>]&gt;);
+
+<span class="kw">impl </span><a href="#509">TokenStreamBuilder</a> {
+    <span class="kw">pub fn </span>new() -&gt; <a href="#509">TokenStreamBuilder</a> {
+        <a href="#509">TokenStreamBuilder</a>(SmallVec::new())
+    }
+
+    <span class="kw">pub fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stream: <a href="#309">TokenStream</a>) {
+        <a class="self" href="#516">self</a>.<span class="number">0</span>.push(<a href="#516">stream</a>);
+    }
+
+    <span class="kw">pub fn </span>build(<span class="self">self</span>) -&gt; <a href="#309">TokenStream</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>streams = <a class="self" href="#520">self</a>.<span class="number">0</span>;
+        <span class="kw">match </span><a href="#521">streams</a>.len() {
+            <span class="number">0 </span>=&gt; TokenStream::default(),
+            <span class="number">1 </span>=&gt; <a href="#521">streams</a>.pop().unwrap(),
+            <span class="kw">_ </span>=&gt; {
+                <span class="comment">// We will extend the first stream in `streams` with the
+                // elements from the subsequent streams. This requires using
+                // `make_mut()` on the first stream, and in practice this
+                // doesn&#39;t cause cloning 99.9% of the time.
+                //
+                // One very common use case is when `streams` has two elements,
+                // where the first stream has any number of elements within
+                // (often 1, but sometimes many more) and the second stream has
+                // a single element within.
+
+                // Determine how much the first stream will be extended.
+                // Needed to avoid quadratic blow up from on-the-fly
+                // reallocations (#57735).
+                </span><span class="kw">let </span>num_appends = <a href="#521">streams</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">skip</a>(<span class="number">1</span>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|ts| <a href="#539">ts</a>.<a href="#385">len</a>()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">sum</a>();
+
+                <span class="comment">// Get the first stream, which will become the result stream.
+                // If it&#39;s `None`, create an empty stream.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>iter = <a href="#521">streams</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>();
+                <span class="kw">let </span><span class="kw-2">mut </span>res_stream_lrc = <a href="#543">iter</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap().<span class="number">0</span>;
+
+                <span class="comment">// Append the subsequent elements to the result stream, after
+                // reserving space for them.
+                </span><span class="kw">let </span>res_vec_mut = Lrc::make_mut(<span class="kw-2">&amp;mut </span><a href="#544">res_stream_lrc</a>);
+                <a href="#548">res_vec_mut</a>.reserve(<a href="#539">num_appends</a>);
+                <span class="kw">for </span>stream <span class="kw">in </span>iter {
+                    <span class="kw">let </span>stream_iter = stream.<span class="number">0</span>.iter().cloned();
+
+                    <span class="comment">// If (a) `res_mut_vec` is not empty and the last tree
+                    // within it is a token tree marked with `Joint`, and (b)
+                    // `stream` is not empty and the first tree within it is a
+                    // token tree, and (c) the two tokens can be glued
+                    // together...
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(TokenTree::Token(last_tok, Spacing::Joint)) = res_vec_mut.last()
+                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(TokenTree::Token(tok, spacing)) = stream.<span class="number">0</span>.first()
+                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(glued_tok) = last_tok.glue(<span class="kw-2">&amp;</span>tok)
+                    {
+                        <span class="comment">// ...then overwrite the last token tree in
+                        // `res_vec_mut` with the glued token, and skip the
+                        // first token tree from `stream`.
+                        </span><span class="kw-2">*</span>res_vec_mut.last_mut().unwrap() = TokenTree::Token(glued_tok, <span class="kw-2">*</span>spacing);
+                        res_vec_mut.extend(stream_iter.skip(<span class="number">1</span>));
+                    } <span class="kw">else </span>{
+                        <span class="comment">// Append all of `stream`.
+                        </span>res_vec_mut.extend(stream_iter);
+                    }
+                }
+
+                <a href="#309">TokenStream</a>(<a href="#544">res_stream_lrc</a>)
+            }
+        }
+    }
+}
+
+<span class="doccomment">/// By-reference iterator over a [`TokenStream`].
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>CursorRef&lt;<span class="lifetime">&#39;t</span>&gt; {
+    stream: <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><a href="#309">TokenStream</a>,
+    index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;t</span>&gt; CursorRef&lt;<span class="lifetime">&#39;t</span>&gt; {
+    <span class="kw">fn </span>new(stream: <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><a href="#309">TokenStream</a>) -&gt; <span class="self">Self </span>{
+        <a href="#581">CursorRef</a> { <a href="#587">stream</a>, index: <span class="number">0 </span>}
+    }
+
+    <span class="kw">pub fn </span>look_ahead(<span class="kw-2">&amp;</span><span class="self">self</span>, n: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="#43">TokenTree</a>&gt; {
+        <a class="self" href="#591">self</a>.stream.<span class="number">0</span>.get(<a class="self" href="#591">self</a>.index + <a href="#591">n</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;t</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">Iterator</a> <span class="kw">for </span>CursorRef&lt;<span class="lifetime">&#39;t</span>&gt; {
+    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><a href="#43">TokenTree</a>;
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span><a href="#43">TokenTree</a>&gt; {
+        <a class="self" href="#599">self</a>.stream.<span class="number">0</span>.get(<a class="self" href="#599">self</a>.index).map(|tree| {
+            <a class="self" href="#599">self</a>.index += <span class="number">1</span>;
+            <a href="#600">tree</a>
+        })
+    }
+}
+
+<span class="doccomment">/// Owning by-value iterator over a [`TokenStream`].
+</span><span class="comment">// FIXME: Many uses of this can be replaced with by-reference iterator to avoid clones.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>Cursor {
+    <span class="kw">pub </span>stream: <a href="#309">TokenStream</a>,
+    index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">Iterator</a> <span class="kw">for </span><a href="#610">Cursor</a> {
+    <span class="kw">type </span>Item = <a href="#43">TokenTree</a>;
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#43">TokenTree</a>&gt; {
+        <a class="self" href="#618">self</a>.stream.<span class="number">0</span>.get(<a class="self" href="#618">self</a>.index).map(|tree| {
+            <a class="self" href="#618">self</a>.index += <span class="number">1</span>;
+            <a href="#619">tree</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+        })
+    }
+}
+
+<span class="kw">impl </span><a href="#610">Cursor</a> {
+    <span class="kw">fn </span>new(stream: <a href="#309">TokenStream</a>) -&gt; <span class="self">Self </span>{
+        <a href="#610">Cursor</a> { <a href="#627">stream</a>, index: <span class="number">0 </span>}
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>next_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="#43">TokenTree</a>&gt; {
+        <a class="self" href="#632">self</a>.stream.<span class="number">0</span>.get(<a class="self" href="#632">self</a>.index).map(|tree| {
+            <a class="self" href="#632">self</a>.index += <span class="number">1</span>;
+            <a href="#633">tree</a>
+        })
+    }
+
+    <span class="kw">pub fn </span>look_ahead(<span class="kw-2">&amp;</span><span class="self">self</span>, n: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="#43">TokenTree</a>&gt; {
+        <a class="self" href="#639">self</a>.stream.<span class="number">0</span>.get(<a class="self" href="#639">self</a>.index + <a href="#639">n</a>)
+    }
+}
+
+<span class="attribute">#[derive(Debug, Copy, Clone, PartialEq, Encodable, Decodable, HashStable_Generic)]
+</span><span class="kw">pub struct </span>DelimSpan {
+    <span class="kw">pub </span>open: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    <span class="kw">pub </span>close: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+}
+
+<span class="kw">impl </span><a href="#645">DelimSpan</a> {
+    <span class="kw">pub fn </span>from_single(sp: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <span class="self">Self </span>{
+        <a href="#645">DelimSpan</a> { open: <a href="#651">sp</a>, close: <a href="#651">sp</a> }
+    }
+
+    <span class="kw">pub fn </span>from_pair(open: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, close: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <span class="self">Self </span>{
+        <a href="#645">DelimSpan</a> { <a href="#655">open</a>, <a href="#655">close</a> }
+    }
+
+    <span class="kw">pub fn </span>dummy() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::from_single(<a href="../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>)
+    }
+
+    <span class="kw">pub fn </span>entire(<span class="self">self</span>) -&gt; <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <a class="self" href="#663">self</a>.open.with_hi(<a class="self" href="#663">self</a>.close.hi())
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_ast" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

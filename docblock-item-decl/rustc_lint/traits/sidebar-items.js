@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["DROP_BOUNDS","The `drop_bounds` lint checks for generics with `std::ops::Drop` as bounds."],["DYN_DROP","The `dyn_drop` lint checks for trait objects with `std::ops::Drop`."]],"struct":[["DropTraitConstraints","Lint for bounds of the form `T: Drop`, which usually indicate an attempt to emulate `std::mem::needs_drop`."]]};

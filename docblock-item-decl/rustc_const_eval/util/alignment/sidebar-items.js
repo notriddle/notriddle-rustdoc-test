@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["is_disaligned","Returns `true` if this place is allowed to be less aligned than its containing struct (because it is within a packed struct)."],["is_within_packed",""]]};

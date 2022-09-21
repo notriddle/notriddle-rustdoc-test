@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["expect_dyn_trait_in_self","This takes a valid `self` receiver type and extracts the principal trait ref of the type."],["get_vtable","Creates a dynamic vtable for the given type and vtable origin. This is used only for objects."]],"struct":[["VirtualIndex",""]]};

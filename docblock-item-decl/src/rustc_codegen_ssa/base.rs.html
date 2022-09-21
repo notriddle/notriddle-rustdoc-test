@@ -1,0 +1,1980 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_ssa/src/base.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>base.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_codegen_ssa/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="back/metadata.rs.html#276-280"><span class="kw">crate</span>::back::metadata::create_compressed_metadata_file</a>;
+<span class="kw">use </span><span class="kw">crate</span>::back::write::{
+    <a href="back/write.rs.html#774-779">compute_per_cgu_lto_type</a>, <a href="back/write.rs.html#434-441">start_async_codegen</a>, <a href="back/write.rs.html#1959-1964">submit_codegened_module_to_llvm</a>,
+    <a href="back/write.rs.html#1969-1973">submit_post_lto_module_to_llvm</a>, <a href="back/write.rs.html#1978-1983">submit_pre_lto_module_to_llvm</a>, <a href="back/write.rs.html#768">ComputedLtoType</a>, <a href="back/write.rs.html#1868">OngoingCodegen</a>,
+};
+<span class="kw">use </span><span class="kw">crate</span>::common::{<a href="common.rs.html#15">IntPredicate</a>, <a href="common.rs.html#29">RealPredicate</a>, <a href="common.rs.html#80">TypeKind</a>};
+<span class="kw">use </span><a href="lib.rs.html#48"><span class="kw">crate</span>::meth</a>;
+<span class="kw">use </span><a href="lib.rs.html#49"><span class="kw">crate</span>::mir</a>;
+<span class="kw">use </span><a href="mir/operand.rs.html#21"><span class="kw">crate</span>::mir::operand::OperandValue</a>;
+<span class="kw">use </span><a href="mir/place.rs.html#16"><span class="kw">crate</span>::mir::place::PlaceRef</a>;
+<span class="kw">use </span><a href="lib.rs.html#52"><span class="kw">crate</span>::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use crate</span>::{<a href="lib.rs.html#91">CachedModuleCodegen</a>, <a href="lib.rs.html#83">CompiledModule</a>, <a href="lib.rs.html#143">CrateInfo</a>, <a href="lib.rs.html#103-109">MemFlags</a>, <a href="lib.rs.html#54">ModuleCodegen</a>, <a href="lib.rs.html#97">ModuleKind</a>};
+
+<span class="kw">use </span><a href="../../rustc_attr/index.html">rustc_attr</a> <span class="kw">as </span>attr;
+<span class="kw">use </span>rustc_data_structures::fx::{FxHashMap, FxHashSet};
+<span class="kw">use </span>rustc_data_structures::profiling::{<a href="../../rustc_data_structures/profiling/fn.get_resident_set_size.html">get_resident_set_size</a>, <a href="../../rustc_data_structures/profiling/fn.print_time_passes_entry.html">print_time_passes_entry</a>};
+
+<span class="kw">use </span><a href="../../rustc_data_structures/sync/fn.par_iter.html">rustc_data_structures::sync::par_iter</a>;
+<span class="attribute">#[cfg(parallel_compiler)]
+</span><span class="kw">use </span>rustc_data_structures::sync::ParallelIterator;
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>};
+<span class="kw">use </span><a href="../../rustc_hir/lang_items/enum.LangItem.html">rustc_hir::lang_items::LangItem</a>;
+<span class="kw">use </span><a href="../../rustc_hir/weak_lang_items/static.WEAK_ITEMS_SYMBOLS.html">rustc_hir::weak_lang_items::WEAK_ITEMS_SYMBOLS</a>;
+<span class="kw">use </span><a href="../../rustc_index/vec/trait.Idx.html">rustc_index::vec::Idx</a>;
+<span class="kw">use </span><a href="../../rustc_metadata/rmeta/encoder/struct.EncodedMetadata.html">rustc_metadata::EncodedMetadata</a>;
+<span class="kw">use </span><a href="../../rustc_middle/middle/codegen_fn_attrs/struct.CodegenFnAttrs.html">rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs</a>;
+<span class="kw">use </span><a href="../../rustc_middle/middle/exported_symbols/index.html">rustc_middle::middle::exported_symbols</a>;
+<span class="kw">use </span><a href="../../rustc_middle/middle/exported_symbols/enum.SymbolExportKind.html">rustc_middle::middle::exported_symbols::SymbolExportKind</a>;
+<span class="kw">use </span><a href="../../rustc_middle/middle/lang_items/index.html">rustc_middle::middle::lang_items</a>;
+<span class="kw">use </span>rustc_middle::mir::mono::{<a href="../../rustc_middle/mir/mono/struct.CodegenUnit.html">CodegenUnit</a>, <a href="../../rustc_middle/mir/mono/struct.CodegenUnitNameBuilder.html">CodegenUnitNameBuilder</a>, <a href="../../rustc_middle/mir/mono/enum.MonoItem.html">MonoItem</a>};
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">HasTyCtxt</a>, <a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">LayoutOf</a>, <a href="../../rustc_middle/ty/layout/type.TyAndLayout.html">TyAndLayout</a>};
+<span class="kw">use </span><a href="../../rustc_middle/ty/query/struct.Providers.html">rustc_middle::ty::query::Providers</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../rustc_middle/ty/index.html">self</a>, <a href="../../rustc_middle/ty/instance/struct.Instance.html">Instance</a>, <a href="../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_session/cgu_reuse_tracker/enum.CguReuse.html">rustc_session::cgu_reuse_tracker::CguReuse</a>;
+<span class="kw">use </span>rustc_session::config::{<a class="self" href="../../rustc_session/config/index.html">self</a>, <a href="../../rustc_session/config/enum.CrateType.html">CrateType</a>, <a href="../../rustc_session/config/enum.EntryFnType.html">EntryFnType</a>, <a href="../../rustc_session/config/enum.OutputType.html">OutputType</a>};
+<span class="kw">use </span><a href="../../rustc_session/session/struct.Session.html">rustc_session::Session</a>;
+<span class="kw">use </span><a href="../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+<span class="kw">use </span><a href="../../rustc_span/symbol/struct.Symbol.html">rustc_span::Symbol</a>;
+<span class="kw">use </span>rustc_span::{<a href="../../rustc_span/struct.DebuggerVisualizerFile.html">DebuggerVisualizerFile</a>, <a href="../../rustc_span/enum.DebuggerVisualizerType.html">DebuggerVisualizerType</a>};
+<span class="kw">use </span>rustc_target::abi::{<a href="../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>};
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/set/struct.BTreeSet.html">std::collections::BTreeSet</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html">std::convert::TryFrom</a>;
+<span class="kw">use </span>std::time::{<a href="https://doc.rust-lang.org/nightly/core/time/struct.Duration.html">Duration</a>, <a href="https://doc.rust-lang.org/nightly/std/time/struct.Instant.html">Instant</a>};
+
+<span class="kw">use </span><a href="https://docs.rs/itertools/0.8/itertools/trait.Itertools.html">itertools::Itertools</a>;
+
+<span class="kw">pub fn </span>bin_op_to_icmp_predicate(op: <a href="../../rustc_hir/hir/enum.BinOpKind.html">hir::BinOpKind</a>, signed: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="common.rs.html#15">IntPredicate</a> {
+    <span class="kw">match </span><a href="#49">op</a> {
+        hir::BinOpKind::Eq =&gt; <a href="common.rs.html#16">IntPredicate::IntEQ</a>,
+        hir::BinOpKind::Ne =&gt; <a href="common.rs.html#17">IntPredicate::IntNE</a>,
+        hir::BinOpKind::Lt =&gt; {
+            <span class="kw">if </span>signed {
+                <a href="common.rs.html#24">IntPredicate::IntSLT</a>
+            } <span class="kw">else </span>{
+                <a href="common.rs.html#20">IntPredicate::IntULT</a>
+            }
+        }
+        hir::BinOpKind::Le =&gt; {
+            <span class="kw">if </span>signed {
+                <a href="common.rs.html#25">IntPredicate::IntSLE</a>
+            } <span class="kw">else </span>{
+                <a href="common.rs.html#21">IntPredicate::IntULE</a>
+            }
+        }
+        hir::BinOpKind::Gt =&gt; {
+            <span class="kw">if </span>signed {
+                <a href="common.rs.html#22">IntPredicate::IntSGT</a>
+            } <span class="kw">else </span>{
+                <a href="common.rs.html#18">IntPredicate::IntUGT</a>
+            }
+        }
+        hir::BinOpKind::Ge =&gt; {
+            <span class="kw">if </span>signed {
+                <a href="common.rs.html#23">IntPredicate::IntSGE</a>
+            } <span class="kw">else </span>{
+                <a href="common.rs.html#19">IntPredicate::IntUGE</a>
+            }
+        }
+        op =&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(
+            <span class="string">&quot;comparison_op_to_icmp_predicate: expected comparison operator, \
+             found {:?}&quot;</span>,
+            op
+        ),
+    }
+}
+
+<span class="kw">pub fn </span>bin_op_to_fcmp_predicate(op: <a href="../../rustc_hir/hir/enum.BinOpKind.html">hir::BinOpKind</a>) -&gt; <a href="common.rs.html#29">RealPredicate</a> {
+    <span class="kw">match </span><a href="#89">op</a> {
+        hir::BinOpKind::Eq =&gt; <a href="common.rs.html#31">RealPredicate::RealOEQ</a>,
+        hir::BinOpKind::Ne =&gt; <a href="common.rs.html#44">RealPredicate::RealUNE</a>,
+        hir::BinOpKind::Lt =&gt; <a href="common.rs.html#34">RealPredicate::RealOLT</a>,
+        hir::BinOpKind::Le =&gt; <a href="common.rs.html#35">RealPredicate::RealOLE</a>,
+        hir::BinOpKind::Gt =&gt; <a href="common.rs.html#32">RealPredicate::RealOGT</a>,
+        hir::BinOpKind::Ge =&gt; <a href="common.rs.html#33">RealPredicate::RealOGE</a>,
+        op =&gt; {
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(
+                <span class="string">&quot;comparison_op_to_fcmp_predicate: expected comparison operator, \
+                 found {:?}&quot;</span>,
+                op
+            );
+        }
+    }
+}
+
+<span class="kw">pub fn </span>compare_simd_types&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    lhs: Bx::Value,
+    rhs: Bx::Value,
+    t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ret_ty: Bx::Type,
+    op: <a href="../../rustc_hir/hir/enum.BinOpKind.html">hir::BinOpKind</a>,
+) -&gt; Bx::Value {
+    <span class="kw">let </span>signed = <span class="kw">match </span><a href="#111">t</a>.kind() {
+        ty::Float(<span class="kw">_</span>) =&gt; {
+            <span class="kw">let </span>cmp = <a href="#89">bin_op_to_fcmp_predicate</a>(<a href="#113">op</a>);
+            <span class="kw">let </span>cmp = <a href="#108">bx</a>.<a href="traits/builder.rs.html#228">fcmp</a>(<a href="#117">cmp</a>, <a href="#109">lhs</a>, <a href="#110">rhs</a>);
+            <span class="kw">return </span><a href="#108">bx</a>.<a href="traits/builder.rs.html#188">sext</a>(<a href="#118">cmp</a>, <a href="#112">ret_ty</a>);
+        }
+        ty::Uint(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+        ty::Int(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+        <span class="kw">_ </span>=&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;compare_simd_types: invalid SIMD type&quot;</span>),
+    };
+
+    <span class="kw">let </span>cmp = <a href="#49">bin_op_to_icmp_predicate</a>(<a href="#113">op</a>, <a href="#115">signed</a>);
+    <span class="kw">let </span>cmp = <a href="#108">bx</a>.<a href="traits/builder.rs.html#227">icmp</a>(<a href="#126">cmp</a>, <a href="#109">lhs</a>, <a href="#110">rhs</a>);
+    <span class="comment">// LLVM outputs an `&lt; size x i1 &gt;`, so we need to perform a sign extension
+    // to get the correctly sized type. This will compile to a single instruction
+    // once the IR is converted to assembly if the SIMD instruction is supported
+    // by the target architecture.
+    </span><a href="#108">bx</a>.<a href="traits/builder.rs.html#188">sext</a>(<a href="#127">cmp</a>, <a href="#112">ret_ty</a>)
+}
+
+<span class="doccomment">/// Retrieves the information we are losing (making dynamic) in an unsizing
+/// adjustment.
+///
+/// The `old_info` argument is a bit odd. It is intended for use in an upcast,
+/// where the new vtable for an object will be derived from the old one.
+</span><span class="kw">pub fn </span>unsized_info&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    source: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    target: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    old_info: <span class="prelude-ty">Option</span>&lt;Bx::Value&gt;,
+) -&gt; Bx::Value {
+    <span class="kw">let </span>cx = <a href="#141">bx</a>.<a href="traits/builder.rs.html#44">cx</a>();
+    <span class="kw">let </span>(source, target) =
+        <a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().struct_lockstep_tails_erasing_lifetimes(<a href="#142">source</a>, <a href="#143">target</a>, <a href="#141">bx</a>.<a href="../../rustc_middle/ty/layout/trait.HasParamEnv.html">param_env</a>());
+    <span class="kw">match </span>(<a href="#147">source</a>.kind(), <a href="#147">target</a>.kind()) {
+        (<span class="kw-2">&amp;</span>ty::Array(<span class="kw">_</span>, len), <span class="kw-2">&amp;</span>ty::Slice(<span class="kw">_</span>)) =&gt; {
+            <a href="#146">cx</a>.<a href="traits/consts.rs.html#19">const_usize</a>(<a href="#150">len</a>.eval_usize(<a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>(), ty::ParamEnv::reveal_all()))
+        }
+        (<span class="kw-2">&amp;</span>ty::Dynamic(<span class="kw-2">ref </span>data_a, ..), <span class="kw-2">&amp;</span>ty::Dynamic(<span class="kw-2">ref </span>data_b, ..)) =&gt; {
+            <span class="kw">let </span>old_info =
+                <a href="#144">old_info</a>.expect(<span class="string">&quot;unsized_info: missing old info for trait upcasting coercion&quot;</span>);
+            <span class="kw">if </span>data_a.principal_def_id() == data_b.principal_def_id() {
+                <span class="comment">// A NOP cast that doesn&#39;t actually change anything, should be allowed even with invalid vtables.
+                </span><span class="kw">return </span><a href="#154">old_info</a>;
+            }
+
+            <span class="comment">// trait upcasting coercion
+
+            </span><span class="kw">let </span>vptr_entry_idx =
+                <a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().vtable_trait_upcasting_coercion_new_vptr_slot((<a href="#147">source</a>, <a href="#147">target</a>));
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(entry_idx) = <a href="#163">vptr_entry_idx</a> {
+                <span class="kw">let </span>ptr_ty = <a href="#146">cx</a>.<a href="traits/type_.rs.html#45">type_i8p</a>();
+                <span class="kw">let </span>ptr_align = <a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().data_layout.pointer_align.abi;
+                <span class="kw">let </span>vtable_ptr_ty = <a href="#146">cx</a>.<a href="traits/type_.rs.html#112-117">scalar_pair_element_backend_type</a>(
+                    <a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().mk_mut_ptr(<a href="#147">target</a>)),
+                    <span class="number">1</span>,
+                    <span class="bool-val">true</span>,
+                );
+                <span class="kw">let </span>llvtable = <a href="#141">bx</a>.<a href="traits/builder.rs.html#201">pointercast</a>(<a href="#154">old_info</a>, <a href="#141">bx</a>.<a href="traits/type_.rs.html#29">type_ptr_to</a>(<a href="#167">ptr_ty</a>));
+                <span class="kw">let </span>gep = <a href="#141">bx</a>.<a href="traits/builder.rs.html#179-184">inbounds_gep</a>(
+                    <a href="#167">ptr_ty</a>,
+                    <a href="#174">llvtable</a>,
+                    <span class="kw-2">&amp;</span>[<a href="#141">bx</a>.<a href="traits/consts.rs.html#19">const_usize</a>(u64::try_from(<a href="#166">entry_idx</a>).unwrap())],
+                );
+                <span class="kw">let </span>new_vptr = <a href="#141">bx</a>.<a href="traits/builder.rs.html#139">load</a>(<a href="#167">ptr_ty</a>, <a href="#175">gep</a>, <a href="#168">ptr_align</a>);
+                <a href="#141">bx</a>.<a href="traits/builder.rs.html#160">nonnull_metadata</a>(<a href="#180">new_vptr</a>);
+                <span class="comment">// VTable loads are invariant.
+                </span><a href="#141">bx</a>.<a href="traits/builder.rs.html#304">set_invariant_load</a>(<a href="#180">new_vptr</a>);
+                <a href="#141">bx</a>.<a href="traits/builder.rs.html#201">pointercast</a>(<a href="#180">new_vptr</a>, <a href="#169">vtable_ptr_ty</a>)
+            } <span class="kw">else </span>{
+                <a href="#154">old_info</a>
+            }
+        }
+        (<span class="kw">_</span>, <span class="kw-2">&amp;</span>ty::Dynamic(<span class="kw-2">ref </span>data, ..)) =&gt; {
+            <span class="kw">let </span>vtable_ptr_ty = <a href="#146">cx</a>.<a href="traits/type_.rs.html#112-117">scalar_pair_element_backend_type</a>(
+                <a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#146">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().mk_mut_ptr(<a href="#147">target</a>)),
+                <span class="number">1</span>,
+                <span class="bool-val">true</span>,
+            );
+            <a href="#146">cx</a>.<a href="traits/consts.rs.html#39">const_ptrcast</a>(<a href="meth.rs.html#90-94">meth::get_vtable</a>(<a href="#146">cx</a>, <a href="#147">source</a>, <a href="#189">data</a>.principal()), <a href="#190">vtable_ptr_ty</a>)
+        }
+        <span class="kw">_ </span>=&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unsized_info: invalid unsizing {:?} -&gt; {:?}&quot;</span>, source, target),
+    }
+}
+
+<span class="doccomment">/// Coerces `src` to `dst_ty`. `src_ty` must be a pointer.
+</span><span class="kw">pub fn </span>unsize_ptr&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    src: Bx::Value,
+    src_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    dst_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    old_info: <span class="prelude-ty">Option</span>&lt;Bx::Value&gt;,
+) -&gt; (Bx::Value, Bx::Value) {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;unsize_ptr: {:?} =&gt; {:?}&quot;</span>, src_ty, dst_ty);
+    <span class="kw">match </span>(<a href="#205">src_ty</a>.kind(), <a href="#206">dst_ty</a>.kind()) {
+        (<span class="kw-2">&amp;</span>ty::Ref(<span class="kw">_</span>, a, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ty::Ref(<span class="kw">_</span>, b, <span class="kw">_</span>) | <span class="kw-2">&amp;</span>ty::RawPtr(<a href="../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { ty: b, .. }))
+        | (<span class="kw-2">&amp;</span>ty::RawPtr(<a href="../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { ty: a, .. }), <span class="kw-2">&amp;</span>ty::RawPtr(<a href="../../rustc_middle/ty/sty/struct.TypeAndMut.html">ty::TypeAndMut</a> { ty: b, .. })) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(bx.cx().type_is_sized(a), old_info.is_none());
+            <span class="kw">let </span>ptr_ty = <a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#29">type_ptr_to</a>(<a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#103">backend_type</a>(<a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#211">b</a>)));
+            (<a href="#203">bx</a>.<a href="traits/builder.rs.html#201">pointercast</a>(<a href="#204">src</a>, <a href="#214">ptr_ty</a>), <a href="#140-145">unsized_info</a>(<a href="#203">bx</a>, <a href="#211">a</a>, <a href="#211">b</a>, <a href="#207">old_info</a>))
+        }
+        (<span class="kw-2">&amp;</span>ty::Adt(def_a, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ty::Adt(def_b, <span class="kw">_</span>)) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(def_a, def_b);
+            <span class="kw">let </span>src_layout = <a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#205">src_ty</a>);
+            <span class="kw">let </span>dst_layout = <a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#206">dst_ty</a>);
+            <span class="kw">if </span>src_ty == dst_ty {
+                <span class="kw">return </span>(<a href="#204">src</a>, <a href="#207">old_info</a>.unwrap());
+            }
+            <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">None</span>;
+            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..src_layout.fields.count() {
+                <span class="kw">let </span>src_f = src_layout.field(bx.cx(), i);
+                <span class="kw">if </span>src_f.is_zst() {
+                    <span class="kw">continue</span>;
+                }
+
+                <span class="macro">assert_eq!</span>(src_layout.fields.offset(i).bytes(), <span class="number">0</span>);
+                <span class="macro">assert_eq!</span>(dst_layout.fields.offset(i).bytes(), <span class="number">0</span>);
+                <span class="macro">assert_eq!</span>(src_layout.size, src_f.size);
+
+                <span class="kw">let </span>dst_f = dst_layout.field(bx.cx(), i);
+                <span class="macro">assert_ne!</span>(src_f.ty, dst_f.ty);
+                <span class="macro">assert_eq!</span>(result, <span class="prelude-val">None</span>);
+                result = <span class="prelude-val">Some</span>(unsize_ptr(bx, src, src_f.ty, dst_f.ty, old_info));
+            }
+            <span class="kw">let </span>(lldata, llextra) = <a href="#224">result</a>.unwrap();
+            <span class="kw">let </span>lldata_ty = <a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#112-117">scalar_pair_element_backend_type</a>(<a href="#220">dst_layout</a>, <span class="number">0</span>, <span class="bool-val">true</span>);
+            <span class="kw">let </span>llextra_ty = <a href="#203">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#112-117">scalar_pair_element_backend_type</a>(<a href="#220">dst_layout</a>, <span class="number">1</span>, <span class="bool-val">true</span>);
+            <span class="comment">// HACK(eddyb) have to bitcast pointers until LLVM removes pointee types.
+            </span>(<a href="#203">bx</a>.<a href="traits/builder.rs.html#199">bitcast</a>(<a href="#240">lldata</a>, <a href="#241">lldata_ty</a>), <a href="#203">bx</a>.<a href="traits/builder.rs.html#199">bitcast</a>(<a href="#240">llextra</a>, <a href="#242">llextra_ty</a>))
+        }
+        <span class="kw">_ </span>=&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unsize_ptr: called on bad types&quot;</span>),
+    }
+}
+
+<span class="doccomment">/// Coerces `src`, which is a reference to a value of type `src_ty`,
+/// to a value of type `dst_ty`, and stores the result in `dst`.
+</span><span class="kw">pub fn </span>coerce_unsized_into&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    src: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, Bx::Value&gt;,
+    dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, Bx::Value&gt;,
+) {
+    <span class="kw">let </span>src_ty = <a href="#254">src</a>.layout.ty;
+    <span class="kw">let </span>dst_ty = <a href="#255">dst</a>.layout.ty;
+    <span class="kw">match </span>(<a href="#257">src_ty</a>.kind(), <a href="#258">dst_ty</a>.kind()) {
+        (<span class="kw-2">&amp;</span>ty::Ref(..), <span class="kw-2">&amp;</span>ty::Ref(..) | <span class="kw-2">&amp;</span>ty::RawPtr(..)) | (<span class="kw-2">&amp;</span>ty::RawPtr(..), <span class="kw-2">&amp;</span>ty::RawPtr(..)) =&gt; {
+            <span class="kw">let </span>(base, info) = <span class="kw">match </span><a href="#253">bx</a>.<a href="traits/builder.rs.html#148-149">load_operand</a>(<a href="#254">src</a>).val {
+                <a href="mir/operand.rs.html#30">OperandValue::Pair</a>(base, info) =&gt; <a href="#202-208">unsize_ptr</a>(<a href="#253">bx</a>, <a href="#262">base</a>, <a href="#257">src_ty</a>, <a href="#258">dst_ty</a>, <span class="prelude-val">Some</span>(<a href="#262">info</a>)),
+                <a href="mir/operand.rs.html#28">OperandValue::Immediate</a>(base) =&gt; <a href="#202-208">unsize_ptr</a>(<a href="#253">bx</a>, <a href="#263">base</a>, <a href="#257">src_ty</a>, <a href="#258">dst_ty</a>, <span class="prelude-val">None</span>),
+                <a href="mir/operand.rs.html#26">OperandValue::Ref</a>(..) =&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(),
+            };
+            <a href="mir/operand.rs.html#30">OperandValue::Pair</a>(<a href="#261">base</a>, <a href="#261">info</a>).<a href="mir/operand.rs.html#246-250">store</a>(<a href="#253">bx</a>, <a href="#255">dst</a>);
+        }
+
+        (<span class="kw-2">&amp;</span>ty::Adt(def_a, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ty::Adt(def_b, <span class="kw">_</span>)) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(def_a, def_b);
+
+            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..def_a.variant(VariantIdx::new(<span class="number">0</span>)).fields.len() {
+                <span class="kw">let </span>src_f = src.project_field(bx, i);
+                <span class="kw">let </span>dst_f = dst.project_field(bx, i);
+
+                <span class="kw">if </span>dst_f.layout.is_zst() {
+                    <span class="kw">continue</span>;
+                }
+
+                <span class="kw">if </span>src_f.layout.ty == dst_f.layout.ty {
+                    memcpy_ty(
+                        bx,
+                        dst_f.llval,
+                        dst_f.align,
+                        src_f.llval,
+                        src_f.align,
+                        src_f.layout,
+                        MemFlags::empty(),
+                    );
+                } <span class="kw">else </span>{
+                    coerce_unsized_into(bx, src_f, dst_f);
+                }
+            }
+        }
+        <span class="kw">_ </span>=&gt; <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;coerce_unsized_into: invalid coercion {:?} -&gt; {:?}&quot;</span>, src_ty, dst_ty,),
+    }
+}
+
+<span class="kw">pub fn </span>cast_shift_expr_rhs&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    op: <a href="../../rustc_hir/hir/enum.BinOpKind.html">hir::BinOpKind</a>,
+    lhs: Bx::Value,
+    rhs: Bx::Value,
+) -&gt; Bx::Value {
+    <a href="#308-313">cast_shift_rhs</a>(<a href="#300">bx</a>, <a href="#301">op</a>, <a href="#302">lhs</a>, <a href="#303">rhs</a>)
+}
+
+<span class="kw">fn </span>cast_shift_rhs&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    op: <a href="../../rustc_hir/hir/enum.BinOpKind.html">hir::BinOpKind</a>,
+    lhs: Bx::Value,
+    rhs: Bx::Value,
+) -&gt; Bx::Value {
+    <span class="comment">// Shifts may have any size int on the rhs
+    </span><span class="kw">if </span>op.is_shift() {
+        <span class="kw">let </span><span class="kw-2">mut </span>rhs_llty = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#41">val_ty</a>(<a href="#312">rhs</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>lhs_llty = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#41">val_ty</a>(<a href="#311">lhs</a>);
+        <span class="kw">if </span>bx.cx().type_kind(rhs_llty) == TypeKind::Vector {
+            <a href="#316">rhs_llty</a> = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#31">element_type</a>(<a href="#316">rhs_llty</a>)
+        }
+        <span class="kw">if </span>bx.cx().type_kind(lhs_llty) == TypeKind::Vector {
+            <a href="#317">lhs_llty</a> = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#31">element_type</a>(<a href="#317">lhs_llty</a>)
+        }
+        <span class="kw">let </span>rhs_sz = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#39">int_width</a>(<a href="#316">rhs_llty</a>);
+        <span class="kw">let </span>lhs_sz = <a href="#309">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/type_.rs.html#39">int_width</a>(<a href="#317">lhs_llty</a>);
+        <span class="kw">if </span>lhs_sz &lt; rhs_sz {
+            <a href="#309">bx</a>.<a href="traits/builder.rs.html#187">trunc</a>(<a href="#312">rhs</a>, <a href="#317">lhs_llty</a>)
+        } <span class="kw">else if </span>lhs_sz &gt; rhs_sz {
+            <span class="comment">// FIXME (#1877: If in the future shifting by negative
+            // values is no longer undefined then this is wrong.
+            </span><a href="#309">bx</a>.<a href="traits/builder.rs.html#327">zext</a>(<a href="#312">rhs</a>, <a href="#317">lhs_llty</a>)
+        } <span class="kw">else </span>{
+            <a href="#312">rhs</a>
+        }
+    } <span class="kw">else </span>{
+        <a href="#312">rhs</a>
+    }
+}
+
+<span class="doccomment">/// Returns `true` if this session&#39;s target will use SEH-based unwinding.
+///
+/// This is only true for MSVC targets, and even then the 64-bit MSVC target
+/// currently uses SEH-ish unwinding with DWARF info tables to the side (same as
+/// 64-bit MinGW) instead of &quot;full SEH&quot;.
+</span><span class="kw">pub fn </span>wants_msvc_seh(sess: <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#345">sess</a>.target.is_like_msvc
+}
+
+<span class="kw">pub fn </span>memcpy_ty&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    dst: Bx::Value,
+    dst_align: <a href="../../rustc_target/abi/struct.Align.html">Align</a>,
+    src: Bx::Value,
+    src_align: <a href="../../rustc_target/abi/struct.Align.html">Align</a>,
+    layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    flags: <a href="lib.rs.html#103-109">MemFlags</a>,
+) {
+    <span class="kw">let </span>size = <a href="#355">layout</a>.size.bytes();
+    <span class="kw">if </span>size == <span class="number">0 </span>{
+        <span class="kw">return</span>;
+    }
+
+    <a href="#350">bx</a>.<a href="traits/builder.rs.html#230-238">memcpy</a>(<a href="#351">dst</a>, <a href="#352">dst_align</a>, <a href="#353">src</a>, <a href="#354">src_align</a>, <a href="#350">bx</a>.<a href="traits/builder.rs.html#44">cx</a>().<a href="traits/consts.rs.html#19">const_usize</a>(<a href="#358">size</a>), <a href="#356">flags</a>);
+}
+
+<span class="kw">pub fn </span>codegen_instance&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;a</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Bx::CodegenCx,
+    instance: Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) {
+    <span class="comment">// this is an info! to allow collecting monomorphization statistics
+    // and to allow finding the last function before LLVM aborts from
+    // release builds.
+    </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;codegen_instance({})&quot;</span>, instance);
+
+    mir::codegen_mir::&lt;Bx&gt;(<a href="#367">cx</a>, <a href="#368">instance</a>);
+}
+
+<span class="doccomment">/// Creates the `main` function which will initialize the rust runtime and call
+/// users main function.
+</span><span class="kw">pub fn </span>maybe_create_entry_wrapper&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Bx::CodegenCx,
+) -&gt; <span class="prelude-ty">Option</span>&lt;Bx::Function&gt; {
+    <span class="kw">let </span>(main_def_id, entry_type) = cx.tcx().entry_fn(())<span class="question-mark">?</span>;
+    <span class="kw">let </span>main_is_local = <a href="#383">main_def_id</a>.is_local();
+    <span class="kw">let </span>instance = Instance::mono(<a href="#381">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>(), <a href="#383">main_def_id</a>);
+
+    <span class="kw">if </span>main_is_local {
+        <span class="comment">// We want to create the wrapper in the same codegen unit as Rust&#39;s main
+        // function.
+        </span><span class="kw">if </span>!cx.codegen_unit().contains_item(<span class="kw-2">&amp;</span>MonoItem::Fn(instance)) {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+    } <span class="kw">else if </span>!cx.codegen_unit().is_primary() {
+        <span class="comment">// We want to create the wrapper only when the codegen unit is the primary one
+        </span><span class="kw">return </span><span class="prelude-val">None</span>;
+    }
+
+    <span class="kw">let </span>main_llfn = <a href="#381">cx</a>.<a href="traits/misc.rs.html#14">get_fn_addr</a>(<a href="#385">instance</a>);
+
+    <span class="kw">let </span>entry_fn = create_entry_fn::&lt;Bx&gt;(<a href="#381">cx</a>, <a href="#398">main_llfn</a>, <a href="#383">main_def_id</a>, <a href="#383">entry_type</a>);
+    <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#400">entry_fn</a>);
+
+    <span class="kw">fn </span>create_entry_fn&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Bx::CodegenCx,
+        rust_main: Bx::Value,
+        rust_main_def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        entry_type: <a href="../../rustc_session/config/enum.EntryFnType.html">EntryFnType</a>,
+    ) -&gt; Bx::Function {
+        <span class="comment">// The entry function is either `int main(void)` or `int main(int argc, char **argv)`,
+        // depending on whether the target needs `argc` and `argv` to be passed in.
+        </span><span class="kw">let </span>llfty = <span class="kw">if </span>cx.sess().target.main_needs_argc_argv {
+            <a href="#404">cx</a>.<a href="traits/type_.rs.html#26">type_func</a>(<span class="kw-2">&amp;</span>[<a href="#404">cx</a>.<a href="traits/type_.rs.html#53">type_int</a>(), <a href="#404">cx</a>.<a href="traits/type_.rs.html#29">type_ptr_to</a>(<a href="#404">cx</a>.<a href="traits/type_.rs.html#45">type_i8p</a>())], <a href="#404">cx</a>.<a href="traits/type_.rs.html#53">type_int</a>())
+        } <span class="kw">else </span>{
+            <a href="#404">cx</a>.<a href="traits/type_.rs.html#26">type_func</a>(<span class="kw-2">&amp;</span>[], <a href="#404">cx</a>.<a href="traits/type_.rs.html#53">type_int</a>())
+        };
+
+        <span class="kw">let </span>main_ret_ty = <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().fn_sig(<a href="#406">rust_main_def_id</a>).output();
+        <span class="comment">// Given that `main()` has no arguments,
+        // then its return type cannot have
+        // late-bound regions, since late-bound
+        // regions must appear in the argument
+        // listing.
+        </span><span class="kw">let </span>main_ret_ty = <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().normalize_erasing_regions(
+            ty::ParamEnv::reveal_all(),
+            <a href="#417">main_ret_ty</a>.no_bound_vars().unwrap(),
+        );
+
+        <span class="kw">let </span><span class="prelude-val">Some</span>(llfn) = <a href="#404">cx</a>.<a href="traits/misc.rs.html#25">declare_c_main</a>(<a href="#411">llfty</a>) <span class="kw">else </span>{
+            <span class="comment">// FIXME: We should be smart and show a better diagnostic here.
+            </span><span class="kw">let </span>span = <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().def_span(<a href="#406">rust_main_def_id</a>);
+            <a href="#404">cx</a>.<a href="traits/misc.rs.html#16">sess</a>()
+                .struct_span_err(<a href="#430">span</a>, <span class="string">&quot;entry symbol `main` declared multiple times&quot;</span>)
+                .help(<span class="string">&quot;did you use `#[no_mangle]` on `fn main`? Use `#[start]` instead&quot;</span>)
+                .emit();
+            <a href="#404">cx</a>.<a href="traits/misc.rs.html#16">sess</a>().abort_if_errors();
+            <a class="macro" href="../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>();
+        };
+
+        <span class="comment">// `main` should respect same config for frame pointer elimination as rest of code
+        </span><a href="#404">cx</a>.<a href="traits/misc.rs.html#20">set_frame_pointer_type</a>(<a href="#428">llfn</a>);
+        <a href="#404">cx</a>.<a href="traits/misc.rs.html#21">apply_target_cpu_attr</a>(<a href="#428">llfn</a>);
+
+        <span class="kw">let </span>llbb = Bx::append_block(<span class="kw-2">&amp;</span><a href="#404">cx</a>, <a href="#428">llfn</a>, <span class="string">&quot;top&quot;</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>bx = Bx::build(<span class="kw-2">&amp;</span><a href="#404">cx</a>, <a href="#443">llbb</a>);
+
+        <a href="#444">bx</a>.<a href="traits/debuginfo.rs.html#77">insert_reference_to_gdb_debug_scripts_section_global</a>();
+
+        <span class="kw">let </span>isize_ty = <a href="#404">cx</a>.<a href="traits/type_.rs.html#21">type_isize</a>();
+        <span class="kw">let </span>i8pp_ty = <a href="#404">cx</a>.<a href="traits/type_.rs.html#29">type_ptr_to</a>(<a href="#404">cx</a>.<a href="traits/type_.rs.html#45">type_i8p</a>());
+        <span class="kw">let </span>(arg_argc, arg_argv) = <a href="#486-489">get_argc_argv</a>(<a href="#404">cx</a>, <span class="kw-2">&amp;mut </span><a href="#444">bx</a>);
+
+        <span class="kw">let </span>(start_fn, start_ty, args) = <span class="kw">if let </span><a href="../../rustc_session/config/enum.EntryFnType.html">EntryFnType::Main</a> { sigpipe } = <a href="#407">entry_type</a> {
+            <span class="kw">let </span>start_def_id = <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().require_lang_item(LangItem::Start, <span class="prelude-val">None</span>);
+            <span class="kw">let </span>start_fn = <a href="#404">cx</a>.<a href="traits/misc.rs.html#14">get_fn_addr</a>(
+                ty::Instance::resolve(
+                    <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>(),
+                    ty::ParamEnv::reveal_all(),
+                    <a href="#453">start_def_id</a>,
+                    <a href="#404">cx</a>.<a href="../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().intern_substs(<span class="kw-2">&amp;</span>[<a href="#423">main_ret_ty</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()]),
+                )
+                .unwrap()
+                .unwrap(),
+            );
+
+            <span class="kw">let </span>i8_ty = <a href="#404">cx</a>.<a href="traits/type_.rs.html#16">type_i8</a>();
+            <span class="kw">let </span>arg_sigpipe = <a href="#444">bx</a>.<a href="traits/consts.rs.html#20">const_u8</a>(<a href="#452">sigpipe</a>);
+
+            <span class="kw">let </span>start_ty =
+                <a href="#404">cx</a>.<a href="traits/type_.rs.html#26">type_func</a>(<span class="kw-2">&amp;</span>[<a href="#404">cx</a>.<a href="traits/type_.rs.html#41">val_ty</a>(<a href="#405">rust_main</a>), <a href="#448">isize_ty</a>, <a href="#449">i8pp_ty</a>, <a href="#465">i8_ty</a>], <a href="#448">isize_ty</a>);
+            (<a href="#454">start_fn</a>, <a href="#468">start_ty</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[rust_main, arg_argc, arg_argv, arg_sigpipe])
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;using user-defined start fn&quot;</span>);
+            <span class="kw">let </span>start_ty = <a href="#404">cx</a>.<a href="traits/type_.rs.html#26">type_func</a>(<span class="kw-2">&amp;</span>[<a href="#448">isize_ty</a>, <a href="#449">i8pp_ty</a>], <a href="#448">isize_ty</a>);
+            (<a href="#405">rust_main</a>, <a href="#473">start_ty</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[arg_argc, arg_argv])
+        };
+
+        <span class="kw">let </span>result = <a href="#444">bx</a>.<a href="traits/builder.rs.html#320-326">call</a>(<a href="#452">start_ty</a>, <a href="#452">start_fn</a>, <span class="kw-2">&amp;</span><a href="#452">args</a>, <span class="prelude-val">None</span>);
+        <span class="kw">let </span>cast = <a href="#444">bx</a>.<a href="traits/builder.rs.html#200">intcast</a>(<a href="#477">result</a>, <a href="#404">cx</a>.<a href="traits/type_.rs.html#53">type_int</a>(), <span class="bool-val">true</span>);
+        <a href="#444">bx</a>.<a href="traits/builder.rs.html#57">ret</a>(<a href="#478">cast</a>);
+
+        <a href="#428">llfn</a>
+    }
+}
+
+<span class="doccomment">/// Obtain the `argc` and `argv` values to pass to the rust start function.
+</span><span class="kw">fn </span>get_argc_argv&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Bx::CodegenCx,
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+) -&gt; (Bx::Value, Bx::Value) {
+    <span class="kw">if </span>cx.sess().target.main_needs_argc_argv {
+        <span class="comment">// Params from native `main()` used as args for rust start function
+        </span><span class="kw">let </span>param_argc = <a href="#488">bx</a>.<a href="traits/abi.rs.html#7">get_param</a>(<span class="number">0</span>);
+        <span class="kw">let </span>param_argv = <a href="#488">bx</a>.<a href="traits/abi.rs.html#7">get_param</a>(<span class="number">1</span>);
+        <span class="kw">let </span>arg_argc = <a href="#488">bx</a>.<a href="traits/builder.rs.html#200">intcast</a>(<a href="#492">param_argc</a>, <a href="#487">cx</a>.<a href="traits/type_.rs.html#21">type_isize</a>(), <span class="bool-val">true</span>);
+        <span class="kw">let </span>arg_argv = <a href="#493">param_argv</a>;
+        (<a href="#494">arg_argc</a>, <a href="#495">arg_argv</a>)
+    } <span class="kw">else </span>{
+        <span class="comment">// The Rust start function doesn&#39;t need `argc` and `argv`, so just pass zeros.
+        </span><span class="kw">let </span>arg_argc = <a href="#488">bx</a>.<a href="traits/consts.rs.html#11">const_int</a>(<a href="#487">cx</a>.<a href="traits/type_.rs.html#53">type_int</a>(), <span class="number">0</span>);
+        <span class="kw">let </span>arg_argv = <a href="#488">bx</a>.<a href="traits/consts.rs.html#9">const_null</a>(<a href="#487">cx</a>.<a href="traits/type_.rs.html#29">type_ptr_to</a>(<a href="#487">cx</a>.<a href="traits/type_.rs.html#45">type_i8p</a>()));
+        (<a href="#499">arg_argc</a>, <a href="#500">arg_argv</a>)
+    }
+}
+
+<span class="doccomment">/// This function returns all of the debugger visualizers specified for the
+/// current crate as well as all upstream crates transitively that match the
+/// `visualizer_type` specified.
+</span><span class="kw">pub fn </span>collect_debugger_visualizers_transitive(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    visualizer_type: <a href="../../rustc_span/enum.DebuggerVisualizerType.html">DebuggerVisualizerType</a>,
+) -&gt; BTreeSet&lt;<a href="../../rustc_span/struct.DebuggerVisualizerFile.html">DebuggerVisualizerFile</a>&gt; {
+    <a href="#509">tcx</a>.debugger_visualizers(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>)
+        .iter()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(
+            <a href="#509">tcx</a>.crates(())
+                .iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>cnum| {
+                    <span class="kw">let </span>used_crate_source = <a href="#509">tcx</a>.used_crate_source(<span class="kw-2">*</span><a href="#517">cnum</a>);
+                    <a href="#518">used_crate_source</a>.rlib.is_some() || <a href="#518">used_crate_source</a>.rmeta.is_some()
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|<span class="kw-2">&amp;</span>cnum| <a href="#509">tcx</a>.debugger_visualizers(<a href="#521">cnum</a>)),
+        )
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|visualizer| <a href="#523">visualizer</a>.visualizer_type == <a href="#510">visualizer_type</a>)
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;BTreeSet&lt;<span class="kw">_</span>&gt;&gt;()
+}
+
+<span class="kw">pub fn </span>codegen_crate&lt;B: <a href="traits/backend.rs.html#116">ExtraBackendMethods</a>&gt;(
+    backend: B,
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    target_cpu: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    metadata: <a href="../../rustc_metadata/rmeta/encoder/struct.EncodedMetadata.html">EncodedMetadata</a>,
+    need_metadata_module: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; OngoingCodegen&lt;B&gt; {
+    <span class="comment">// Skip crate items and just output metadata in -Z no-codegen mode.
+    </span><span class="kw">if </span>tcx.sess.opts.unstable_opts.no_codegen || !tcx.sess.opts.output_types.should_codegen() {
+        <span class="kw">let </span>ongoing_codegen = <a href="back/write.rs.html#434-441">start_async_codegen</a>(<a href="#529">backend</a>, <a href="#530">tcx</a>, <a href="#531">target_cpu</a>, <a href="#532">metadata</a>, <span class="prelude-val">None</span>, <span class="number">1</span>);
+
+        <a href="#537">ongoing_codegen</a>.<a href="back/write.rs.html#1935">codegen_finished</a>(<a href="#530">tcx</a>);
+
+        <a href="#537">ongoing_codegen</a>.<a href="back/write.rs.html#1941">check_for_errors</a>(<a href="#530">tcx</a>.sess);
+
+        <span class="kw">return </span><a href="#537">ongoing_codegen</a>;
+    }
+
+    <span class="kw">let </span>cgu_name_builder = <span class="kw-2">&amp;mut </span>CodegenUnitNameBuilder::new(<a href="#530">tcx</a>);
+
+    <span class="comment">// Run the monomorphization collector and partition the collected items into
+    // codegen units.
+    </span><span class="kw">let </span>codegen_units = <a href="#530">tcx</a>.collect_and_partition_mono_items(()).<span class="number">1</span>;
+
+    <span class="comment">// Force all codegen_unit queries so they are already either red or green
+    // when compile_codegen_unit accesses them. We are not able to re-execute
+    // the codegen_unit query from just the DepNode, so an unknown color would
+    // lead to having to re-execute compile_codegen_unit, possibly
+    // unnecessarily.
+    </span><span class="kw">if </span>tcx.dep_graph.is_fully_enabled() {
+        <span class="kw">for </span>cgu <span class="kw">in </span>codegen_units {
+            tcx.ensure().codegen_unit(cgu.name());
+        }
+    }
+
+    <span class="kw">let </span>metadata_module = <span class="kw">if </span>need_metadata_module {
+        <span class="comment">// Emit compressed metadata object.
+        </span><span class="kw">let </span>metadata_cgu_name =
+            <a href="#546">cgu_name_builder</a>.build_cgu_name(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>, <span class="kw-2">&amp;</span>[<span class="string">&quot;crate&quot;</span>], <span class="prelude-val">Some</span>(<span class="string">&quot;metadata&quot;</span>)).<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+        <a href="#530">tcx</a>.sess.time(<span class="string">&quot;write_compressed_metadata&quot;</span>, || {
+            <span class="kw">let </span>file_name =
+                <a href="#530">tcx</a>.output_filenames(()).temp_path(OutputType::Metadata, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#565">metadata_cgu_name</a>));
+            <span class="kw">let </span>data = <a href="back/metadata.rs.html#276-280">create_compressed_metadata_file</a>(
+                <a href="#530">tcx</a>.sess,
+                <span class="kw-2">&amp;</span><a href="#532">metadata</a>,
+                <span class="kw-2">&amp;</span><a href="../../rustc_middle/middle/exported_symbols/fn.metadata_symbol_name.html">exported_symbols::metadata_symbol_name</a>(<a href="#530">tcx</a>),
+            );
+            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = std::fs::write(<span class="kw-2">&amp;</span><a href="#568">file_name</a>, <a href="#570">data</a>) {
+                <a href="#530">tcx</a>.sess.fatal(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;error writing metadata object file: {}&quot;</span>, err));
+            }
+            <span class="prelude-val">Some</span>(<a href="lib.rs.html#83">CompiledModule</a> {
+                name: <a href="#565">metadata_cgu_name</a>,
+                kind: <a href="lib.rs.html#99">ModuleKind::Metadata</a>,
+                object: <span class="prelude-val">Some</span>(<a href="#568">file_name</a>),
+                dwarf_object: <span class="prelude-val">None</span>,
+                bytecode: <span class="prelude-val">None</span>,
+            })
+        })
+    } <span class="kw">else </span>{
+        <span class="prelude-val">None
+    </span>};
+
+    <span class="kw">let </span>ongoing_codegen = <a href="back/write.rs.html#434-441">start_async_codegen</a>(
+        <a href="#529">backend</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+        <a href="#530">tcx</a>,
+        <a href="#531">target_cpu</a>,
+        <a href="#532">metadata</a>,
+        <a href="#563">metadata_module</a>,
+        <a href="#550">codegen_units</a>.len(),
+    );
+
+    <span class="comment">// Codegen an allocator shim, if necessary.
+    //
+    // If the crate doesn&#39;t have an `allocator_kind` set then there&#39;s definitely
+    // no shim to generate. Otherwise we also check our dependency graph for all
+    // our output crate types. If anything there looks like its a `Dynamic`
+    // linkage, then it&#39;s already got an allocator shim and we&#39;ll be using that
+    // one instead. If nothing exists then it&#39;s our job to generate the
+    // allocator!
+    </span><span class="kw">let </span>any_dynamic_crate = <a href="#530">tcx</a>.dependency_formats(()).iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|(<span class="kw">_</span>, list)| {
+        <span class="kw">use </span><a href="../../rustc_middle/middle/dependency_format/enum.Linkage.html">rustc_middle::middle::dependency_format::Linkage</a>;
+        <a href="#607">list</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|<span class="kw-2">&amp;</span>linkage| <a href="#609">linkage</a> == Linkage::Dynamic)
+    });
+    <span class="kw">let </span>allocator_module = <span class="kw">if </span>any_dynamic_crate {
+        <span class="prelude-val">None
+    </span>} <span class="kw">else if let </span><span class="prelude-val">Some</span>(kind) = <a href="#530">tcx</a>.allocator_kind(()) {
+        <span class="kw">let </span>llmod_id =
+            <a href="#546">cgu_name_builder</a>.build_cgu_name(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>, <span class="kw-2">&amp;</span>[<span class="string">&quot;crate&quot;</span>], <span class="prelude-val">Some</span>(<span class="string">&quot;allocator&quot;</span>)).<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+        <span class="kw">let </span>module_llvm = <a href="#530">tcx</a>.sess.time(<span class="string">&quot;write_allocator_module&quot;</span>, || {
+            <a href="#529">backend</a>.<a href="traits/backend.rs.html#117-123">codegen_allocator</a>(<a href="#530">tcx</a>, <span class="kw-2">&amp;</span><a href="#614">llmod_id</a>, <a href="#613">kind</a>, <a href="#530">tcx</a>.lang_items().oom().is_some())
+        });
+
+        <span class="prelude-val">Some</span>(<a href="lib.rs.html#54">ModuleCodegen</a> { name: <a href="#614">llmod_id</a>, <a href="#616">module_llvm</a>, kind: <a href="lib.rs.html#100">ModuleKind::Allocator</a> })
+    } <span class="kw">else </span>{
+        <span class="prelude-val">None
+    </span>};
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(allocator_module) = <a href="#611">allocator_module</a> {
+        <a href="#590">ongoing_codegen</a>.<a href="back/write.rs.html#1922-1926">submit_pre_codegened_module_to_llvm</a>(<a href="#530">tcx</a>, <a href="#625">allocator_module</a>);
+    }
+
+    <span class="comment">// For better throughput during parallel processing by LLVM, we used to sort
+    // CGUs largest to smallest. This would lead to better thread utilization
+    // by, for example, preventing a large CGU from being processed last and
+    // having only one LLVM thread working while the rest remained idle.
+    //
+    // However, this strategy would lead to high memory usage, as it meant the
+    // LLVM-IR for all of the largest CGUs would be resident in memory at once.
+    //
+    // Instead, we can compromise by ordering CGUs such that the largest and
+    // smallest are first, second largest and smallest are next, etc. If there
+    // are large size variations, this can reduce memory usage significantly.
+    </span><span class="kw">let </span>codegen_units: Vec&lt;<span class="kw">_</span>&gt; = {
+        <span class="kw">let </span><span class="kw-2">mut </span>sorted_cgus = <a href="#550">codegen_units</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <a href="#641">sorted_cgus</a>.sort_by_cached_key(|cgu| <a href="#642">cgu</a>.size_estimate());
+
+        <span class="kw">let </span>(first_half, second_half) = <a href="#641">sorted_cgus</a>.split_at(<a href="#641">sorted_cgus</a>.len() / <span class="number">2</span>);
+        <a href="#644">second_half</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://docs.rs/itertools/0.8/itertools/trait.Itertools.html">interleave</a>(<a href="#644">first_half</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    };
+
+    <span class="comment">// Calculate the CGU reuse
+    </span><span class="kw">let </span>cgu_reuse = <a href="#530">tcx</a>.sess.time(<span class="string">&quot;find_cgu_reuse&quot;</span>, || {
+        <a href="#640">codegen_units</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|cgu| <a href="#948">determine_cgu_reuse</a>(<a href="#530">tcx</a>, <span class="kw-2">&amp;</span><a href="#650">cgu</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+    });
+
+    <span class="kw">let </span><span class="kw-2">mut </span>total_codegen_time = Duration::new(<span class="number">0</span>, <span class="number">0</span>);
+    <span class="kw">let </span>start_rss = <a href="#530">tcx</a>.sess.time_passes().then(|| <a href="../../rustc_data_structures/profiling/fn.get_resident_set_size.html">get_resident_set_size</a>());
+
+    <span class="comment">// The non-parallel compiler can only translate codegen units to LLVM IR
+    // on a single thread, leading to a staircase effect where the N LLVM
+    // threads have to wait on the single codegen threads to generate work
+    // for them. The parallel compiler does not have this restriction, so
+    // we can pre-load the LLVM queue in parallel before handing off
+    // coordination to the OnGoingCodegen scheduler.
+    //
+    // This likely is a temporary measure. Once we don&#39;t have to support the
+    // non-parallel compiler anymore, we can compile CGUs end-to-end in
+    // parallel and get rid of the complicated scheduling logic.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>pre_compiled_cgus = <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.cfg.html">cfg!</a>(parallel_compiler) {
+        <a href="#530">tcx</a>.sess.time(<span class="string">&quot;compile_first_CGU_batch&quot;</span>, || {
+            <span class="comment">// Try to find one CGU to compile per thread.
+            </span><span class="kw">let </span>cgus: Vec&lt;<span class="kw">_</span>&gt; = <a href="#649">cgu_reuse</a>
+                .iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, reuse)| <a href="#672">reuse</a> == <span class="kw-2">&amp;</span>CguReuse::No)
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take</a>(<a href="#530">tcx</a>.sess.threads())
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+            <span class="comment">// Compile the found CGUs in parallel.
+            </span><span class="kw">let </span>start_time = Instant::now();
+
+            <span class="kw">let </span>pre_compiled_cgus = <a href="../../rustc_data_structures/sync/fn.par_iter.html">par_iter</a>(<a href="#669">cgus</a>)
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(i, <span class="kw">_</span>)| {
+                    <span class="kw">let </span>module = <a href="#529">backend</a>.<a href="traits/backend.rs.html#126-130">compile_codegen_unit</a>(<a href="#530">tcx</a>, <a href="#640">codegen_units</a>[<a href="#680">i</a>].name());
+                    (<a href="#680">i</a>, <a href="#681">module</a>)
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+            <a href="#653">total_codegen_time</a> += <a href="#677">start_time</a>.elapsed();
+
+            <a href="#679">pre_compiled_cgus</a>
+        })
+    } <span class="kw">else </span>{
+        FxHashMap::default()
+    };
+
+    <span class="kw">for </span>(i, cgu) <span class="kw">in </span>codegen_units.iter().enumerate() {
+        ongoing_codegen.wait_for_signal_to_codegen_item();
+        ongoing_codegen.check_for_errors(tcx.sess);
+
+        <span class="kw">let </span>cgu_reuse = cgu_reuse[i];
+        tcx.sess.cgu_reuse_tracker.set_actual_reuse(cgu.name().as_str(), cgu_reuse);
+
+        <span class="kw">match </span>cgu_reuse {
+            CguReuse::No =&gt; {
+                <span class="kw">let </span>(module, cost) = <span class="kw">if let </span><span class="prelude-val">Some</span>(cgu) = pre_compiled_cgus.remove(<span class="kw-2">&amp;</span>i) {
+                    cgu
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>start_time = Instant::now();
+                    <span class="kw">let </span>module = backend.compile_codegen_unit(tcx, cgu.name());
+                    total_codegen_time += start_time.elapsed();
+                    module
+                };
+                <span class="comment">// This will unwind if there are errors, which triggers our `AbortCodegenOnDrop`
+                // guard. Unfortunately, just skipping the `submit_codegened_module_to_llvm` makes
+                // compilation hang on post-monomorphization errors.
+                </span>tcx.sess.abort_if_errors();
+
+                submit_codegened_module_to_llvm(
+                    <span class="kw-2">&amp;</span>backend,
+                    <span class="kw-2">&amp;</span>ongoing_codegen.coordinator.sender,
+                    module,
+                    cost,
+                );
+                <span class="bool-val">false
+            </span>}
+            CguReuse::PreLto =&gt; {
+                submit_pre_lto_module_to_llvm(
+                    <span class="kw-2">&amp;</span>backend,
+                    tcx,
+                    <span class="kw-2">&amp;</span>ongoing_codegen.coordinator.sender,
+                    CachedModuleCodegen {
+                        name: cgu.name().to_string(),
+                        source: cgu.previous_work_product(tcx),
+                    },
+                );
+                <span class="bool-val">true
+            </span>}
+            CguReuse::PostLto =&gt; {
+                submit_post_lto_module_to_llvm(
+                    <span class="kw-2">&amp;</span>backend,
+                    <span class="kw-2">&amp;</span>ongoing_codegen.coordinator.sender,
+                    CachedModuleCodegen {
+                        name: cgu.name().to_string(),
+                        source: cgu.previous_work_product(tcx),
+                    },
+                );
+                <span class="bool-val">true
+            </span>}
+        };
+    }
+
+    <a href="#590">ongoing_codegen</a>.<a href="back/write.rs.html#1935">codegen_finished</a>(<a href="#530">tcx</a>);
+
+    <span class="comment">// Since the main thread is sometimes blocked during codegen, we keep track
+    // -Ztime-passes output manually.
+    </span><span class="kw">if </span>tcx.sess.time_passes() {
+        <span class="kw">let </span>end_rss = <a href="../../rustc_data_structures/profiling/fn.get_resident_set_size.html">get_resident_set_size</a>();
+
+        <a href="../../rustc_data_structures/profiling/fn.print_time_passes_entry.html">print_time_passes_entry</a>(
+            <span class="string">&quot;codegen_to_LLVM_IR&quot;</span>,
+            <a href="#653">total_codegen_time</a>,
+            <a href="#654">start_rss</a>.unwrap(),
+            <a href="#755">end_rss</a>,
+        );
+    }
+
+    <a href="#590">ongoing_codegen</a>.<a href="back/write.rs.html#1941">check_for_errors</a>(<a href="#530">tcx</a>.sess);
+    <a href="#590">ongoing_codegen</a>
+}
+
+<span class="kw">impl </span><a href="lib.rs.html#143">CrateInfo</a> {
+    <span class="kw">pub fn </span>new(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, target_cpu: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>) -&gt; <a href="lib.rs.html#143">CrateInfo</a> {
+        <span class="kw">let </span>exported_symbols = <a href="#770">tcx</a>
+            .sess
+            .crate_types()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>c| (<a href="#775">c</a>, <a href="back/linker.rs.html#1496"><span class="kw">crate</span>::back::linker::exported_symbols</a>(<a href="#770">tcx</a>, <a href="#775">c</a>)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="kw">let </span>linked_symbols = <a href="#770">tcx</a>
+            .sess
+            .crate_types()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>c| (<a href="#781">c</a>, <a href="back/linker.rs.html#1513-1516"><span class="kw">crate</span>::back::linker::linked_symbols</a>(<a href="#770">tcx</a>, <a href="#781">c</a>)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="kw">let </span>local_crate_name = <a href="#770">tcx</a>.crate_name(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>);
+        <span class="kw">let </span>crate_attrs = <a href="#770">tcx</a>.hir().attrs(rustc_hir::CRATE_HIR_ID);
+        <span class="kw">let </span>subsystem = <a href="#770">tcx</a>.sess.first_attr_value_str_by_name(<a href="#784">crate_attrs</a>, sym::windows_subsystem);
+        <span class="kw">let </span>windows_subsystem = <a href="#785">subsystem</a>.map(|subsystem| {
+            <span class="kw">if </span>subsystem != sym::windows &amp;&amp; subsystem != sym::console {
+                <a href="#770">tcx</a>.sess.fatal(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;invalid windows subsystem `{}`, only \
+                                     `windows` and `console` are allowed&quot;</span>,
+                    subsystem
+                ));
+            }
+            <a href="#786">subsystem</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+        });
+
+        <span class="comment">// This list is used when generating the command line to pass through to
+        // system linker. The linker expects undefined symbols on the left of the
+        // command line to be defined in libraries on the right, not the other way
+        // around. For more info, see some comments in the add_used_library function
+        // below.
+        //
+        // In order to get this left-to-right dependency ordering, we use the reverse
+        // postorder of all crates putting the leaves at the right-most positions.
+        </span><span class="kw">let </span>used_crates = <a href="#770">tcx</a>
+            .postorder_cnums(())
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>cnum| !<a href="#770">tcx</a>.dep_kind(<a href="#810">cnum</a>).macros_only())
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>info = <a href="lib.rs.html#143">CrateInfo</a> {
+            <a href="#770">target_cpu</a>,
+            <a href="#771">exported_symbols</a>,
+            <a href="#777">linked_symbols</a>,
+            <a href="#783">local_crate_name</a>,
+            compiler_builtins: <span class="prelude-val">None</span>,
+            profiler_runtime: <span class="prelude-val">None</span>,
+            is_no_builtins: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            native_libraries: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            used_libraries: <a href="#770">tcx</a>.native_libraries(<a href="../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>).iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">Into::into</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+            crate_name: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            <a href="#805">used_crates</a>,
+            used_crate_source: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            dependency_formats: <a href="#770">tcx</a>.dependency_formats(()).<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+            <a href="#786">windows_subsystem</a>,
+            natvis_debugger_visualizers: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        };
+        <span class="kw">let </span>crates = <a href="#770">tcx</a>.crates(());
+
+        <span class="kw">let </span>n_crates = <a href="#830">crates</a>.len();
+        <a href="#813">info</a>.native_libraries.reserve(<a href="#832">n_crates</a>);
+        <a href="#813">info</a>.crate_name.reserve(<a href="#832">n_crates</a>);
+        <a href="#813">info</a>.used_crate_source.reserve(<a href="#832">n_crates</a>);
+
+        <span class="kw">for </span><span class="kw-2">&amp;</span>cnum <span class="kw">in </span>crates.iter() {
+            info.native_libraries
+                .insert(cnum, tcx.native_libraries(cnum).iter().map(Into::into).collect());
+            info.crate_name.insert(cnum, tcx.crate_name(cnum));
+
+            <span class="kw">let </span>used_crate_source = tcx.used_crate_source(cnum);
+            info.used_crate_source.insert(cnum, used_crate_source.clone());
+            <span class="kw">if </span>tcx.is_compiler_builtins(cnum) {
+                info.compiler_builtins = <span class="prelude-val">Some</span>(cnum);
+            }
+            <span class="kw">if </span>tcx.is_profiler_runtime(cnum) {
+                info.profiler_runtime = <span class="prelude-val">Some</span>(cnum);
+            }
+            <span class="kw">if </span>tcx.is_no_builtins(cnum) {
+                info.is_no_builtins.insert(cnum);
+            }
+        }
+
+        <span class="comment">// Handle circular dependencies in the standard library.
+        // See comment before `add_linked_symbol_object` function for the details.
+        // With msvc-like linkers it&#39;s both unnecessary (they support circular dependencies),
+        // and causes linking issues (when weak lang item symbols are &quot;privatized&quot; by LTO).
+        </span><span class="kw">let </span>target = <span class="kw-2">&amp;</span><a href="#770">tcx</a>.sess.target;
+        <span class="kw">if </span>!target.is_like_msvc {
+            <span class="kw">let </span>missing_weak_lang_items: FxHashSet&lt;<span class="kw-2">&amp;</span><a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt; = <a href="#813">info</a>
+                .used_crates
+                .iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|cnum| {
+                    <a href="#770">tcx</a>.missing_lang_items(<span class="kw-2">*</span><a href="#864">cnum</a>)
+                        .iter()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|l| lang_items::required(<a href="#770">tcx</a>, <span class="kw-2">**</span><a href="#867">l</a>))
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|item| <a href="../../rustc_hir/weak_lang_items/static.WEAK_ITEMS_SYMBOLS.html">WEAK_ITEMS_SYMBOLS</a>.get(<a href="#868">item</a>))
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+            <span class="kw">let </span>prefix = <span class="kw">if </span>target.is_like_windows &amp;&amp; target.arch == <span class="string">&quot;x86&quot; </span>{ <span class="string">&quot;_&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;&quot; </span>};
+            <a href="#813">info</a>.linked_symbols
+                .iter_mut()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|(crate_type, <span class="kw">_</span>)| {
+                    !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(crate_type, CrateType::Rlib | CrateType::Staticlib)
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">for_each</a>(|(<span class="kw">_</span>, linked_symbols)| {
+                    <a href="#877">linked_symbols</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(
+                        <a href="#861">missing_weak_lang_items</a>
+                            .iter()
+                            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|item| (<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{prefix}{item}&quot;</span>), SymbolExportKind::Text)),
+                    )
+                });
+        }
+
+        <span class="kw">let </span>embed_visualizers = <a href="#770">tcx</a>.sess.crate_types().iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(|<span class="kw-2">&amp;</span>crate_type| <span class="kw">match </span><a href="#886">crate_type</a> {
+            CrateType::Executable | CrateType::Dylib | CrateType::Cdylib =&gt; {
+                <span class="comment">// These are crate types for which we invoke the linker and can embed
+                // NatVis visualizers.
+                </span><span class="bool-val">true
+            </span>}
+            CrateType::ProcMacro =&gt; {
+                <span class="comment">// We could embed NatVis for proc macro crates too (to improve the debugging
+                // experience for them) but it does not seem like a good default, since
+                // this is a rare use case and we don&#39;t want to slow down the common case.
+                </span><span class="bool-val">false
+            </span>}
+            CrateType::Staticlib | CrateType::Rlib =&gt; {
+                <span class="comment">// We don&#39;t invoke the linker for these, so we don&#39;t need to collect the NatVis for them.
+                </span><span class="bool-val">false
+            </span>}
+        });
+
+        <span class="kw">if </span>target.is_like_msvc &amp;&amp; embed_visualizers {
+            <a href="#813">info</a>.natvis_debugger_visualizers =
+                <a href="#508-511">collect_debugger_visualizers_transitive</a>(<a href="#770">tcx</a>, DebuggerVisualizerType::Natvis);
+        }
+
+        <a href="#813">info</a>
+    }
+}
+
+<span class="kw">pub fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="../../rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <a href="#913">providers</a>.backend_optimization_level = |tcx, cratenum| {
+        <span class="kw">let </span>for_speed = <span class="kw">match </span><a href="#914">tcx</a>.sess.opts.optimize {
+            <span class="comment">// If globally no optimisation is done, #[optimize] has no effect.
+            //
+            // This is done because if we ended up &quot;upgrading&quot; to `-O2` here, we’d populate the
+            // pass manager and it is likely that some module-wide passes (such as inliner or
+            // cross-function constant propagation) would ignore the `optnone` annotation we put
+            // on the functions, thus necessarily involving these functions into optimisations.
+            </span>config::OptLevel::No =&gt; <span class="kw">return </span>config::OptLevel::No,
+            <span class="comment">// If globally optimise-speed is already specified, just use that level.
+            </span>config::OptLevel::Less =&gt; <span class="kw">return </span>config::OptLevel::Less,
+            config::OptLevel::Default =&gt; <span class="kw">return </span>config::OptLevel::Default,
+            config::OptLevel::Aggressive =&gt; <span class="kw">return </span>config::OptLevel::Aggressive,
+            <span class="comment">// If globally optimize-for-size has been requested, use -O2 instead (if optimize(size)
+            // are present).
+            </span>config::OptLevel::Size =&gt; config::OptLevel::Default,
+            config::OptLevel::SizeMin =&gt; config::OptLevel::Default,
+        };
+
+        <span class="kw">let </span>(defids, <span class="kw">_</span>) = <a href="#914">tcx</a>.collect_and_partition_mono_items(<a href="#914">cratenum</a>);
+        <span class="kw">for </span>id <span class="kw">in </span><span class="kw-2">&amp;*</span>defids {
+            <span class="kw">let </span>CodegenFnAttrs { optimize, .. } = tcx.codegen_fn_attrs(<span class="kw-2">*</span>id);
+            <span class="kw">match </span>optimize {
+                attr::OptimizeAttr::None =&gt; <span class="kw">continue</span>,
+                attr::OptimizeAttr::Size =&gt; <span class="kw">continue</span>,
+                attr::OptimizeAttr::Speed =&gt; {
+                    <span class="kw">return </span>for_speed;
+                }
+            }
+        }
+        <a href="#914">tcx</a>.sess.opts.optimize
+    };
+}
+
+<span class="kw">fn </span>determine_cgu_reuse&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, cgu: <span class="kw-2">&amp;</span>CodegenUnit&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="../../rustc_session/cgu_reuse_tracker/enum.CguReuse.html">CguReuse</a> {
+    <span class="kw">if </span>!tcx.dep_graph.is_fully_enabled() {
+        <span class="kw">return </span>CguReuse::No;
+    }
+
+    <span class="kw">let </span>work_product_id = <span class="kw-2">&amp;</span><a href="#948">cgu</a>.work_product_id();
+    <span class="kw">if </span>tcx.dep_graph.previous_work_product(work_product_id).is_none() {
+        <span class="comment">// We don&#39;t have anything cached for this CGU. This can happen
+        // if the CGU did not exist in the previous session.
+        </span><span class="kw">return </span>CguReuse::No;
+    }
+
+    <span class="comment">// Try to mark the CGU as green. If it we can do so, it means that nothing
+    // affecting the LLVM module has changed and we can re-use a cached version.
+    // If we compile with any kind of LTO, this means we can re-use the bitcode
+    // of the Pre-LTO stage (possibly also the Post-LTO version but we&#39;ll only
+    // know that later). If we are not doing LTO, there is only one optimized
+    // version of each module, so we re-use that.
+    </span><span class="kw">let </span>dep_node = <a href="#948">cgu</a>.codegen_dep_node(<a href="#948">tcx</a>);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+        !tcx.dep_graph.dep_node_exists(<span class="kw-2">&amp;</span>dep_node),
+        <span class="string">&quot;CompileCodegenUnit dep-node for CGU `{}` already exists before marking.&quot;</span>,
+        cgu.name()
+    );
+
+    <span class="kw">if </span>tcx.try_mark_green(<span class="kw-2">&amp;</span>dep_node) {
+        <span class="comment">// We can re-use either the pre- or the post-thinlto state. If no LTO is
+        // being performed then we can use post-LTO artifacts, otherwise we must
+        // reuse pre-LTO artifacts
+        </span><span class="kw">match </span><a href="back/write.rs.html#774-779">compute_per_cgu_lto_type</a>(
+            <span class="kw-2">&amp;</span><a href="#948">tcx</a>.sess.lto(),
+            <span class="kw-2">&amp;</span><a href="#948">tcx</a>.sess.opts,
+            <span class="kw-2">&amp;</span><a href="#948">tcx</a>.sess.crate_types(),
+            <a href="lib.rs.html#98">ModuleKind::Regular</a>,
+        ) {
+            <a href="back/write.rs.html#769">ComputedLtoType::No</a> =&gt; CguReuse::PostLto,
+            <span class="kw">_ </span>=&gt; CguReuse::PreLto,
+        }
+    } <span class="kw">else </span>{
+        CguReuse::No
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_codegen_ssa" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

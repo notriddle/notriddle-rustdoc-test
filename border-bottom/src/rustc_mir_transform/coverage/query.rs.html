@@ -1,0 +1,342 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_transform/src/coverage/query.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>query.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+</pre><pre class="rust"><code><span class="kw">use super</span>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/index.html">rustc_middle::mir::coverage</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_middle::mir::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Body.html">Body</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/struct.Coverage.html">Coverage</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/query/struct.CoverageInfo.html">CoverageInfo</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">rustc_middle::ty::query::Providers</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_span::def_id::DefId</a>;
+
+<span class="doccomment">/// A `query` provider for retrieving coverage information injected into MIR.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <a href="#10">providers</a>.coverageinfo = |tcx, def_id| <a href="#122">coverageinfo</a>(<a href="#11">tcx</a>, <a href="#11">def_id</a>);
+    <a href="#10">providers</a>.covered_code_regions = |tcx, def_id| <a href="#139">covered_code_regions</a>(<a href="#12">tcx</a>, <a href="#12">def_id</a>);
+}
+
+<span class="doccomment">/// The `num_counters` argument to `llvm.instrprof.increment` is the max counter_id + 1, or in
+/// other words, the number of counter value references injected into the MIR (plus 1 for the
+/// reserved `ZERO` counter, which uses counter ID `0` when included in an expression). Injected
+/// counters have a counter ID from `1..num_counters-1`.
+///
+/// `num_expressions` is the number of counter expressions added to the MIR body.
+///
+/// Both `num_counters` and `num_expressions` are used to initialize new vectors, during backend
+/// code generate, to lookup counters and expressions by simple u32 indexes.
+///
+/// MIR optimization may split and duplicate some BasicBlock sequences, or optimize out some code
+/// including injected counters. (It is OK if some counters are optimized out, but those counters
+/// are still included in the total `num_counters` or `num_expressions`.) Simply counting the
+/// calls may not work; but computing the number of counters or expressions by adding `1` to the
+/// highest ID (for a given instrumented function) is valid.
+///
+/// This visitor runs twice, first with `add_missing_operands` set to `false`, to find the maximum
+/// counter ID and maximum expression ID based on their enum variant `id` fields; then, as a
+/// safeguard, with `add_missing_operands` set to `true`, to find any other counter or expression
+/// IDs referenced by expression operands, if not already seen.
+///
+/// Ideally, each operand ID in a MIR `CoverageKind::Expression` will have a separate MIR `Coverage`
+/// statement for the `Counter` or `Expression` with the referenced ID. but since current or future
+/// MIR optimizations can theoretically optimize out segments of a MIR, it may not be possible to
+/// guarantee this, so the second pass ensures the `CoverageInfo` counts include all referenced IDs.
+</span><span class="kw">struct </span>CoverageVisitor {
+    info: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/query/struct.CoverageInfo.html">CoverageInfo</a>,
+    add_missing_operands: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">impl </span><a href="#40">CoverageVisitor</a> {
+    <span class="doccomment">/// Updates `num_counters` to the maximum encountered zero-based counter_id plus 1. Note the
+    /// final computed number of counters should be the number of all `CoverageKind::Counter`
+    /// statements in the MIR *plus one* for the implicit `ZERO` counter.
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>update_num_counters(<span class="kw-2">&amp;mut </span><span class="self">self</span>, counter_id: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) {
+        <a class="self" href="#50">self</a>.info.num_counters = std::cmp::max(<a class="self" href="#50">self</a>.info.num_counters, <a href="#50">counter_id</a> + <span class="number">1</span>);
+    }
+
+    <span class="doccomment">/// Computes an expression index for each expression ID, and updates `num_expressions` to the
+    /// maximum encountered index plus 1.
+    </span><span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>update_num_expressions(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expression_id: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) {
+        <span class="kw">let </span>expression_index = u32::MAX - <a href="#57">expression_id</a>;
+        <a class="self" href="#57">self</a>.info.num_expressions = std::cmp::max(<a class="self" href="#57">self</a>.info.num_expressions, <a href="#58">expression_index</a> + <span class="number">1</span>);
+    }
+
+    <span class="kw">fn </span>update_from_expression_operand(<span class="kw-2">&amp;mut </span><span class="self">self</span>, operand_id: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) {
+        <span class="kw">if </span>operand_id &gt;= <span class="self">self</span>.info.num_counters {
+            <span class="kw">let </span>operand_as_expression_index = u32::MAX - <a href="#62">operand_id</a>;
+            <span class="kw">if </span>operand_as_expression_index &gt;= <span class="self">self</span>.info.num_expressions {
+                <span class="comment">// The operand ID is outside the known range of counter IDs and also outside the
+                // known range of expression IDs. In either case, the result of a missing operand
+                // (if and when used in an expression) will be zero, so from a computation
+                // perspective, it doesn&#39;t matter whether it is interpreted as a counter or an
+                // expression.
+                //
+                // However, the `num_counters` and `num_expressions` query results are used to
+                // allocate arrays when generating the coverage map (during codegen), so choose
+                // the type that grows either `num_counters` or `num_expressions` the least.
+                </span><span class="kw">if </span>operand_id - <span class="self">self</span>.info.num_counters
+                    &lt; operand_as_expression_index - <span class="self">self</span>.info.num_expressions
+                {
+                    <a class="self" href="#62">self</a>.<a href="#50">update_num_counters</a>(<a href="#62">operand_id</a>)
+                } <span class="kw">else </span>{
+                    <a class="self" href="#62">self</a>.<a href="#57">update_num_expressions</a>(<a href="#62">operand_id</a>)
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>visit_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">for </span>bb_data <span class="kw">in </span>body.basic_blocks.iter() {
+            <span class="kw">for </span>statement <span class="kw">in </span>bb_data.statements.iter() {
+                <span class="kw">if let </span>StatementKind::Coverage(<span class="kw">box </span><span class="kw-2">ref </span>coverage) = statement.kind {
+                    <span class="kw">if </span>is_inlined(body, statement) {
+                        <span class="kw">continue</span>;
+                    }
+                    <span class="self">self</span>.visit_coverage(coverage);
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>visit_coverage(<span class="kw-2">&amp;mut </span><span class="self">self</span>, coverage: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/struct.Coverage.html">Coverage</a>) {
+        <span class="kw">if </span><span class="self">self</span>.add_missing_operands {
+            <span class="kw">match </span><a href="#99">coverage</a>.kind {
+                <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind::Expression</a> { lhs, rhs, .. } =&gt; {
+                    <a class="self" href="#99">self</a>.<a href="#62">update_from_expression_operand</a>(u32::from(<a href="#102">lhs</a>));
+                    <a class="self" href="#99">self</a>.<a href="#62">update_from_expression_operand</a>(u32::from(<a href="#102">rhs</a>));
+                }
+                <span class="kw">_ </span>=&gt; {}
+            }
+        } <span class="kw">else </span>{
+            <span class="kw">match </span><a href="#99">coverage</a>.kind {
+                <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind::Counter</a> { id, .. } =&gt; {
+                    <a class="self" href="#99">self</a>.<a href="#50">update_num_counters</a>(u32::from(<a href="#110">id</a>));
+                }
+                <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind::Expression</a> { id, .. } =&gt; {
+                    <a class="self" href="#99">self</a>.<a href="#57">update_num_expressions</a>(u32::from(<a href="#113">id</a>));
+                }
+                <span class="kw">_ </span>=&gt; {}
+            }
+        }
+    }
+}
+
+<span class="kw">fn </span>coverageinfo&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, instance_def: ty::InstanceDef&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/query/struct.CoverageInfo.html">CoverageInfo</a> {
+    <span class="kw">let </span>mir_body = <a href="#122">tcx</a>.instance_mir(<a href="#122">instance_def</a>);
+
+    <span class="kw">let </span><span class="kw-2">mut </span>coverage_visitor = <a href="#40">CoverageVisitor</a> {
+        <span class="comment">// num_counters always has at least the `ZERO` counter.
+        </span>info: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/query/struct.CoverageInfo.html">CoverageInfo</a> { num_counters: <span class="number">1</span>, num_expressions: <span class="number">0 </span>},
+        add_missing_operands: <span class="bool-val">false</span>,
+    };
+
+    <a href="#125">coverage_visitor</a>.<a href="#86">visit_body</a>(<a href="#123">mir_body</a>);
+
+    <a href="#125">coverage_visitor</a>.add_missing_operands = <span class="bool-val">true</span>;
+    <a href="#125">coverage_visitor</a>.<a href="#86">visit_body</a>(<a href="#123">mir_body</a>);
+
+    <a href="#125">coverage_visitor</a>.info
+}
+
+<span class="kw">fn </span>covered_code_regions&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.CodeRegion.html">CodeRegion</a>&gt; {
+    <span class="kw">let </span>body = <a href="#166">mir_body</a>(<a href="#139">tcx</a>, <a href="#139">def_id</a>);
+    <a href="#140">body</a>.basic_blocks
+        .iter()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|data| {
+            <a href="#143">data</a>.statements.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|statement| <span class="kw">match </span><a href="#144">statement</a>.kind {
+                StatementKind::Coverage(<span class="kw">box </span><span class="kw-2">ref </span>coverage) =&gt; {
+                    <span class="kw">if </span>is_inlined(body, statement) {
+                        <span class="prelude-val">None
+                    </span>} <span class="kw">else </span>{
+                        <a href="#145">coverage</a>.code_region.as_ref() <span class="comment">// may be None
+                    </span>}
+                }
+                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+            })
+        })
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+}
+
+<span class="kw">fn </span>is_inlined(body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;_</span>&gt;, statement: <span class="kw-2">&amp;</span>Statement&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>scope_data = <span class="kw-2">&amp;</span><a href="#158">body</a>.source_scopes[<a href="#158">statement</a>.source_info.scope];
+    <a href="#159">scope_data</a>.inlined.is_some() || <a href="#159">scope_data</a>.inlined_parent_scope.is_some()
+}
+
+<span class="doccomment">/// This function ensures we obtain the correct MIR for the given item irrespective of
+/// whether that means const mir or runtime mir. For `const fn` this opts for runtime
+/// mir.
+</span><span class="kw">fn </span>mir_body&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">let </span>id = ty::WithOptConstParam::unknown(<a href="#166">def_id</a>);
+    <span class="kw">let </span>def = ty::InstanceDef::Item(<a href="#167">id</a>);
+    <a href="#166">tcx</a>.instance_mir(<a href="#168">def</a>)
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

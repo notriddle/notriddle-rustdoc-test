@@ -1,0 +1,268 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_borrowck/src/diagnostics/var_name.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>var_name.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_borrowck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../lib.rs.html#98"><span class="kw">crate</span>::Upvar</a>;
+<span class="kw">use crate</span>::{<a href="../nll.rs.html#445">nll::ToRegionVid</a>, <a href="../region_infer/mod.rs.html#50">region_infer::RegionInferenceContext</a>};
+<span class="kw">use </span>rustc_index::vec::{<a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>, <a href="../../../rustc_index/vec/struct.IndexVec.html">IndexVec</a>};
+<span class="kw">use </span>rustc_middle::mir::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Body.html">Body</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../rustc_span/span_encoding/struct.Span.html">rustc_span::source_map::Span</a>;
+<span class="kw">use </span><a href="../../../rustc_span/symbol/struct.Symbol.html">rustc_span::symbol::Symbol</a>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; RegionInferenceContext&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_var_name_and_span_for_region(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        local_names: <span class="kw-2">&amp;</span>IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;,
+        upvars: <span class="kw-2">&amp;</span>[Upvar&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;(<span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;get_var_name_and_span_for_region(fr={:?})&quot;</span>, fr);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.universal_regions().is_universal_region(fr));
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;get_var_name_and_span_for_region: attempting upvar&quot;</span>);
+        <a class="self" href="#11">self</a>.<a href="#37-41">get_upvar_index_for_region</a>(<a href="#12">tcx</a>, <a href="#16">fr</a>)
+            .map(|index| {
+                <span class="comment">// FIXME(project-rfc-2229#8): Use place span for diagnostics
+                </span><span class="kw">let </span>(name, span) = <a class="self" href="#11">self</a>.<a href="#64-69">get_upvar_name_and_span_for_region</a>(<a href="#12">tcx</a>, <a href="#15">upvars</a>, <a href="#23">index</a>);
+                (<span class="prelude-val">Some</span>(<a href="#25">name</a>), <a href="#25">span</a>)
+            })
+            .or_else(|| {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;get_var_name_and_span_for_region: attempting argument&quot;</span>);
+                <a class="self" href="#11">self</a>.<a href="#88-92">get_argument_index_for_region</a>(<a href="#12">tcx</a>, <a href="#16">fr</a>).map(|index| {
+                    <a class="self" href="#11">self</a>.<a href="#114-119">get_argument_name_and_span_for_region</a>(<a href="#13">body</a>, <a href="#14">local_names</a>, <a href="#30">index</a>)
+                })
+            })
+    }
+
+    <span class="doccomment">/// Search the upvars (if any) to find one that references fr. Return its index.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_upvar_index_for_region(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt; {
+        <span class="kw">let </span>upvar_index =
+            <span class="self">self</span>.universal_regions().defining_ty.upvar_tys().position(|upvar_ty| {
+                <span class="macro">debug!</span>(<span class="string">&quot;get_upvar_index_for_region: upvar_ty={:?}&quot;</span>, upvar_ty);
+                tcx.any_free_region_meets(<span class="kw-2">&amp;</span>upvar_ty, |r| {
+                    <span class="kw">let </span>r = r.to_region_vid();
+                    <span class="macro">debug!</span>(<span class="string">&quot;get_upvar_index_for_region: r={:?} fr={:?}&quot;</span>, r, fr);
+                    r == fr
+                })
+            })<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>upvar_ty = <a class="self" href="#38">self</a>.<a href="../region_infer/mod.rs.html#1997">universal_regions</a>().defining_ty.<a href="../universal_regions.rs.html#115">upvar_tys</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">nth</a>(<a href="#42">upvar_index</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;get_upvar_index_for_region: found {:?} in upvar {} which has type {:?}&quot;</span>,
+            fr, upvar_index, upvar_ty,
+        );
+
+        <span class="prelude-val">Some</span>(<a href="#42">upvar_index</a>)
+    }
+
+    <span class="doccomment">/// Given the index of an upvar, finds its name and the span from where it was
+    /// declared.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_upvar_name_and_span_for_region(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        upvars: <span class="kw-2">&amp;</span>[Upvar&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+        upvar_index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; (<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <span class="kw">let </span>upvar_hir_id = <a href="#67">upvars</a>[<a href="#68">upvar_index</a>].place.get_root_variable();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;get_upvar_name_and_span_for_region: upvar_hir_id={:?}&quot;</span>, upvar_hir_id);
+
+        <span class="kw">let </span>upvar_name = <a href="#66">tcx</a>.hir().name(<a href="#70">upvar_hir_id</a>);
+        <span class="kw">let </span>upvar_span = <a href="#66">tcx</a>.hir().span(<a href="#70">upvar_hir_id</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;get_upvar_name_and_span_for_region: upvar_name={:?} upvar_span={:?}&quot;</span>,
+            upvar_name, upvar_span
+        );
+
+        (<a href="#73">upvar_name</a>, <a href="#74">upvar_span</a>)
+    }
+
+    <span class="doccomment">/// Search the argument types for one that references fr (which should be a free region).
+    /// Returns Some(_) with the index of the input if one is found.
+    ///
+    /// N.B., in the case of a closure, the index is indexing into the signature as seen by the
+    /// user - in particular, index 0 is not the implicit self parameter.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_argument_index_for_region(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt; {
+        <span class="kw">let </span>implicit_inputs = <a class="self" href="#89">self</a>.<a href="../region_infer/mod.rs.html#1997">universal_regions</a>().defining_ty.<a href="../universal_regions.rs.html#130">implicit_inputs</a>();
+        <span class="kw">let </span>argument_index =
+            <span class="self">self</span>.universal_regions().unnormalized_input_tys.iter().skip(implicit_inputs).position(
+                |arg_ty| {
+                    <span class="macro">debug!</span>(<span class="string">&quot;get_argument_index_for_region: arg_ty = {:?}&quot;</span>, arg_ty);
+                    tcx.any_free_region_meets(arg_ty, |r| r.to_region_vid() == fr)
+                },
+            )<span class="question-mark">?</span>;
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;get_argument_index_for_region: found {:?} in argument {} which has type {:?}&quot;</span>,
+            fr,
+            argument_index,
+            <span class="self">self</span>.universal_regions().unnormalized_input_tys[argument_index],
+        );
+
+        <span class="prelude-val">Some</span>(<a href="#94">argument_index</a>)
+    }
+
+    <span class="doccomment">/// Given the index of an argument, finds its name (if any) and the span from where it was
+    /// declared.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_argument_name_and_span_for_region(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        local_names: <span class="kw-2">&amp;</span>IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;,
+        argument_index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; (<span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <span class="kw">let </span>implicit_inputs = <a class="self" href="#115">self</a>.<a href="../region_infer/mod.rs.html#1997">universal_regions</a>().defining_ty.<a href="../universal_regions.rs.html#130">implicit_inputs</a>();
+        <span class="kw">let </span>argument_local = Local::new(<a href="#120">implicit_inputs</a> + <a href="#118">argument_index</a> + <span class="number">1</span>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;get_argument_name_and_span_for_region: argument_local={:?}&quot;</span>, argument_local);
+
+        <span class="kw">let </span>argument_name = <a href="#117">local_names</a>[<a href="#121">argument_local</a>];
+        <span class="kw">let </span>argument_span = <a href="#116">body</a>.local_decls[<a href="#121">argument_local</a>].source_info.span;
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;get_argument_name_and_span_for_region: argument_name={:?} argument_span={:?}&quot;</span>,
+            argument_name, argument_span
+        );
+
+        (<a href="#124">argument_name</a>, <a href="#125">argument_span</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_borrowck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

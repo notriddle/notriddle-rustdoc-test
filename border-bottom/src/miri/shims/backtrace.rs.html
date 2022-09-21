@@ -1,0 +1,510 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/shims/backtrace.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>backtrace.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../miri/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+</pre><pre class="rust"><code><span class="kw">use crate</span>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../../../rustc_ast/ast/enum.Mutability.html">rustc_ast::ast::Mutability</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">rustc_middle::ty::layout::LayoutOf</a> <span class="kw">as _</span>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/instance/struct.Instance.html">Instance</a>};
+<span class="kw">use </span>rustc_span::{BytePos, <a href="../../../rustc_span/struct.Loc.html">Loc</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_target::{<a href="../../../rustc_target/abi/struct.Size.html">abi::Size</a>, <a href="../../../rustc_target/spec/abi/enum.Abi.html">spec::abi::Abi</a>};
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw">crate</span>::MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {}
+<span class="kw">pub trait </span>EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt;: <span class="kw">crate</span>::MiriEvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>handle_miri_backtrace_size(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;],
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#11">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>[flags] = this.check_shim(abi, Abi::Rust, link_name, args)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>flags = this.read_scalar(flags)<span class="question-mark">?</span>.to_u64()<span class="question-mark">?</span>;
+        <span class="kw">if </span>flags != <span class="number">0 </span>{
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;unknown `miri_backtrace_size` flags {}&quot;</span>, flags);
+        }
+
+        <span class="kw">let </span>frame_count = <a href="#17">this</a>.<a href="../concurrency/thread.rs.html#789">active_thread_stack</a>().len();
+
+        <a href="#17">this</a>.write_scalar(Scalar::from_machine_usize(<a href="#25">frame_count</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>().unwrap(), <a href="#17">this</a>), <a href="#15">dest</a>)
+    }
+
+    <span class="kw">fn </span>handle_miri_get_backtrace(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;],
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#31">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>tcx = <a href="#37">this</a>.tcx;
+
+        <span class="kw">let </span>flags = <span class="kw">if let </span><span class="prelude-val">Some</span>(flags_op) = <a href="#34">args</a>.get(<span class="number">0</span>) {
+            this.read_scalar(flags_op)<span class="question-mark">?</span>.to_u64()<span class="question-mark">?
+        </span>} <span class="kw">else </span>{
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;expected at least 1 argument&quot;</span>)
+        };
+
+        <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::new();
+        <span class="kw">for </span>frame <span class="kw">in </span>this.active_thread_stack().iter().rev() {
+            <span class="kw">let </span><span class="kw-2">mut </span>span = frame.current_span();
+            <span class="comment">// Match the behavior of runtime backtrace spans
+            // by using a non-macro span in our backtrace. See `FunctionCx::debug_loc`.
+            </span><span class="kw">if </span>span.from_expansion() &amp;&amp; !tcx.sess.opts.unstable_opts.debug_macros {
+                span = rustc_span::hygiene::walk_chain(span, frame.body.span.ctxt())
+            }
+            data.push((frame.instance, span.lo()));
+        }
+
+        <span class="kw">let </span>ptrs: Vec&lt;<span class="kw">_</span>&gt; = <a href="#46">data</a>
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(instance, pos)| {
+                <span class="comment">// We represent a frame pointer by using the `span.lo` value
+                // as an offset into the function&#39;s allocation. This gives us an
+                // opaque pointer that we can return to user code, and allows us
+                // to reconstruct the needed frame information in `handle_miri_resolve_frame`.
+                // Note that we never actually read or write anything from/to this pointer -
+                // all of the data is represented by the pointer value itself.
+                </span><span class="kw">let </span>fn_ptr = <a href="#37">this</a>.create_fn_alloc_ptr(FnVal::Instance(<a href="#59">instance</a>));
+                <a href="#66">fn_ptr</a>.wrapping_offset(Size::from_bytes(<a href="#59">pos</a>.<span class="number">0</span>), <a href="#37">this</a>)
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span>len: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> = <a href="#57">ptrs</a>.len().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>().unwrap();
+
+        <span class="kw">let </span>ptr_ty = <a href="#37">this</a>.machine.layouts.mut_raw_ptr.ty;
+        <span class="kw">let </span>array_layout = <a href="#37">this</a>.<a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#38">tcx</a>.mk_array(<a href="#73">ptr_ty</a>, <a href="#71">len</a>)).unwrap();
+
+        <span class="kw">match </span><a href="#40">flags</a> {
+            <span class="comment">// storage for pointers is allocated by miri
+            // deallocating the slice is undefined behavior with a custom global allocator
+            </span><span class="number">0 </span>=&gt; {
+                <span class="kw">let </span>[_flags] = this.check_shim(abi, Abi::Rust, link_name, args)<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>alloc = this.allocate(array_layout, MiriMemoryKind::Rust.into())<span class="question-mark">?</span>;
+
+                <span class="comment">// Write pointers into array
+                </span><span class="kw">for </span>(i, ptr) <span class="kw">in </span>ptrs.into_iter().enumerate() {
+                    <span class="kw">let </span>place = this.mplace_index(<span class="kw-2">&amp;</span>alloc, i <span class="kw">as </span>u64)<span class="question-mark">?</span>;
+
+                    this.write_pointer(ptr, <span class="kw-2">&amp;</span>place.into())<span class="question-mark">?</span>;
+                }
+
+                this.write_immediate(
+                    Immediate::new_slice(Scalar::from_maybe_pointer(alloc.ptr, this), len, this),
+                    dest,
+                )<span class="question-mark">?</span>;
+            }
+            <span class="comment">// storage for pointers is allocated by the caller
+            </span><span class="number">1 </span>=&gt; {
+                <span class="kw">let </span>[_flags, buf] = this.check_shim(abi, Abi::Rust, link_name, args)<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>buf_place = this.deref_operand(buf)<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>ptr_layout = this.layout_of(ptr_ty)<span class="question-mark">?</span>;
+
+                <span class="kw">for </span>(i, ptr) <span class="kw">in </span>ptrs.into_iter().enumerate() {
+                    <span class="kw">let </span>offset = ptr_layout.size * i.try_into().unwrap();
+
+                    <span class="kw">let </span>op_place = buf_place.offset(offset, ptr_layout, this)<span class="question-mark">?</span>;
+
+                    this.write_pointer(ptr, <span class="kw-2">&amp;</span>op_place.into())<span class="question-mark">?</span>;
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;unknown `miri_get_backtrace` flags {}&quot;</span>, flags),
+        };
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>resolve_frame_pointer(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ptr: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, (Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="../../../rustc_span/struct.Loc.html">Loc</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>)&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#119">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+
+        <span class="kw">let </span>ptr = this.read_pointer(ptr)<span class="question-mark">?</span>;
+        <span class="comment">// Take apart the pointer, we need its pieces. The offset encodes the span.
+        </span><span class="kw">let </span>(alloc_id, offset, _prov) = this.ptr_get_alloc_id(ptr)<span class="question-mark">?</span>;
+
+        <span class="comment">// This has to be an actual global fn ptr, not a dlsym function.
+        </span><span class="kw">let </span>fn_instance = <span class="kw">if let </span><span class="prelude-val">Some</span>(GlobalAlloc::Function(instance)) =
+            <a href="#122">this</a>.tcx.try_get_global_alloc(<a href="#126">alloc_id</a>)
+        {
+            <a href="#129">instance</a>
+        } <span class="kw">else </span>{
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;expected static function pointer, found {:?}&quot;</span>, ptr);
+        };
+
+        <span class="kw">let </span>lo =
+            <a href="#122">this</a>.tcx.sess.source_map().lookup_char_pos(BytePos(<a href="#126">offset</a>.bytes().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>().unwrap()));
+
+        <span class="kw">let </span>name = <a href="#129">fn_instance</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+        <span class="kw">let </span>filename = <a href="#137">lo</a>.file.name.prefer_remapped().<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>();
+
+        <span class="prelude-val">Ok</span>((<a href="#129">fn_instance</a>, <a href="#137">lo</a>, <a href="#140">name</a>, <a href="#141">filename</a>))
+    }
+
+    <span class="kw">fn </span>handle_miri_resolve_frame(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;],
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#147">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>[ptr, flags] = this.check_shim(abi, Abi::Rust, link_name, args)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>flags = this.read_scalar(flags)<span class="question-mark">?</span>.to_u64()<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(fn_instance, lo, name, filename) = this.resolve_frame_pointer(ptr)<span class="question-mark">?</span>;
+
+        <span class="comment">// Reconstruct the original function pointer,
+        // which we pass to user code.
+        </span><span class="kw">let </span>fn_ptr = <a href="#153">this</a>.create_fn_alloc_ptr(FnVal::Instance(<a href="#158">fn_instance</a>));
+
+        <span class="kw">let </span>num_fields = <a href="#151">dest</a>.layout.fields.count();
+
+        <span class="kw">if </span>!(<span class="number">4</span>..=<span class="number">5</span>).contains(<span class="kw-2">&amp;</span>num_fields) {
+            <span class="comment">// Always mention 5 fields, since the 4-field struct
+            // is deprecated and slated for removal.
+            </span><a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(
+                <span class="string">&quot;bad declaration of miri_resolve_frame - should return a struct with 5 fields&quot;
+            </span>);
+        }
+
+        <span class="comment">// `u32` is not enough to fit line/colno, which can be `usize`. It seems unlikely that a
+        // file would have more than 2^32 lines or columns, but whatever, just default to 0.
+        </span><span class="kw">let </span>lineno: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = u32::try_from(<a href="#158">lo</a>.line).unwrap_or(<span class="number">0</span>);
+        <span class="comment">// `lo.col` is 0-based - add 1 to make it 1-based for the caller.
+        </span><span class="kw">let </span>colno: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> = u32::try_from(<a href="#158">lo</a>.col.<span class="number">0</span>.saturating_add(<span class="number">1</span>)).unwrap_or(<span class="number">0</span>);
+
+        <span class="kw">let </span>dest = this.force_allocation(dest)<span class="question-mark">?</span>;
+        <span class="kw">if let </span>ty::Adt(adt, <span class="kw">_</span>) = <a href="#180">dest</a>.layout.ty.kind() {
+            <span class="kw">if </span>!adt.repr().c() {
+                <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_ub_format.html">throw_ub_format!</a>(
+                    <span class="string">&quot;miri_resolve_frame must be declared with a `#[repr(C)]` return type&quot;
+                </span>);
+            }
+        }
+
+        <span class="kw">match </span><a href="#156">flags</a> {
+            <span class="number">0 </span>=&gt; {
+                <span class="comment">// These are &quot;mutable&quot; allocations as we consider them to be owned by the callee.
+                </span><span class="kw">let </span>name_alloc =
+                    <a href="#153">this</a>.allocate_str(<span class="kw-2">&amp;</span><a href="#158">name</a>, <a href="../machine.rs.html#72">MiriMemoryKind::Rust</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), Mutability::Mut);
+                <span class="kw">let </span>filename_alloc =
+                    <a href="#153">this</a>.allocate_str(<span class="kw-2">&amp;</span><a href="#158">filename</a>, <a href="../machine.rs.html#72">MiriMemoryKind::Rust</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), Mutability::Mut);
+
+                this.write_immediate(
+                    name_alloc.to_ref(this),
+                    <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">0</span>)<span class="question-mark">?</span>.into(),
+                )<span class="question-mark">?</span>;
+                this.write_immediate(
+                    filename_alloc.to_ref(this),
+                    <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">1</span>)<span class="question-mark">?</span>.into(),
+                )<span class="question-mark">?</span>;
+            }
+            <span class="number">1 </span>=&gt; {
+                this.write_scalar(
+                    Scalar::from_machine_usize(name.len().try_into().unwrap(), this),
+                    <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">0</span>)<span class="question-mark">?</span>.into(),
+                )<span class="question-mark">?</span>;
+                this.write_scalar(
+                    Scalar::from_machine_usize(filename.len().try_into().unwrap(), this),
+                    <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">1</span>)<span class="question-mark">?</span>.into(),
+                )<span class="question-mark">?</span>;
+            }
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;unknown `miri_resolve_frame` flags {}&quot;</span>, flags),
+        }
+
+        this.write_scalar(Scalar::from_u32(lineno), <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">2</span>)<span class="question-mark">?</span>.into())<span class="question-mark">?</span>;
+        this.write_scalar(Scalar::from_u32(colno), <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">3</span>)<span class="question-mark">?</span>.into())<span class="question-mark">?</span>;
+
+        <span class="comment">// Support a 4-field struct for now - this is deprecated
+        // and slated for removal.
+        </span><span class="kw">if </span>num_fields == <span class="number">5 </span>{
+            this.write_pointer(fn_ptr, <span class="kw-2">&amp;</span>this.mplace_field(<span class="kw-2">&amp;</span>dest, <span class="number">4</span>)<span class="question-mark">?</span>.into())<span class="question-mark">?</span>;
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>handle_miri_resolve_frame_names(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        abi: <a href="../../../rustc_target/spec/abi/enum.Abi.html">Abi</a>,
+        link_name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;],
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#232">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+
+        <span class="kw">let </span>[ptr, flags, name_ptr, filename_ptr] =
+            this.check_shim(abi, Abi::Rust, link_name, args)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>flags = this.read_scalar(flags)<span class="question-mark">?</span>.to_u64()<span class="question-mark">?</span>;
+        <span class="kw">if </span>flags != <span class="number">0 </span>{
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;unknown `miri_resolve_frame_names` flags {}&quot;</span>, flags);
+        }
+
+        <span class="kw">let </span>(<span class="kw">_</span>, <span class="kw">_</span>, name, filename) = this.resolve_frame_pointer(ptr)<span class="question-mark">?</span>;
+
+        this.write_bytes_ptr(this.read_pointer(name_ptr)<span class="question-mark">?</span>, name.bytes())<span class="question-mark">?</span>;
+        this.write_bytes_ptr(this.read_pointer(filename_ptr)<span class="question-mark">?</span>, filename.bytes())<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,1460 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/interpret/intrinsics.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intrinsics.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Intrinsics and other functions that the miri engine executes without
+//! looking at their MIR. Intrinsics/functions supported here are shared by CTFE
+//! and miri.
+
+</span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html">std::convert::TryFrom</a>;
+
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span>rustc_middle::mir::{
+    <a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>,
+    interpret::{<a href="../../../rustc_const_eval/interpret/enum.ConstValue.html">ConstValue</a>, <a href="../../../rustc_const_eval/interpret/struct.GlobalId.html">GlobalId</a>, <a href="../../../rustc_const_eval/interpret/type.InterpResult.html">InterpResult</a>, <a href="../../../rustc_const_eval/interpret/trait.PointerArithmetic.html">PointerArithmetic</a>, <a href="../../../rustc_const_eval/interpret/enum.Scalar.html">Scalar</a>},
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.BinOp.html">BinOp</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.NonDivergingIntrinsic.html">NonDivergingIntrinsic</a>,
+};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">rustc_middle::ty</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">rustc_middle::ty::layout::LayoutOf</a> <span class="kw">as _</span>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/type.SubstsRef.html">rustc_middle::ty::subst::SubstsRef</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_target::abi::{<a href="../../../rustc_target/abi/enum.Abi.html">Abi</a>, <a href="../../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../../rustc_target/abi/enum.Primitive.html">Primitive</a>, <a href="../../../rustc_target/abi/struct.Size.html">Size</a>};
+
+<span class="kw">use super</span>::{
+    <a href="util.rs.html#11-13">util::ensure_monomorphic_enough</a>, <a href="../../../rustc_const_eval/interpret/enum.CheckInAllocMsg.html">CheckInAllocMsg</a>, <a href="operand.rs.html#88">ImmTy</a>, <a href="eval_context.rs.html#28">InterpCx</a>, <a href="machine.rs.html#84">Machine</a>, <a href="operand.rs.html#151">OpTy</a>, <a href="place.rs.html#77">PlaceTy</a>,
+    <a href="../../../rustc_const_eval/interpret/struct.Pointer.html">Pointer</a>,
+};
+
+<span class="kw">mod </span><a href="intrinsics/caller_location.rs.html#1-130">caller_location</a>;
+<span class="kw">mod </span><a href="intrinsics/type_name.rs.html#1-196">type_name</a>;
+
+<span class="kw">fn </span>numeric_intrinsic&lt;Prov&gt;(name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, bits: <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>, kind: <a href="../../../rustc_target/abi/enum.Primitive.html">Primitive</a>) -&gt; Scalar&lt;Prov&gt; {
+    <span class="kw">let </span>size = <span class="kw">match </span><a href="#28">kind</a> {
+        Primitive::Int(integer, <span class="kw">_</span>) =&gt; <a href="#30">integer</a>.size(),
+        <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;invalid `{}` argument: {:?}&quot;</span>, name, bits),
+    };
+    <span class="kw">let </span>extra = <span class="number">128 </span>- u128::from(<a href="#29">size</a>.bits());
+    <span class="kw">let </span>bits_out = <span class="kw">match </span><a href="#28">name</a> {
+        sym::ctpop =&gt; u128::from(<a href="#28">bits</a>.count_ones()),
+        sym::ctlz =&gt; u128::from(<a href="#28">bits</a>.leading_zeros()) - <a href="#33">extra</a>,
+        sym::cttz =&gt; u128::from((<a href="#28">bits</a> &lt;&lt; <a href="#33">extra</a>).trailing_zeros()) - <a href="#33">extra</a>,
+        sym::bswap =&gt; (<a href="#28">bits</a> &lt;&lt; <a href="#33">extra</a>).swap_bytes(),
+        sym::bitreverse =&gt; (<a href="#28">bits</a> &lt;&lt; <a href="#33">extra</a>).reverse_bits(),
+        <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;not a numeric intrinsic: {}&quot;</span>, name),
+    };
+    Scalar::from_uint(<a href="#34">bits_out</a>, <a href="#29">size</a>)
+}
+
+<span class="doccomment">/// The logic for all nullary intrinsics is implemented here. These intrinsics don&#39;t get evaluated
+/// inside an `InterpCx` and instead have their value computed directly from rustc internal info.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>eval_nullary_intrinsic&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ConstValue&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">let </span>tp_ty = <a href="#51">substs</a>.type_at(<span class="number">0</span>);
+    <span class="kw">let </span>name = <a href="#48">tcx</a>.item_name(<a href="#50">def_id</a>);
+    <span class="prelude-val">Ok</span>(<span class="kw">match </span><a href="#54">name</a> {
+        sym::type_name =&gt; {
+            ensure_monomorphic_enough(tcx, tp_ty)<span class="question-mark">?</span>;
+            <span class="kw">let </span>alloc = <a href="intrinsics/type_name.rs.html#192">type_name::alloc_type_name</a>(<a href="#48">tcx</a>, <a href="#53">tp_ty</a>);
+            <a href="../../../rustc_const_eval/interpret/enum.ConstValue.html">ConstValue::Slice</a> { data: <a href="#58">alloc</a>, start: <span class="number">0</span>, end: <a href="#58">alloc</a>.inner().len() }
+        }
+        sym::needs_drop =&gt; {
+            ensure_monomorphic_enough(tcx, tp_ty)<span class="question-mark">?</span>;
+            ConstValue::from_bool(<a href="#53">tp_ty</a>.needs_drop(<a href="#48">tcx</a>, <a href="#49">param_env</a>))
+        }
+        sym::pref_align_of =&gt; {
+            <span class="comment">// Correctly handles non-monomorphic calls, so there is no need for ensure_monomorphic_enough.
+            </span><span class="kw">let </span>layout = tcx.layout_of(param_env.and(tp_ty)).map_err(|e| <span class="macro">err_inval!</span>(Layout(e)))<span class="question-mark">?</span>;
+            ConstValue::from_machine_usize(<a href="#67">layout</a>.align.pref.bytes(), <span class="kw-2">&amp;</span><a href="#48">tcx</a>)
+        }
+        sym::type_id =&gt; {
+            ensure_monomorphic_enough(tcx, tp_ty)<span class="question-mark">?</span>;
+            ConstValue::from_u64(<a href="#48">tcx</a>.type_id_hash(<a href="#53">tp_ty</a>))
+        }
+        sym::variant_count =&gt; <span class="kw">match </span><a href="#53">tp_ty</a>.kind() {
+            <span class="comment">// Correctly handles non-monomorphic calls, so there is no need for ensure_monomorphic_enough.
+            </span>ty::Adt(<span class="kw-2">ref </span>adt, <span class="kw">_</span>) =&gt; {
+                ConstValue::from_machine_usize(<a href="#76">adt</a>.variants().len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>, <span class="kw-2">&amp;</span><a href="#48">tcx</a>)
+            }
+            ty::Projection(<span class="kw">_</span>)
+            | ty::Opaque(<span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::Param(<span class="kw">_</span>)
+            | ty::Placeholder(<span class="kw">_</span>)
+            | ty::Infer(<span class="kw">_</span>) =&gt; <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_inval.html">throw_inval!</a>(TooGeneric),
+            ty::Bound(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;bound ty during ctfe&quot;</span>),
+            ty::Bool
+            | ty::Char
+            | ty::Int(<span class="kw">_</span>)
+            | ty::Uint(<span class="kw">_</span>)
+            | ty::Float(<span class="kw">_</span>)
+            | ty::Foreign(<span class="kw">_</span>)
+            | ty::Str
+            | ty::Array(<span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::Slice(<span class="kw">_</span>)
+            | ty::RawPtr(<span class="kw">_</span>)
+            | ty::Ref(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::FnDef(<span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::FnPtr(<span class="kw">_</span>)
+            | ty::Dynamic(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::Closure(<span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::Generator(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>)
+            | ty::GeneratorWitness(<span class="kw">_</span>)
+            | ty::Never
+            | ty::Tuple(<span class="kw">_</span>)
+            | ty::Error(<span class="kw">_</span>) =&gt; ConstValue::from_machine_usize(<span class="number">0u64</span>, <span class="kw-2">&amp;</span><a href="#48">tcx</a>),
+        },
+        other =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;`{}` is not a zero arg intrinsic&quot;</span>, other),
+    })
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, M: Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt; {
+    <span class="doccomment">/// Returns `true` if emulation happened.
+    /// Here we implement the intrinsics that are common to all Miri instances; individual machines can add their own
+    /// intrinsic handling.
+    </span><span class="kw">pub fn </span>emulate_intrinsic(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        instance: ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;],
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        ret: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">mir::BasicBlock</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt; {
+        <span class="kw">let </span>substs = <a href="#116">instance</a>.substs;
+        <span class="kw">let </span>intrinsic_name = <a class="self" href="#115">self</a>.tcx.item_name(<a href="#116">instance</a>.def_id());
+
+        <span class="comment">// First handle intrinsics without return place.
+        </span><span class="kw">let </span>ret = <span class="kw">match </span><a href="#119">ret</a> {
+            <span class="prelude-val">None </span>=&gt; <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                sym::transmute =&gt; <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;transmuting to uninhabited type&quot;</span>),
+                sym::abort =&gt; M::abort(<span class="self">self</span>, <span class="string">&quot;the program aborted execution&quot;</span>.to_owned())<span class="question-mark">?</span>,
+                <span class="comment">// Unsupported diverging intrinsic.
+                </span><span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">false</span>),
+            },
+            <span class="prelude-val">Some</span>(p) =&gt; <a href="#132">p</a>,
+        };
+
+        <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+            sym::caller_location =&gt; {
+                <span class="kw">let </span>span = <a class="self" href="#115">self</a>.<a href="intrinsics/caller_location.rs.html#18">find_closest_untracked_caller_location</a>();
+                <span class="kw">let </span>location = <a class="self" href="#115">self</a>.<a href="intrinsics/caller_location.rs.html#126">alloc_caller_location_for_span</a>(<a href="#137">span</a>);
+                <span class="self">self</span>.write_immediate(location.to_ref(<span class="self">self</span>), dest)<span class="question-mark">?</span>;
+            }
+
+            sym::min_align_of_val | sym::size_of_val =&gt; {
+                <span class="comment">// Avoid `deref_operand` -- this is not a deref, the ptr does not have to be
+                // dereferenceable!
+                </span><span class="kw">let </span>place = <span class="self">self</span>.ref_to_mplace(<span class="kw-2">&amp;</span><span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(size, align) = <span class="self">self
+                    </span>.size_and_align_of_mplace(<span class="kw-2">&amp;</span>place)<span class="question-mark">?
+                    </span>.ok_or_else(|| <span class="macro">err_unsup_format!</span>(<span class="string">&quot;`extern type` does not have known layout&quot;</span>))<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>result = <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                    sym::min_align_of_val =&gt; <a href="#146">align</a>.bytes(),
+                    sym::size_of_val =&gt; <a href="#146">size</a>.bytes(),
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                };
+
+                <span class="self">self</span>.write_scalar(Scalar::from_machine_usize(result, <span class="self">self</span>), dest)<span class="question-mark">?</span>;
+            }
+
+            sym::pref_align_of
+            | sym::needs_drop
+            | sym::type_id
+            | sym::type_name
+            | sym::variant_count =&gt; {
+                <span class="kw">let </span>gid = <a href="../../../rustc_const_eval/interpret/struct.GlobalId.html">GlobalId</a> { <a href="#116">instance</a>, promoted: <span class="prelude-val">None </span>};
+                <span class="kw">let </span>ty = <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                    sym::pref_align_of | sym::variant_count =&gt; <a class="self" href="#115">self</a>.tcx.types.usize,
+                    sym::needs_drop =&gt; <a class="self" href="#115">self</a>.tcx.types.bool,
+                    sym::type_id =&gt; <a class="self" href="#115">self</a>.tcx.types.u64,
+                    sym::type_name =&gt; <a class="self" href="#115">self</a>.tcx.mk_static_str(),
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                };
+                <span class="kw">let </span>val =
+                    <span class="self">self</span>.tcx.const_eval_global_id(<span class="self">self</span>.param_env, gid, <span class="prelude-val">Some</span>(<span class="self">self</span>.tcx.span))<span class="question-mark">?</span>;
+                <span class="kw">let </span>val = <span class="self">self</span>.const_val_to_op(val, ty, <span class="prelude-val">Some</span>(dest.layout))<span class="question-mark">?</span>;
+                <span class="self">self</span>.copy_op(<span class="kw-2">&amp;</span>val, dest, <span class="comment">/*allow_transmute*/ </span><span class="bool-val">false</span>)<span class="question-mark">?</span>;
+            }
+
+            sym::ctpop
+            | sym::cttz
+            | sym::cttz_nonzero
+            | sym::ctlz
+            | sym::ctlz_nonzero
+            | sym::bswap
+            | sym::bitreverse =&gt; {
+                <span class="kw">let </span>ty = <a href="#121">substs</a>.type_at(<span class="number">0</span>);
+                <span class="kw">let </span>layout_of = <span class="self">self</span>.layout_of(ty)<span class="question-mark">?</span>;
+                <span class="kw">let </span>val = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>bits = val.to_bits(layout_of.size)<span class="question-mark">?</span>;
+                <span class="kw">let </span>kind = <span class="kw">match </span><a href="#186">layout_of</a>.abi {
+                    Abi::Scalar(scalar) =&gt; <a href="#190">scalar</a>.primitive(),
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                        <span class="self">self</span>.cur_span(),
+                        <span class="string">&quot;{} called on invalid type {:?}&quot;</span>,
+                        intrinsic_name,
+                        ty
+                    ),
+                };
+                <span class="kw">let </span>(nonzero, intrinsic_name) = <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                    sym::cttz_nonzero =&gt; (<span class="bool-val">true</span>, sym::cttz),
+                    sym::ctlz_nonzero =&gt; (<span class="bool-val">true</span>, sym::ctlz),
+                    other =&gt; (<span class="bool-val">false</span>, <a href="#201">other</a>),
+                };
+                <span class="kw">if </span>nonzero &amp;&amp; bits == <span class="number">0 </span>{
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;`{}_nonzero` called on 0&quot;</span>, intrinsic_name);
+                }
+                <span class="kw">let </span>out_val = <a href="#28">numeric_intrinsic</a>(<a href="#198">intrinsic_name</a>, <a href="#188">bits</a>, <a href="#189">kind</a>);
+                <span class="self">self</span>.write_scalar(out_val, dest)<span class="question-mark">?</span>;
+            }
+            sym::add_with_overflow | sym::sub_with_overflow | sym::mul_with_overflow =&gt; {
+                <span class="kw">let </span>lhs = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>rhs = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>bin_op = <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                    sym::add_with_overflow =&gt; BinOp::Add,
+                    sym::sub_with_overflow =&gt; BinOp::Sub,
+                    sym::mul_with_overflow =&gt; BinOp::Mul,
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                };
+                <span class="self">self</span>.binop_with_overflow(
+                    bin_op, <span class="comment">/*force_overflow_checks*/ </span><span class="bool-val">true</span>, <span class="kw-2">&amp;</span>lhs, <span class="kw-2">&amp;</span>rhs, dest,
+                )<span class="question-mark">?</span>;
+            }
+            sym::saturating_add | sym::saturating_sub =&gt; {
+                <span class="kw">let </span>l = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>r = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>val = <span class="self">self</span>.saturating_arith(
+                    <span class="kw">if </span>intrinsic_name == sym::saturating_add { BinOp::Add } <span class="kw">else </span>{ BinOp::Sub },
+                    <span class="kw-2">&amp;</span>l,
+                    <span class="kw-2">&amp;</span>r,
+                )<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_scalar(val, dest)<span class="question-mark">?</span>;
+            }
+            sym::discriminant_value =&gt; {
+                <span class="kw">let </span>place = <span class="self">self</span>.deref_operand(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>discr_val = <span class="self">self</span>.read_discriminant(<span class="kw-2">&amp;</span>place.into())<span class="question-mark">?</span>.<span class="number">0</span>;
+                <span class="self">self</span>.write_scalar(discr_val, dest)<span class="question-mark">?</span>;
+            }
+            sym::unchecked_shl
+            | sym::unchecked_shr
+            | sym::unchecked_add
+            | sym::unchecked_sub
+            | sym::unchecked_mul
+            | sym::unchecked_div
+            | sym::unchecked_rem =&gt; {
+                <span class="kw">let </span>l = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>r = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>bin_op = <span class="kw">match </span><a href="#122">intrinsic_name</a> {
+                    sym::unchecked_shl =&gt; BinOp::Shl,
+                    sym::unchecked_shr =&gt; BinOp::Shr,
+                    sym::unchecked_add =&gt; BinOp::Add,
+                    sym::unchecked_sub =&gt; BinOp::Sub,
+                    sym::unchecked_mul =&gt; BinOp::Mul,
+                    sym::unchecked_div =&gt; BinOp::Div,
+                    sym::unchecked_rem =&gt; BinOp::Rem,
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(),
+                };
+                <span class="kw">let </span>(val, overflowed, _ty) = <span class="self">self</span>.overflowing_binary_op(bin_op, <span class="kw-2">&amp;</span>l, <span class="kw-2">&amp;</span>r)<span class="question-mark">?</span>;
+                <span class="kw">if </span>overflowed {
+                    <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(substs.type_at(<span class="number">0</span>))<span class="question-mark">?</span>;
+                    <span class="kw">let </span>r_val = r.to_scalar().to_bits(layout.size)<span class="question-mark">?</span>;
+                    <span class="kw">if let </span>sym::unchecked_shl | sym::unchecked_shr = <a href="#122">intrinsic_name</a> {
+                        <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;overflowing shift by {} in `{}`&quot;</span>, r_val, intrinsic_name);
+                    } <span class="kw">else </span>{
+                        <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;overflow executing `{}`&quot;</span>, intrinsic_name);
+                    }
+                }
+                <span class="self">self</span>.write_scalar(val, dest)<span class="question-mark">?</span>;
+            }
+            sym::rotate_left | sym::rotate_right =&gt; {
+                <span class="comment">// rotate_left: (X &lt;&lt; (S % BW)) | (X &gt;&gt; ((BW - S) % BW))
+                // rotate_right: (X &lt;&lt; ((BW - S) % BW)) | (X &gt;&gt; (S % BW))
+                </span><span class="kw">let </span>layout = <span class="self">self</span>.layout_of(substs.type_at(<span class="number">0</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>val = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>val_bits = val.to_bits(layout.size)<span class="question-mark">?</span>;
+                <span class="kw">let </span>raw_shift = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>raw_shift_bits = raw_shift.to_bits(layout.size)<span class="question-mark">?</span>;
+                <span class="kw">let </span>width_bits = u128::from(<a href="#271">layout</a>.size.bits());
+                <span class="kw">let </span>shift_bits = <a href="#275">raw_shift_bits</a> % <a href="#276">width_bits</a>;
+                <span class="kw">let </span>inv_shift_bits = (<a href="#276">width_bits</a> - <a href="#277">shift_bits</a>) % <a href="#276">width_bits</a>;
+                <span class="kw">let </span>result_bits = <span class="kw">if </span>intrinsic_name == sym::rotate_left {
+                    (<a href="#273">val_bits</a> &lt;&lt; <a href="#277">shift_bits</a>) | (<a href="#273">val_bits</a> &gt;&gt; <a href="#278">inv_shift_bits</a>)
+                } <span class="kw">else </span>{
+                    (<a href="#273">val_bits</a> &gt;&gt; <a href="#277">shift_bits</a>) | (<a href="#273">val_bits</a> &lt;&lt; <a href="#278">inv_shift_bits</a>)
+                };
+                <span class="kw">let </span>truncated_bits = <a class="self" href="#115">self</a>.<a href="eval_context.rs.html#462">truncate</a>(<a href="#279">result_bits</a>, <a href="#271">layout</a>);
+                <span class="kw">let </span>result = Scalar::from_uint(<a href="#284">truncated_bits</a>, <a href="#271">layout</a>.size);
+                <span class="self">self</span>.write_scalar(result, dest)<span class="question-mark">?</span>;
+            }
+            sym::copy =&gt; {
+                <span class="self">self</span>.copy_intrinsic(<span class="kw-2">&amp;</span>args[<span class="number">0</span>], <span class="kw-2">&amp;</span>args[<span class="number">1</span>], <span class="kw-2">&amp;</span>args[<span class="number">2</span>], <span class="comment">/*nonoverlapping*/ </span><span class="bool-val">false</span>)<span class="question-mark">?</span>;
+            }
+            sym::write_bytes =&gt; {
+                <span class="self">self</span>.write_bytes_intrinsic(<span class="kw-2">&amp;</span>args[<span class="number">0</span>], <span class="kw-2">&amp;</span>args[<span class="number">1</span>], <span class="kw-2">&amp;</span>args[<span class="number">2</span>])<span class="question-mark">?</span>;
+            }
+            sym::offset =&gt; {
+                <span class="kw">let </span>ptr = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>offset_count = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>.to_machine_isize(<span class="self">self</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>pointee_ty = <a href="#121">substs</a>.type_at(<span class="number">0</span>);
+
+                <span class="kw">let </span>offset_ptr = <span class="self">self</span>.ptr_offset_inbounds(ptr, pointee_ty, offset_count)<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_pointer(offset_ptr, dest)<span class="question-mark">?</span>;
+            }
+            sym::arith_offset =&gt; {
+                <span class="kw">let </span>ptr = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>offset_count = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>.to_machine_isize(<span class="self">self</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>pointee_ty = <a href="#121">substs</a>.type_at(<span class="number">0</span>);
+
+                <span class="kw">let </span>pointee_size = i64::try_from(<span class="self">self</span>.layout_of(pointee_ty)<span class="question-mark">?</span>.size.bytes()).unwrap();
+                <span class="kw">let </span>offset_bytes = <a href="#304">offset_count</a>.wrapping_mul(<a href="#307">pointee_size</a>);
+                <span class="kw">let </span>offset_ptr = <a href="#303">ptr</a>.wrapping_signed_offset(<a href="#308">offset_bytes</a>, <a class="self" href="#115">self</a>);
+                <span class="self">self</span>.write_pointer(offset_ptr, dest)<span class="question-mark">?</span>;
+            }
+            sym::ptr_offset_from | sym::ptr_offset_from_unsigned =&gt; {
+                <span class="kw">let </span>a = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>b = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>usize_layout = <span class="self">self</span>.layout_of(<span class="self">self</span>.tcx.types.usize)<span class="question-mark">?</span>;
+                <span class="kw">let </span>isize_layout = <span class="self">self</span>.layout_of(<span class="self">self</span>.tcx.types.isize)<span class="question-mark">?</span>;
+
+                <span class="comment">// Get offsets for both that are at least relative to the same base.
+                </span><span class="kw">let </span>(a_offset, b_offset) =
+                    <span class="kw">match </span>(<a class="self" href="#115">self</a>.<a href="memory.rs.html#1200-1203">ptr_try_get_alloc_id</a>(<a href="#313">a</a>), <a class="self" href="#115">self</a>.<a href="memory.rs.html#1200-1203">ptr_try_get_alloc_id</a>(<a href="#314">b</a>)) {
+                        (<span class="prelude-val">Err</span>(a), <span class="prelude-val">Err</span>(b)) =&gt; {
+                            <span class="comment">// Neither pointer points to an allocation.
+                            // If these are inequal or null, this *will* fail the deref check below.
+                            </span>(<a href="#322">a</a>, <a href="#322">b</a>)
+                        }
+                        (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; {
+                            <span class="comment">// We managed to find a valid allocation for one pointer, but not the other.
+                            // That means they are definitely not pointing to the same allocation.
+                            </span><a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                                <span class="string">&quot;`{}` called on pointers into different allocations&quot;</span>,
+                                intrinsic_name
+                            );
+                        }
+                        (<span class="prelude-val">Ok</span>((a_alloc_id, a_offset, <span class="kw">_</span>)), <span class="prelude-val">Ok</span>((b_alloc_id, b_offset, <span class="kw">_</span>))) =&gt; {
+                            <span class="comment">// Found allocation for both. They must be into the same allocation.
+                            </span><span class="kw">if </span>a_alloc_id != b_alloc_id {
+                                <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                                    <span class="string">&quot;`{}` called on pointers into different allocations&quot;</span>,
+                                    intrinsic_name
+                                );
+                            }
+                            <span class="comment">// Use these offsets for distance calculation.
+                            </span>(<a href="#335">a_offset</a>.bytes(), <a href="#335">b_offset</a>.bytes())
+                        }
+                    };
+
+                <span class="comment">// Compute distance.
+                </span><span class="kw">let </span>dist = {
+                    <span class="comment">// Addresses are unsigned, so this is a `usize` computation. We have to do the
+                    // overflow check separately anyway.
+                    </span><span class="kw">let </span>(val, overflowed, _ty) = {
+                        <span class="kw">let </span>a_offset = ImmTy::from_uint(<a href="#320">a_offset</a>, <a href="#316">usize_layout</a>);
+                        <span class="kw">let </span>b_offset = ImmTy::from_uint(<a href="#320">b_offset</a>, <a href="#316">usize_layout</a>);
+                        <span class="self">self</span>.overflowing_binary_op(BinOp::Sub, <span class="kw-2">&amp;</span>a_offset, <span class="kw-2">&amp;</span>b_offset)<span class="question-mark">?
+                    </span>};
+                    <span class="kw">if </span>overflowed {
+                        <span class="comment">// a &lt; b
+                        </span><span class="kw">if </span>intrinsic_name == sym::ptr_offset_from_unsigned {
+                            <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                                <span class="string">&quot;`{}` called when first pointer has smaller offset than second: {} &lt; {}&quot;</span>,
+                                intrinsic_name,
+                                a_offset,
+                                b_offset,
+                            );
+                        }
+                        <span class="comment">// The signed form of the intrinsic allows this. If we interpret the
+                        // difference as isize, we&#39;ll get the proper signed difference. If that
+                        // seems *positive*, they were more than isize::MAX apart.
+                        </span><span class="kw">let </span>dist = val.to_machine_isize(<span class="self">self</span>)<span class="question-mark">?</span>;
+                        <span class="kw">if </span>dist &gt;= <span class="number">0 </span>{
+                            <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                                <span class="string">&quot;`{}` called when first pointer is too far before second&quot;</span>,
+                                intrinsic_name
+                            );
+                        }
+                        <a href="#370">dist</a>
+                    } <span class="kw">else </span>{
+                        <span class="comment">// b &gt;= a
+                        </span><span class="kw">let </span>dist = val.to_machine_isize(<span class="self">self</span>)<span class="question-mark">?</span>;
+                        <span class="comment">// If converting to isize produced a *negative* result, we had an overflow
+                        // because they were more than isize::MAX apart.
+                        </span><span class="kw">if </span>dist &lt; <span class="number">0 </span>{
+                            <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                                <span class="string">&quot;`{}` called when first pointer is too far ahead of second&quot;</span>,
+                                intrinsic_name
+                            );
+                        }
+                        <a href="#380">dist</a>
+                    }
+                };
+
+                <span class="comment">// Check that the range between them is dereferenceable (&quot;in-bounds or one past the
+                // end of the same allocation&quot;). This is like the check in ptr_offset_inbounds.
+                </span><span class="kw">let </span>min_ptr = <span class="kw">if </span>dist &gt;= <span class="number">0 </span>{ <a href="#314">b</a> } <span class="kw">else </span>{ <a href="#313">a</a> };
+                <span class="self">self</span>.check_ptr_access_align(
+                    min_ptr,
+                    Size::from_bytes(dist.unsigned_abs()),
+                    Align::ONE,
+                    CheckInAllocMsg::OffsetFromTest,
+                )<span class="question-mark">?</span>;
+
+                <span class="comment">// Perform division by size to compute return value.
+                </span><span class="kw">let </span>ret_layout = <span class="kw">if </span>intrinsic_name == sym::ptr_offset_from_unsigned {
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="number">0 </span>&lt;= dist &amp;&amp; dist &lt;= <span class="self">self</span>.machine_isize_max());
+                    <a href="#316">usize_layout</a>
+                } <span class="kw">else </span>{
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.machine_isize_min() &lt;= dist &amp;&amp; dist &lt;= <span class="self">self</span>.machine_isize_max());
+                    <a href="#317">isize_layout</a>
+                };
+                <span class="kw">let </span>pointee_layout = <span class="self">self</span>.layout_of(substs.type_at(<span class="number">0</span>))<span class="question-mark">?</span>;
+                <span class="comment">// If ret_layout is unsigned, we checked that so is the distance, so we are good.
+                </span><span class="kw">let </span>val = ImmTy::from_int(<a href="#349">dist</a>, <a href="#404">ret_layout</a>);
+                <span class="kw">let </span>size = ImmTy::from_int(<a href="#411">pointee_layout</a>.size.bytes(), <a href="#404">ret_layout</a>);
+                <span class="self">self</span>.exact_div(<span class="kw-2">&amp;</span>val, <span class="kw-2">&amp;</span>size, dest)<span class="question-mark">?</span>;
+            }
+
+            sym::transmute =&gt; {
+                <span class="self">self</span>.copy_op(<span class="kw-2">&amp;</span>args[<span class="number">0</span>], dest, <span class="comment">/*allow_transmute*/ </span><span class="bool-val">true</span>)<span class="question-mark">?</span>;
+            }
+            sym::assert_inhabited | sym::assert_zero_valid | sym::assert_uninit_valid =&gt; {
+                <span class="kw">let </span>ty = <a href="#116">instance</a>.substs.type_at(<span class="number">0</span>);
+                <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(ty)<span class="question-mark">?</span>;
+
+                <span class="comment">// For *all* intrinsics we first check `is_uninhabited` to give a more specific
+                // error message.
+                </span><span class="kw">if </span>layout.abi.is_uninhabited() {
+                    <span class="comment">// The run-time intrinsic panics just to get a good backtrace; here we abort
+                    // since there is no problem showing a backtrace even for aborts.
+                    </span>M::abort(
+                        <span class="self">self</span>,
+                        <span class="macro">format!</span>(
+                            <span class="string">&quot;aborted execution: attempted to instantiate uninhabited type `{}`&quot;</span>,
+                            ty
+                        ),
+                    )<span class="question-mark">?</span>;
+                }
+
+                <span class="kw">if </span>intrinsic_name == sym::assert_zero_valid {
+                    <span class="kw">let </span>should_panic = !<a class="self" href="#115">self</a>.tcx.permits_zero_init(<a href="#423">layout</a>);
+
+                    <span class="kw">if </span>should_panic {
+                        M::abort(
+                            <span class="self">self</span>,
+                            <span class="macro">format!</span>(
+                                <span class="string">&quot;aborted execution: attempted to zero-initialize type `{}`, which is invalid&quot;</span>,
+                                ty
+                            ),
+                        )<span class="question-mark">?</span>;
+                    }
+                }
+
+                <span class="kw">if </span>intrinsic_name == sym::assert_uninit_valid {
+                    <span class="kw">let </span>should_panic = !<a class="self" href="#115">self</a>.tcx.permits_uninit_init(<a href="#423">layout</a>);
+
+                    <span class="kw">if </span>should_panic {
+                        M::abort(
+                            <span class="self">self</span>,
+                            <span class="macro">format!</span>(
+                                <span class="string">&quot;aborted execution: attempted to leave type `{}` uninitialized, which is invalid&quot;</span>,
+                                ty
+                            ),
+                        )<span class="question-mark">?</span>;
+                    }
+                }
+            }
+            sym::simd_insert =&gt; {
+                <span class="kw">let </span>index = u64::from(<span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>.to_u32()<span class="question-mark">?</span>);
+                <span class="kw">let </span>elem = <span class="kw-2">&amp;</span><a href="#117">args</a>[<span class="number">2</span>];
+                <span class="kw">let </span>(input, input_len) = <span class="self">self</span>.operand_to_simd(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>(dest, dest_len) = <span class="self">self</span>.place_to_simd(dest)<span class="question-mark">?</span>;
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(input_len, dest_len, <span class="string">&quot;Return vector length must match input length&quot;</span>);
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                    index &lt; dest_len,
+                    <span class="string">&quot;Index `{}` must be in bounds of vector with length {}`&quot;</span>,
+                    index,
+                    dest_len
+                );
+
+                <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..dest_len {
+                    <span class="kw">let </span>place = <span class="self">self</span>.mplace_index(<span class="kw-2">&amp;</span>dest, i)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>value = <span class="kw">if </span>i == index {
+                        elem.clone()
+                    } <span class="kw">else </span>{
+                        <span class="self">self</span>.mplace_index(<span class="kw-2">&amp;</span>input, i)<span class="question-mark">?</span>.into()
+                    };
+                    <span class="self">self</span>.copy_op(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>place.into(), <span class="comment">/*allow_transmute*/ </span><span class="bool-val">false</span>)<span class="question-mark">?</span>;
+                }
+            }
+            sym::simd_extract =&gt; {
+                <span class="kw">let </span>index = u64::from(<span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>.to_u32()<span class="question-mark">?</span>);
+                <span class="kw">let </span>(input, input_len) = <span class="self">self</span>.operand_to_simd(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                    index &lt; input_len,
+                    <span class="string">&quot;index `{}` must be in bounds of vector with length `{}`&quot;</span>,
+                    index,
+                    input_len
+                );
+                <span class="self">self</span>.copy_op(
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.mplace_index(<span class="kw-2">&amp;</span>input, index)<span class="question-mark">?</span>.into(),
+                    dest,
+                    <span class="comment">/*allow_transmute*/ </span><span class="bool-val">false</span>,
+                )<span class="question-mark">?</span>;
+            }
+            sym::likely | sym::unlikely | sym::black_box =&gt; {
+                <span class="comment">// These just return their argument
+                </span><span class="self">self</span>.copy_op(<span class="kw-2">&amp;</span>args[<span class="number">0</span>], dest, <span class="comment">/*allow_transmute*/ </span><span class="bool-val">false</span>)<span class="question-mark">?</span>;
+            }
+            sym::raw_eq =&gt; {
+                <span class="kw">let </span>result = <span class="self">self</span>.raw_eq_intrinsic(<span class="kw-2">&amp;</span>args[<span class="number">0</span>], <span class="kw-2">&amp;</span>args[<span class="number">1</span>])<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_scalar(result, dest)<span class="question-mark">?</span>;
+            }
+
+            sym::vtable_size =&gt; {
+                <span class="kw">let </span>ptr = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>(size, _align) = <span class="self">self</span>.get_vtable_size_and_align(ptr)<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_scalar(Scalar::from_machine_usize(size.bytes(), <span class="self">self</span>), dest)<span class="question-mark">?</span>;
+            }
+            sym::vtable_align =&gt; {
+                <span class="kw">let </span>ptr = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>args[<span class="number">0</span>])<span class="question-mark">?</span>;
+                <span class="kw">let </span>(_size, align) = <span class="self">self</span>.get_vtable_size_and_align(ptr)<span class="question-mark">?</span>;
+                <span class="self">self</span>.write_scalar(Scalar::from_machine_usize(align.bytes(), <span class="self">self</span>), dest)<span class="question-mark">?</span>;
+            }
+
+            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">false</span>),
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;{:?}&quot;</span>, <span class="self">self</span>.dump_place(<span class="kw-2">**</span>dest));
+        <a class="self" href="#115">self</a>.<a href="eval_context.rs.html#722">go_to_block</a>(<a href="#125">ret</a>);
+        <span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>emulate_nondiverging_intrinsic(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        intrinsic: <span class="kw-2">&amp;</span>NonDivergingIntrinsic&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a href="#535">intrinsic</a> {
+            NonDivergingIntrinsic::Assume(op) =&gt; {
+                <span class="kw">let </span>op = <span class="self">self</span>.eval_operand(op, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>cond = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>op)<span class="question-mark">?</span>.to_bool()<span class="question-mark">?</span>;
+                <span class="kw">if </span>!cond {
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;`assume` called with `false`&quot;</span>);
+                }
+                <span class="prelude-val">Ok</span>(())
+            }
+            NonDivergingIntrinsic::CopyNonOverlapping(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/struct.CopyNonOverlapping.html">mir::CopyNonOverlapping</a> {
+                count,
+                src,
+                dst,
+            }) =&gt; {
+                <span class="kw">let </span>src = <span class="self">self</span>.eval_operand(src, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>dst = <span class="self">self</span>.eval_operand(dst, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>count = <span class="self">self</span>.eval_operand(count, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                <a class="self" href="#534">self</a>.<a href="#654-660">copy_intrinsic</a>(<span class="kw-2">&amp;</span><a href="#551">src</a>, <span class="kw-2">&amp;</span><a href="#552">dst</a>, <span class="kw-2">&amp;</span><a href="#553">count</a>, <span class="comment">/* nonoverlapping */ </span><span class="bool-val">true</span>)
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>exact_div(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        a: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        b: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        dest: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Performs an exact division, resulting in undefined behavior where
+        // `x % y != 0` or `y == 0` or `x == T::MIN &amp;&amp; y == -1`.
+        // First, check x % y != 0 (or if that computation overflows).
+        </span><span class="kw">let </span>(res, overflow, _ty) = <span class="self">self</span>.overflowing_binary_op(BinOp::Rem, <span class="kw-2">&amp;</span>a, <span class="kw-2">&amp;</span>b)<span class="question-mark">?</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!overflow); <span class="comment">// All overflow is UB, so this should never return on overflow.
+        </span><span class="kw">if </span>res.assert_bits(a.layout.size) != <span class="number">0 </span>{
+            <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;exact_div: {} cannot be divided by {} without remainder&quot;</span>, a, b)
+        }
+        <span class="comment">// `Rem` says this is all right, so we can let `Div` do its job.
+        </span><a class="self" href="#560">self</a>.<a href="operator.rs.html#58-64">binop_ignore_overflow</a>(BinOp::Div, <span class="kw-2">&amp;</span><a href="#561">a</a>, <span class="kw-2">&amp;</span><a href="#562">b</a>, <a href="#563">dest</a>)
+    }
+
+    <span class="kw">pub fn </span>saturating_arith(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        mir_op: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.BinOp.html">BinOp</a>,
+        l: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        r: <span class="kw-2">&amp;</span>ImmTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;M::Provenance&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="macro">matches!</span>(mir_op, BinOp::Add | BinOp::Sub));
+        <span class="kw">let </span>(val, overflowed, _ty) = <span class="self">self</span>.overflowing_binary_op(mir_op, l, r)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="kw">if </span>overflowed {
+            <span class="kw">let </span>size = <a href="#580">l</a>.layout.size;
+            <span class="kw">let </span>num_bits = <a href="#586">size</a>.bits();
+            <span class="kw">if </span>l.layout.abi.is_signed() {
+                <span class="comment">// For signed ints the saturated value depends on the sign of the first
+                // term since the sign of the second term can be inferred from this and
+                // the fact that the operation has overflowed (if either is 0 no
+                // overflow can occur)
+                </span><span class="kw">let </span>first_term: <a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a> = l.to_scalar().to_bits(l.layout.size)<span class="question-mark">?</span>;
+                <span class="kw">let </span>first_term_positive = <a href="#593">first_term</a> &amp; (<span class="number">1 </span>&lt;&lt; (<a href="#587">num_bits</a> - <span class="number">1</span>)) == <span class="number">0</span>;
+                <span class="kw">if </span>first_term_positive {
+                    <span class="comment">// Negative overflow not possible since the positive first term
+                    // can only increase an (in range) negative term for addition
+                    // or corresponding negated positive term for subtraction
+                    </span>Scalar::from_int(<a href="#586">size</a>.signed_int_max(), <a href="#586">size</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// Positive overflow not possible for similar reason
+                    // max negative
+                    </span>Scalar::from_int(<a href="#586">size</a>.signed_int_min(), <a href="#586">size</a>)
+                }
+            } <span class="kw">else </span>{
+                <span class="comment">// unsigned
+                </span><span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(mir_op, BinOp::Add) {
+                    <span class="comment">// max unsigned
+                    </span>Scalar::from_uint(<a href="#586">size</a>.unsigned_int_max(), <a href="#586">size</a>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// underflow to 0
+                    </span>Scalar::from_uint(<span class="number">0u128</span>, <a href="#586">size</a>)
+                }
+            }
+        } <span class="kw">else </span>{
+            <a href="#584">val</a>
+        })
+    }
+
+    <span class="doccomment">/// Offsets a pointer by some multiple of its type, returning an error if the pointer leaves its
+    /// allocation. For integer pointers, we consider each of them their own tiny allocation of size
+    /// 0, so offset-by-0 (and only 0) is okay -- except that null cannot be offset by _any_ value.
+    </span><span class="kw">pub fn </span>ptr_offset_inbounds(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        ptr: Pointer&lt;<span class="prelude-ty">Option</span>&lt;M::Provenance&gt;&gt;,
+        pointee_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        offset_count: <a href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Pointer&lt;<span class="prelude-ty">Option</span>&lt;M::Provenance&gt;&gt;&gt; {
+        <span class="comment">// We cannot overflow i64 as a type&#39;s size must be &lt;= isize::MAX.
+        </span><span class="kw">let </span>pointee_size = i64::try_from(<span class="self">self</span>.layout_of(pointee_ty)<span class="question-mark">?</span>.size.bytes()).unwrap();
+        <span class="comment">// The computed offset, in bytes, must not overflow an isize.
+        // `checked_mul` enforces a too small bound, but no actual allocation can be big enough for
+        // the difference to be noticeable.
+        </span><span class="kw">let </span>offset_bytes =
+            offset_count.checked_mul(pointee_size).ok_or(<span class="macro">err_ub!</span>(PointerArithOverflow))<span class="question-mark">?</span>;
+        <span class="comment">// The offset being in bounds cannot rely on &quot;wrapping around&quot; the address space.
+        // So, first rule out overflows in the pointer arithmetic.
+        </span><span class="kw">let </span>offset_ptr = ptr.signed_offset(offset_bytes, <span class="self">self</span>)<span class="question-mark">?</span>;
+        <span class="comment">// ptr and offset_ptr must be in bounds of the same allocated object. This means all of the
+        // memory between these pointers must be accessible. Note that we do not require the
+        // pointers to be properly aligned (unlike a read/write operation).
+        </span><span class="kw">let </span>min_ptr = <span class="kw">if </span>offset_bytes &gt;= <span class="number">0 </span>{ <a href="#625">ptr</a> } <span class="kw">else </span>{ <a href="#638">offset_ptr</a> };
+        <span class="comment">// This call handles checking for integer/null pointers.
+        </span><span class="self">self</span>.check_ptr_access_align(
+            min_ptr,
+            Size::from_bytes(offset_bytes.unsigned_abs()),
+            Align::ONE,
+            CheckInAllocMsg::PointerArithmeticTest,
+        )<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="#638">offset_ptr</a>)
+    }
+
+    <span class="doccomment">/// Copy `count*size_of::&lt;T&gt;()` many bytes from `*src` to `*dst`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>copy_intrinsic(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        src: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        dst: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        count: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        nonoverlapping: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>count = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>count)<span class="question-mark">?</span>.to_machine_usize(<span class="self">self</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(src.layout.ty.builtin_deref(<span class="bool-val">true</span>).unwrap().ty)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(size, align) = (<a href="#662">layout</a>.size, <a href="#662">layout</a>.align.abi);
+        <span class="comment">// `checked_mul` enforces a too small bound (the correct one would probably be machine_isize_max),
+        // but no actual allocation can be big enough for the difference to be noticeable.
+        </span><span class="kw">let </span>size = size.checked_mul(count, <span class="self">self</span>).ok_or_else(|| {
+            <span class="macro">err_ub_format!</span>(
+                <span class="string">&quot;overflow computing total size of `{}`&quot;</span>,
+                <span class="kw">if </span>nonoverlapping { <span class="string">&quot;copy_nonoverlapping&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;copy&quot; </span>}
+            )
+        })<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>src = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>src)<span class="question-mark">?</span>;
+        <span class="kw">let </span>dst = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>dst)<span class="question-mark">?</span>;
+
+        <a class="self" href="#655">self</a>.<a href="memory.rs.html#1031-1039">mem_copy</a>(<a href="#673">src</a>, <a href="#663">align</a>, <a href="#674">dst</a>, <a href="#663">align</a>, <a href="#666">size</a>, <a href="#659">nonoverlapping</a>)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>write_bytes_intrinsic(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        dst: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        byte: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        count: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(dst.layout.ty.builtin_deref(<span class="bool-val">true</span>).unwrap().ty)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>dst = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>dst)<span class="question-mark">?</span>;
+        <span class="kw">let </span>byte = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>byte)<span class="question-mark">?</span>.to_u8()<span class="question-mark">?</span>;
+        <span class="kw">let </span>count = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span>count)<span class="question-mark">?</span>.to_machine_usize(<span class="self">self</span>)<span class="question-mark">?</span>;
+
+        <span class="comment">// `checked_mul` enforces a too small bound (the correct one would probably be machine_isize_max),
+        // but no actual allocation can be big enough for the difference to be noticeable.
+        </span><span class="kw">let </span>len = layout
+            .size
+            .checked_mul(count, <span class="self">self</span>)
+            .ok_or_else(|| <span class="macro">err_ub_format!</span>(<span class="string">&quot;overflow computing total size of `write_bytes`&quot;</span>))<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>bytes = std::iter::repeat(<a href="#688">byte</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take</a>(<a href="#693">len</a>.bytes_usize());
+        <a class="self" href="#680">self</a>.<a href="memory.rs.html#994-998">write_bytes_ptr</a>(<a href="#687">dst</a>, <a href="#698">bytes</a>)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>raw_eq_intrinsic(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        lhs: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+        rhs: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;M::Provenance&gt;&gt; {
+        <span class="kw">let </span>layout = <span class="self">self</span>.layout_of(lhs.layout.ty.builtin_deref(<span class="bool-val">true</span>).unwrap().ty)<span class="question-mark">?</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized());
+
+        <span class="kw">let </span>get_bytes = |this: <span class="kw-2">&amp;</span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;,
+                         op: <span class="kw-2">&amp;</span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, &lt;M <span class="kw">as </span>Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;::Provenance&gt;,
+                         size|
+         -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>]&gt; {
+            <span class="kw">let </span>ptr = this.read_pointer(op)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="prelude-val">Some</span>(alloc_ref) = <span class="self">self</span>.get_ptr_alloc(ptr, size, Align::ONE)<span class="question-mark">? </span><span class="kw">else </span>{
+                <span class="comment">// zero-sized access
+                </span><span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="kw-2">&amp;</span>[]);
+            };
+            <span class="kw">if </span>alloc_ref.has_provenance() {
+                <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;`raw_eq` on bytes with provenance&quot;</span>);
+            }
+            <a href="#715">alloc_ref</a>.<a href="memory.rs.html#956">get_bytes_strip_provenance</a>()
+        };
+
+        <span class="kw">let </span>lhs_bytes = get_bytes(<span class="self">self</span>, lhs, layout.size)<span class="question-mark">?</span>;
+        <span class="kw">let </span>rhs_bytes = get_bytes(<span class="self">self</span>, rhs, layout.size)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(Scalar::from_bool(<a href="#725">lhs_bytes</a> == <a href="#726">rhs_bytes</a>))
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

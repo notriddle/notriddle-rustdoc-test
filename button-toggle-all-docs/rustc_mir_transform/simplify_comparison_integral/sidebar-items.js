@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["find_branch_value_info",""]],"struct":[["OptimizationFinder",""],["OptimizationInfo",""],["SimplifyComparisonIntegral","Pass to convert `if` conditions on integrals into switches on the integral. For an example, it turns something like"]]};

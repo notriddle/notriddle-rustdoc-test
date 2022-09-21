@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Def","A visibility node in the layout."]],"struct":[["Ref","A reference in the layout."]]};

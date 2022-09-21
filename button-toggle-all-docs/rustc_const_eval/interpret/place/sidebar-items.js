@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["MemPlaceMeta","Information required for the sound usage of a `MemPlace`."],["Place",""]],"mod":[["size_asserts",""]],"struct":[["MPlaceTy","A MemPlace with its layout. Constructing it is only possible in this module."],["MemPlace",""],["PlaceTy",""]]};

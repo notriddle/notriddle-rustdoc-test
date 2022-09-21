@@ -1,0 +1,1508 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_transform/src/coverage/graph.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>graph.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="mod.rs.html#35"><span class="kw">super</span>::Error</a>;
+
+<span class="kw">use </span><a href="https://docs.rs/itertools/0.8/itertools/trait.Itertools.html">itertools::Itertools</a>;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span>rustc_data_structures::graph::dominators::{<a class="self" href="../../../rustc_data_structures/graph/dominators/index.html">self</a>, <a href="../../../rustc_data_structures/graph/dominators/struct.Dominators.html">Dominators</a>};
+<span class="kw">use </span>rustc_data_structures::graph::{<a class="self" href="../../../rustc_data_structures/graph/index.html">self</a>, <a href="../../../rustc_data_structures/graph/trait.GraphSuccessors.html">GraphSuccessors</a>, <a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">WithNumNodes</a>, <a href="../../../rustc_data_structures/graph/trait.WithStartNode.html">WithStartNode</a>};
+<span class="kw">use </span><a href="../../../rustc_index/bit_set/struct.BitSet.html">rustc_index::bit_set::BitSet</a>;
+<span class="kw">use </span><a href="../../../rustc_index/vec/struct.IndexVec.html">rustc_index::vec::IndexVec</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/index.html">rustc_middle::mir::coverage</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_middle::mir::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlockData.html">BasicBlockData</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/terminator/struct.Terminator.html">Terminator</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind</a>};
+
+<span class="kw">use </span>std::ops::{<a href="https://doc.rust-lang.org/nightly/core/ops/index/trait.Index.html">Index</a>, <a href="https://doc.rust-lang.org/nightly/core/ops/index/trait.IndexMut.html">IndexMut</a>};
+
+<span class="kw">const </span>ID_SEPARATOR: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> = <span class="string">&quot;,&quot;</span>;
+
+<span class="doccomment">/// A coverage-specific simplification of the MIR control flow graph (CFG). The `CoverageGraph`s
+/// nodes are `BasicCoverageBlock`s, which encompass one or more MIR `BasicBlock`s, plus a
+/// `CoverageKind` counter (to be added by `CoverageCounters::make_bcb_counters`), and an optional
+/// set of additional counters--if needed--to count incoming edges, if there are more than one.
+/// (These &quot;edge counters&quot; are eventually converted into new MIR `BasicBlock`s.)
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>CoverageGraph {
+    bcbs: IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, <a href="#318">BasicCoverageBlockData</a>&gt;,
+    bb_to_bcb: IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+    <span class="kw">pub </span>successors: IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+    <span class="kw">pub </span>predecessors: IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+    dominators: <span class="prelude-ty">Option</span>&lt;Dominators&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+}
+
+<span class="kw">impl </span><a href="#22">CoverageGraph</a> {
+    <span class="kw">pub fn </span>from_mir(mir_body: <span class="kw-2">&amp;</span>mir::Body&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>(bcbs, bb_to_bcb) = <span class="self">Self</span>::compute_basic_coverage_blocks(<a href="#31">mir_body</a>);
+
+        <span class="comment">// Pre-transform MIR `BasicBlock` successors and predecessors into the BasicCoverageBlock
+        // equivalents. Note that since the BasicCoverageBlock graph has been fully simplified, the
+        // each predecessor of a BCB leader_bb should be in a unique BCB. It is possible for a
+        // `SwitchInt` to have multiple targets to the same destination `BasicBlock`, so
+        // de-duplication is required. This is done without reordering the successors.
+
+        </span><span class="kw">let </span>bcbs_len = <a href="#32">bcbs</a>.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>seen = IndexVec::from_elem_n(<span class="bool-val">false</span>, <a href="#40">bcbs_len</a>);
+        <span class="kw">let </span>successors = IndexVec::from_fn_n(
+            |bcb| {
+                <span class="kw">for </span>b <span class="kw">in </span>seen.iter_mut() {
+                    <span class="kw-2">*</span>b = <span class="bool-val">false</span>;
+                }
+                <span class="kw">let </span>bcb_data = <span class="kw-2">&amp;</span><a href="#32">bcbs</a>[<a href="#43">bcb</a>];
+                <span class="kw">let </span><span class="kw-2">mut </span>bcb_successors = Vec::new();
+                <span class="kw">for </span>successor <span class="kw">in
+                    </span>bcb_filtered_successors(<span class="kw-2">&amp;</span>mir_body, <span class="kw-2">&amp;</span>bcb_data.terminator(mir_body).kind)
+                        .filter_map(|successor_bb| bb_to_bcb[successor_bb])
+                {
+                    <span class="kw">if </span>!seen[successor] {
+                        seen[successor] = <span class="bool-val">true</span>;
+                        bcb_successors.push(successor);
+                    }
+                }
+                <a href="#48">bcb_successors</a>
+            },
+            <a href="#32">bcbs</a>.len(),
+        );
+
+        <span class="kw">let </span><span class="kw-2">mut </span>predecessors = IndexVec::from_elem_n(Vec::new(), <a href="#32">bcbs</a>.len());
+        <span class="kw">for </span>(bcb, bcb_successors) <span class="kw">in </span>successors.iter_enumerated() {
+            <span class="kw">for </span><span class="kw-2">&amp;</span>successor <span class="kw">in </span>bcb_successors {
+                predecessors[successor].push(bcb);
+            }
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>basic_coverage_blocks =
+            <span class="self">Self </span>{ <a href="#32">bcbs</a>, <a href="#32">bb_to_bcb</a>, <a href="#42">successors</a>, <a href="#63">predecessors</a>, dominators: <span class="prelude-val">None </span>};
+        <span class="kw">let </span>dominators = dominators::dominators(<span class="kw-2">&amp;</span><a href="#70">basic_coverage_blocks</a>);
+        <a href="#70">basic_coverage_blocks</a>.dominators = <span class="prelude-val">Some</span>(<a href="#72">dominators</a>);
+        <a href="#70">basic_coverage_blocks</a>
+    }
+
+    <span class="kw">fn </span>compute_basic_coverage_blocks(
+        mir_body: <span class="kw-2">&amp;</span>mir::Body&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ) -&gt; (
+        IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, <a href="#318">BasicCoverageBlockData</a>&gt;,
+        IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+    ) {
+        <span class="kw">let </span>num_basic_blocks = <a href="#78">mir_body</a>.basic_blocks.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>bcbs = IndexVec::with_capacity(<a href="#83">num_basic_blocks</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>bb_to_bcb = IndexVec::from_elem_n(<span class="prelude-val">None</span>, <a href="#83">num_basic_blocks</a>);
+
+        <span class="comment">// Walk the MIR CFG using a Preorder traversal, which starts from `START_BLOCK` and follows
+        // each block terminator&#39;s `successors()`. Coverage spans must map to actual source code,
+        // so compiler generated blocks and paths can be ignored. To that end, the CFG traversal
+        // intentionally omits unwind paths.
+        // FIXME(#78544): MIR InstrumentCoverage: Improve coverage of `#[should_panic]` tests and
+        // `catch_unwind()` handlers.
+        </span><span class="kw">let </span>mir_cfg_without_unwind = ShortCircuitPreorder::new(<span class="kw-2">&amp;</span><a href="#78">mir_body</a>, <a href="#483-486">bcb_filtered_successors</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>basic_blocks = Vec::new();
+        <span class="kw">for </span>(bb, data) <span class="kw">in </span>mir_cfg_without_unwind {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = basic_blocks.last() {
+                <span class="kw">let </span>predecessors = <span class="kw-2">&amp;</span>mir_body.basic_blocks.predecessors()[bb];
+                <span class="kw">if </span>predecessors.len() &gt; <span class="number">1 </span>|| !predecessors.contains(last) {
+                    <span class="comment">// The `bb` has more than one _incoming_ edge, and should start its own
+                    // `BasicCoverageBlockData`. (Note, the `basic_blocks` vector does not yet
+                    // include `bb`; it contains a sequence of one or more sequential basic_blocks
+                    // with no intermediate branches in or out. Save these as a new
+                    // `BasicCoverageBlockData` before starting the new one.)
+                    </span><span class="self">Self</span>::add_basic_coverage_block(
+                        <span class="kw-2">&amp;mut </span>bcbs,
+                        <span class="kw-2">&amp;mut </span>bb_to_bcb,
+                        basic_blocks.split_off(<span class="number">0</span>),
+                    );
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;  because {}&quot;</span>,
+                        <span class="kw">if </span>predecessors.len() &gt; <span class="number">1 </span>{
+                            <span class="string">&quot;predecessors.len() &gt; 1&quot;</span>.to_owned()
+                        } <span class="kw">else </span>{
+                            <span class="macro">format!</span>(<span class="string">&quot;bb {} is not in precessors: {:?}&quot;</span>, bb.index(), predecessors)
+                        }
+                    );
+                }
+            }
+            basic_blocks.push(bb);
+
+            <span class="kw">let </span>term = data.terminator();
+
+            <span class="kw">match </span>term.kind {
+                TerminatorKind::Return { .. }
+                | TerminatorKind::Abort
+                | TerminatorKind::Yield { .. }
+                | TerminatorKind::SwitchInt { .. } =&gt; {
+                    <span class="comment">// The `bb` has more than one _outgoing_ edge, or exits the function. Save the
+                    // current sequence of `basic_blocks` gathered to this point, as a new
+                    // `BasicCoverageBlockData`.
+                    </span><span class="self">Self</span>::add_basic_coverage_block(
+                        <span class="kw-2">&amp;mut </span>bcbs,
+                        <span class="kw-2">&amp;mut </span>bb_to_bcb,
+                        basic_blocks.split_off(<span class="number">0</span>),
+                    );
+                    <span class="macro">debug!</span>(<span class="string">&quot;  because term.kind = {:?}&quot;</span>, term.kind);
+                    <span class="comment">// Note that this condition is based on `TerminatorKind`, even though it
+                    // theoretically boils down to `successors().len() != 1`; that is, either zero
+                    // (e.g., `Return`, `Abort`) or multiple successors (e.g., `SwitchInt`), but
+                    // since the BCB CFG ignores things like unwind branches (which exist in the
+                    // `Terminator`s `successors()` list) checking the number of successors won&#39;t
+                    // work.
+                </span>}
+
+                <span class="comment">// The following `TerminatorKind`s are either not expected outside an unwind branch,
+                // or they should not (under normal circumstances) branch. Coverage graphs are
+                // simplified by assuring coverage results are accurate for program executions that
+                // don&#39;t panic.
+                //
+                // Programs that panic and unwind may record slightly inaccurate coverage results
+                // for a coverage region containing the `Terminator` that began the panic. This
+                // is as intended. (See Issue #78544 for a possible future option to support
+                // coverage in test programs that panic.)
+                </span>TerminatorKind::Goto { .. }
+                | TerminatorKind::Resume
+                | TerminatorKind::Unreachable
+                | TerminatorKind::Drop { .. }
+                | TerminatorKind::DropAndReplace { .. }
+                | TerminatorKind::Call { .. }
+                | TerminatorKind::GeneratorDrop
+                | TerminatorKind::Assert { .. }
+                | TerminatorKind::FalseEdge { .. }
+                | TerminatorKind::FalseUnwind { .. }
+                | TerminatorKind::InlineAsm { .. } =&gt; {}
+            }
+        }
+
+        <span class="kw">if </span>!basic_blocks.is_empty() {
+            <span class="comment">// process any remaining basic_blocks into a final `BasicCoverageBlockData`
+            </span><span class="self">Self</span>::add_basic_coverage_block(<span class="kw-2">&amp;mut </span><a href="#84">bcbs</a>, <span class="kw-2">&amp;mut </span><a href="#85">bb_to_bcb</a>, <a href="#95">basic_blocks</a>.split_off(<span class="number">0</span>));
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;  because the end of the MIR CFG was reached while traversing&quot;</span>);
+        }
+
+        (<a href="#84">bcbs</a>, <a href="#85">bb_to_bcb</a>)
+    }
+
+    <span class="kw">fn </span>add_basic_coverage_block(
+        bcbs: <span class="kw-2">&amp;mut </span>IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, <a href="#318">BasicCoverageBlockData</a>&gt;,
+        bb_to_bcb: <span class="kw-2">&amp;mut </span>IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+        basic_blocks: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+    ) {
+        <span class="kw">let </span>bcb = BasicCoverageBlock::from_usize(<a href="#179">bcbs</a>.len());
+        <span class="kw">for </span><span class="kw-2">&amp;</span>bb <span class="kw">in </span>basic_blocks.iter() {
+            bb_to_bcb[bb] = <span class="prelude-val">Some</span>(bcb);
+        }
+        <span class="kw">let </span>bcb_data = BasicCoverageBlockData::from(<a href="#181">basic_blocks</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;adding bcb{}: {:?}&quot;</span>, bcb.index(), bcb_data);
+        <a href="#179">bcbs</a>.push(<a href="#187">bcb_data</a>);
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>iter_enumerated(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<a href="#283-289">BasicCoverageBlock</a>, <span class="kw-2">&amp;</span><a href="#318">BasicCoverageBlockData</a>)&gt; {
+        <a class="self" href="#194">self</a>.bcbs.iter_enumerated()
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>iter_enumerated_mut(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<a href="#283-289">BasicCoverageBlock</a>, <span class="kw-2">&amp;mut </span><a href="#318">BasicCoverageBlockData</a>)&gt; {
+        <a class="self" href="#201">self</a>.bcbs.iter_enumerated_mut()
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>bcb_from_bb(<span class="kw-2">&amp;</span><span class="self">self</span>, bb: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; {
+        <span class="kw">if </span>bb.index() &lt; <span class="self">self</span>.bb_to_bcb.len() { <a class="self" href="#207">self</a>.bb_to_bcb[<a href="#207">bb</a>] } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>is_dominated_by(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <a href="#283-289">BasicCoverageBlock</a>, dom: <a href="#283-289">BasicCoverageBlock</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#212">self</a>.dominators.as_ref().unwrap().is_dominated_by(<a href="#212">node</a>, <a href="#212">dom</a>)
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>dominators(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Dominators&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; {
+        <a class="self" href="#217">self</a>.dominators.as_ref().unwrap()
+    }
+}
+
+<span class="kw">impl </span>Index&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="kw">type </span>Output = <a href="#318">BasicCoverageBlockData</a>;
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>, index: <a href="#283-289">BasicCoverageBlock</a>) -&gt; <span class="kw-2">&amp;</span><a href="#318">BasicCoverageBlockData</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#226">self</a>.bcbs[<a href="#226">index</a>]
+    }
+}
+
+<span class="kw">impl </span>IndexMut&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>index_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: <a href="#283-289">BasicCoverageBlock</a>) -&gt; <span class="kw-2">&amp;mut </span><a href="#318">BasicCoverageBlockData</a> {
+        <span class="kw-2">&amp;mut </span><a class="self" href="#233">self</a>.bcbs[<a href="#233">index</a>]
+    }
+}
+
+<span class="kw">impl </span><a href="../../../rustc_data_structures/graph/trait.DirectedGraph.html">graph::DirectedGraph</a> <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="kw">type </span>Node = <a href="#283-289">BasicCoverageBlock</a>;
+}
+
+<span class="kw">impl </span><a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">graph::WithNumNodes</a> <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>num_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#244">self</a>.bcbs.len()
+    }
+}
+
+<span class="kw">impl </span><a href="../../../rustc_data_structures/graph/trait.WithStartNode.html">graph::WithStartNode</a> <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>start_node(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Node {
+        <a class="self" href="#251">self</a>.<a href="#207">bcb_from_bb</a>(mir::START_BLOCK)
+            .expect(<span class="string">&quot;mir::START_BLOCK should be in a BasicCoverageBlock&quot;</span>)
+    }
+}
+
+<span class="kw">type </span>BcbSuccessors&lt;<span class="lifetime">&#39;graph</span>&gt; = std::slice::Iter&lt;<span class="lifetime">&#39;graph</span>, <a href="#283-289">BasicCoverageBlock</a>&gt;;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;graph</span>&gt; graph::GraphSuccessors&lt;<span class="lifetime">&#39;graph</span>&gt; <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="kw">type </span>Item = <a href="#283-289">BasicCoverageBlock</a>;
+    <span class="kw">type </span>Iter = std::iter::Cloned&lt;BcbSuccessors&lt;<span class="lifetime">&#39;graph</span>&gt;&gt;;
+}
+
+<span class="kw">impl </span><a href="../../../rustc_data_structures/graph/trait.WithSuccessors.html">graph::WithSuccessors</a> <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>successors(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <span class="self">Self</span>::Node) -&gt; &lt;<span class="self">Self </span><span class="kw">as </span>GraphSuccessors&lt;<span class="lifetime">&#39;_</span>&gt;&gt;::Iter {
+        <a class="self" href="#266">self</a>.successors[<a href="#266">node</a>].iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;graph</span>&gt; graph::GraphPredecessors&lt;<span class="lifetime">&#39;graph</span>&gt; <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="kw">type </span>Item = <a href="#283-289">BasicCoverageBlock</a>;
+    <span class="kw">type </span>Iter = std::iter::Copied&lt;std::slice::Iter&lt;<span class="lifetime">&#39;graph</span>, <a href="#283-289">BasicCoverageBlock</a>&gt;&gt;;
+}
+
+<span class="kw">impl </span><a href="../../../rustc_data_structures/graph/trait.WithPredecessors.html">graph::WithPredecessors</a> <span class="kw">for </span><a href="#22">CoverageGraph</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>predecessors(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <span class="self">Self</span>::Node) -&gt; &lt;<span class="self">Self </span><span class="kw">as </span>graph::GraphPredecessors&lt;<span class="lifetime">&#39;_</span>&gt;&gt;::Iter {
+        <a class="self" href="#278">self</a>.predecessors[<a href="#278">node</a>].iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()
+    }
+}
+
+<a class="macro" href="../../../rustc_macros/rustc_macros/macro.newtype_index.html">rustc_index::newtype_index! </a>{
+    <span class="doccomment">/// A node in the control-flow graph of CoverageGraph.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span><a href="#283-289">BasicCoverageBlock</a> {
+        DEBUG_FORMAT = <span class="string">&quot;bcb{}&quot;</span>,
+        <span class="kw">const </span>START_BCB = <span class="number">0</span>,
+    }
+}
+
+<span class="doccomment">/// `BasicCoverageBlockData` holds the data indexed by a `BasicCoverageBlock`.
+///
+/// A `BasicCoverageBlock` (BCB) represents the maximal-length sequence of MIR `BasicBlock`s without
+/// conditional branches, and form a new, simplified, coverage-specific Control Flow Graph, without
+/// altering the original MIR CFG.
+///
+/// Note that running the MIR `SimplifyCfg` transform is not sufficient (and therefore not
+/// necessary). The BCB-based CFG is a more aggressive simplification. For example:
+///
+///   * The BCB CFG ignores (trims) branches not relevant to coverage, such as unwind-related code,
+///     that is injected by the Rust compiler but has no physical source code to count. This also
+///     means a BasicBlock with a `Call` terminator can be merged into its primary successor target
+///     block, in the same BCB. (But, note: Issue #78544: &quot;MIR InstrumentCoverage: Improve coverage
+///     of `#[should_panic]` tests and `catch_unwind()` handlers&quot;)
+///   * Some BasicBlock terminators support Rust-specific concerns--like borrow-checking--that are
+///     not relevant to coverage analysis. `FalseUnwind`, for example, can be treated the same as
+///     a `Goto`, and merged with its successor into the same BCB.
+///
+/// Each BCB with at least one computed `CoverageSpan` will have no more than one `Counter`.
+/// In some cases, a BCB&#39;s execution count can be computed by `Expression`. Additional
+/// disjoint `CoverageSpan`s in a BCB can also be counted by `Expression` (by adding `ZERO`
+/// to the BCB&#39;s primary counter or expression).
+///
+/// The BCB CFG is critical to simplifying the coverage analysis by ensuring graph path-based
+/// queries (`is_dominated_by()`, `predecessors`, `successors`, etc.) have branch (control flow)
+/// significance.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>BasicCoverageBlockData {
+    <span class="kw">pub </span>basic_blocks: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+    <span class="kw">pub </span>counter_kind: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+    edge_from_bcbs: <span class="prelude-ty">Option</span>&lt;FxHashMap&lt;<a href="#283-289">BasicCoverageBlock</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;&gt;,
+}
+
+<span class="kw">impl </span><a href="#318">BasicCoverageBlockData</a> {
+    <span class="kw">pub fn </span>from(basic_blocks: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;) -&gt; <span class="self">Self </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(basic_blocks.len() &gt; <span class="number">0</span>);
+        <span class="self">Self </span>{ <a href="#325">basic_blocks</a>, counter_kind: <span class="prelude-val">None</span>, edge_from_bcbs: <span class="prelude-val">None </span>}
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>leader_bb(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a> {
+        <a class="self" href="#331">self</a>.basic_blocks[<span class="number">0</span>]
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>last_bb(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a> {
+        <span class="kw-2">*</span><a class="self" href="#336">self</a>.basic_blocks.last().unwrap()
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>terminator&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, mir_body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Terminator&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw-2">&amp;</span><a href="#341">mir_body</a>[<a class="self" href="#341">self</a>.<a href="#336">last_bb</a>()].terminator()
+    }
+
+    <span class="kw">pub fn </span>set_counter(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        counter_kind: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert.html">debug_assert!</a>(
+            <span class="comment">// If the BCB has an edge counter (to be injected into a new `BasicBlock`), it can also
+            // have an expression (to be injected into an existing `BasicBlock` represented by this
+            // `BasicCoverageBlock`).
+            </span><span class="self">self</span>.edge_from_bcbs.is_none() || counter_kind.is_expression(),
+            <span class="string">&quot;attempt to add a `Counter` to a BCB target with existing incoming edge counters&quot;
+        </span>);
+        <span class="kw">let </span>operand = <a href="#347">counter_kind</a>.as_operand_id();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(replaced) = <a class="self" href="#346">self</a>.counter_kind.replace(<a href="#347">counter_kind</a>) {
+            Error::from_string(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;attempt to set a BasicCoverageBlock coverage counter more than once; \
+                {:?} already had counter {:?}&quot;</span>,
+                <span class="self">self</span>, replaced,
+            ))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#356">operand</a>)
+        }
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt; {
+        <a class="self" href="#369">self</a>.counter_kind.as_ref()
+    }
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>take_counter(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt; {
+        <a class="self" href="#374">self</a>.counter_kind.take()
+    }
+
+    <span class="kw">pub fn </span>set_edge_counter_from(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        from_bcb: <a href="#283-289">BasicCoverageBlock</a>,
+        counter_kind: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <span class="kw">if </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.level_enabled.html">level_enabled!</a>(tracing::Level::DEBUG) {
+            <span class="comment">// If the BCB has an edge counter (to be injected into a new `BasicBlock`), it can also
+            // have an expression (to be injected into an existing `BasicBlock` represented by this
+            // `BasicCoverageBlock`).
+            </span><span class="kw">if </span>!<span class="self">self</span>.counter_kind.as_ref().map_or(<span class="bool-val">true</span>, |c| c.is_expression()) {
+                <span class="kw">return </span>Error::from_string(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;attempt to add an incoming edge counter from {:?} when the target BCB already \
+                    has a `Counter`&quot;</span>,
+                    from_bcb
+                ));
+            }
+        }
+        <span class="kw">let </span>operand = <a href="#381">counter_kind</a>.as_operand_id();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(replaced) =
+            <a class="self" href="#379">self</a>.edge_from_bcbs.get_or_insert_default().insert(<a href="#380">from_bcb</a>, <a href="#381">counter_kind</a>)
+        {
+            Error::from_string(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;attempt to set an edge counter more than once; from_bcb: \
+                {:?} already had counter {:?}&quot;</span>,
+                from_bcb, replaced,
+            ))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#395">operand</a>)
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>edge_counter_from(<span class="kw-2">&amp;</span><span class="self">self</span>, from_bcb: <a href="#283-289">BasicCoverageBlock</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(edge_from_bcbs) = <span class="kw-2">&amp;</span><a class="self" href="#410">self</a>.edge_from_bcbs {
+            <a href="#411">edge_from_bcbs</a>.get(<span class="kw-2">&amp;</span><a href="#410">from_bcb</a>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>take_edge_counters(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw">impl </span>Iterator&lt;Item = (<a href="#283-289">BasicCoverageBlock</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>)&gt;&gt; {
+        <a class="self" href="#420">self</a>.edge_from_bcbs.take().map(|m| <a href="#422">m</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>())
+    }
+
+    <span class="kw">pub fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;@{}&quot;</span>, <span class="self">self</span>.basic_blocks.iter().map(|bb| bb.index().to_string()).join(ID_SEPARATOR))
+    }
+}
+
+<span class="doccomment">/// Represents a successor from a branching BasicCoverageBlock (such as the arms of a `SwitchInt`)
+/// as either the successor BCB itself, if it has only one incoming edge, or the successor _plus_
+/// the specific branching BCB, representing the edge between the two. The latter case
+/// distinguishes this incoming edge from other incoming edges to the same `target_bcb`.
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>BcbBranch {
+    <span class="kw">pub </span>edge_from_bcb: <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;,
+    <span class="kw">pub </span>target_bcb: <a href="#283-289">BasicCoverageBlock</a>,
+}
+
+<span class="kw">impl </span><a href="#435">BcbBranch</a> {
+    <span class="kw">pub fn </span>from_to(
+        from_bcb: <a href="#283-289">BasicCoverageBlock</a>,
+        to_bcb: <a href="#283-289">BasicCoverageBlock</a>,
+        basic_coverage_blocks: <span class="kw-2">&amp;</span><a href="#22">CoverageGraph</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>edge_from_bcb = <span class="kw">if </span>basic_coverage_blocks.predecessors[to_bcb].len() &gt; <span class="number">1 </span>{
+            <span class="prelude-val">Some</span>(<a href="#442">from_bcb</a>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>};
+        <span class="self">Self </span>{ <a href="#446">edge_from_bcb</a>, target_bcb: <a href="#443">to_bcb</a> }
+    }
+
+    <span class="kw">pub fn </span>counter&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        basic_coverage_blocks: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#22">CoverageGraph</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(from_bcb) = <a class="self" href="#455">self</a>.edge_from_bcb {
+            <a href="#456">basic_coverage_blocks</a>[<a class="self" href="#455">self</a>.target_bcb].<a href="#410">edge_counter_from</a>(<a href="#458">from_bcb</a>)
+        } <span class="kw">else </span>{
+            <a href="#456">basic_coverage_blocks</a>[<a class="self" href="#455">self</a>.target_bcb].<a href="#369">counter</a>()
+        }
+    }
+
+    <span class="kw">pub fn </span>is_only_path_to_target(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#465">self</a>.edge_from_bcb.is_none()
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">std::fmt::Debug</a> <span class="kw">for </span><a href="#435">BcbBranch</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, fmt: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">std::fmt::Result</a> {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(from_bcb) = <a class="self" href="#471">self</a>.edge_from_bcb {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#471">fmt</a>, <span class="string">&quot;{:?}-&gt;{:?}&quot;</span>, from_bcb, <span class="self">self</span>.target_bcb)
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#471">fmt</a>, <span class="string">&quot;{:?}&quot;</span>, <span class="self">self</span>.target_bcb)
+        }
+    }
+}
+
+<span class="comment">// Returns the `Terminator`s non-unwind successors.
+// FIXME(#78544): MIR InstrumentCoverage: Improve coverage of `#[should_panic]` tests and
+// `catch_unwind()` handlers.
+</span><span class="kw">fn </span>bcb_filtered_successors&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    term_kind: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt; + <span class="lifetime">&#39;a</span>&gt; {
+    Box::new(
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#485">term_kind</a> {
+            <span class="comment">// SwitchInt successors are never unwind, and all of them should be traversed.
+            </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::SwitchInt</a> { <span class="kw-2">ref </span>targets, .. } =&gt; {
+                <span class="prelude-val">None</span>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#490">targets</a>.all_targets().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>())
+            }
+            <span class="comment">// For all other kinds, return only the first successor, if any, and ignore unwinds.
+            // NOTE: `chain(&amp;[])` is required to coerce the `option::iter` (from
+            // `next().into_iter()`) into the `mir::Successors` aliased type.
+            </span><span class="kw">_ </span>=&gt; <a href="#485">term_kind</a>.successors().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>((<span class="kw-2">&amp;</span>[]).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()),
+        }
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(<span class="kw">move </span>|<span class="kw-2">&amp;</span>successor| <a href="#484">body</a>[<a href="#498">successor</a>].terminator().kind != TerminatorKind::Unreachable),
+    )
+}
+
+<span class="doccomment">/// Maintains separate worklists for each loop in the BasicCoverageBlock CFG, plus one for the
+/// CoverageGraph outside all loops. This supports traversing the BCB CFG in a way that
+/// ensures a loop is completely traversed before processing Blocks after the end of the loop.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>TraversalContext {
+    <span class="doccomment">/// From one or more backedges returning to a loop header.
+    </span><span class="kw">pub </span>loop_backedges: <span class="prelude-ty">Option</span>&lt;(Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;, <a href="#283-289">BasicCoverageBlock</a>)&gt;,
+
+    <span class="doccomment">/// worklist, to be traversed, of CoverageGraph in the loop with the given loop
+    /// backedges, such that the loop is the inner inner-most loop containing these
+    /// CoverageGraph
+    </span><span class="kw">pub </span>worklist: Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;,
+}
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>TraverseCoverageGraphWithLoops {
+    <span class="kw">pub </span>backedges: IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt;,
+    <span class="kw">pub </span>context_stack: Vec&lt;<a href="#506">TraversalContext</a>&gt;,
+    visited: BitSet&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#516">TraverseCoverageGraphWithLoops</a> {
+    <span class="kw">pub fn </span>new(basic_coverage_blocks: <span class="kw-2">&amp;</span><a href="#22">CoverageGraph</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>start_bcb = <a href="#523">basic_coverage_blocks</a>.<a href="../../../rustc_data_structures/graph/trait.WithStartNode.html">start_node</a>();
+        <span class="kw">let </span>backedges = <a href="#648-650">find_loop_backedges</a>(<a href="#523">basic_coverage_blocks</a>);
+        <span class="kw">let </span>context_stack =
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[TraversalContext { loop_backedges: <span class="prelude-val">None</span>, worklist: <span class="macro">vec!</span>[start_bcb] }];
+        <span class="comment">// `context_stack` starts with a `TraversalContext` for the main function context (beginning
+        // with the `start` BasicCoverageBlock of the function). New worklists are pushed to the top
+        // of the stack as loops are entered, and popped off of the stack when a loop&#39;s worklist is
+        // exhausted.
+        </span><span class="kw">let </span>visited = BitSet::new_empty(<a href="#523">basic_coverage_blocks</a>.<a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">num_nodes</a>());
+        <span class="self">Self </span>{ <a href="#525">backedges</a>, <a href="#526">context_stack</a>, <a href="#532">visited</a> }
+    }
+
+    <span class="kw">pub fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>, basic_coverage_blocks: <span class="kw-2">&amp;</span><a href="#22">CoverageGraph</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;TraverseCoverageGraphWithLoops::next - context_stack: {:?}&quot;</span>,
+            <span class="self">self</span>.context_stack.iter().rev().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+        );
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(next_bcb) = {
+            <span class="comment">// Strip contexts with empty worklists from the top of the stack
+            </span><span class="kw">while </span><span class="self">self</span>.context_stack.last().map_or(<span class="bool-val">false</span>, |context| context.worklist.is_empty()) {
+                <span class="self">self</span>.context_stack.pop();
+            }
+            <span class="comment">// Pop the next bcb off of the current context_stack. If none, all BCBs were visited.
+            </span><span class="self">self</span>.context_stack.last_mut().map_or(<span class="prelude-val">None</span>, |context| context.worklist.pop())
+        } {
+            <span class="kw">if </span>!<span class="self">self</span>.visited.insert(next_bcb) {
+                <span class="macro">debug!</span>(<span class="string">&quot;Already visited: {:?}&quot;</span>, next_bcb);
+                <span class="kw">continue</span>;
+            }
+            <span class="macro">debug!</span>(<span class="string">&quot;Visiting {:?}&quot;</span>, next_bcb);
+            <span class="kw">if </span><span class="self">self</span>.backedges[next_bcb].len() &gt; <span class="number">0 </span>{
+                <span class="macro">debug!</span>(<span class="string">&quot;{:?} is a loop header! Start a new TraversalContext...&quot;</span>, next_bcb);
+                <span class="self">self</span>.context_stack.push(TraversalContext {
+                    loop_backedges: <span class="prelude-val">Some</span>((<span class="self">self</span>.backedges[next_bcb].clone(), next_bcb)),
+                    worklist: Vec::new(),
+                });
+            }
+            <span class="self">self</span>.extend_worklist(basic_coverage_blocks, next_bcb);
+            <span class="kw">return </span><span class="prelude-val">Some</span>(next_bcb);
+        }
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">pub fn </span>extend_worklist(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        basic_coverage_blocks: <span class="kw-2">&amp;</span><a href="#22">CoverageGraph</a>,
+        bcb: <a href="#283-289">BasicCoverageBlock</a>,
+    ) {
+        <span class="kw">let </span>successors = <span class="kw-2">&amp;</span><a href="#569">basic_coverage_blocks</a>.successors[<a href="#570">bcb</a>];
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} has {} successors:&quot;</span>, bcb, successors.len());
+        <span class="kw">for </span><span class="kw-2">&amp;</span>successor <span class="kw">in </span>successors {
+            <span class="kw">if </span>successor == bcb {
+                <span class="macro">debug!</span>(
+                    <span class="string">&quot;{:?} has itself as its own successor. (Note, the compiled code will \
+                    generate an infinite loop.)&quot;</span>,
+                    bcb
+                );
+                <span class="comment">// Don&#39;t re-add this successor to the worklist. We are already processing it.
+                </span><span class="kw">break</span>;
+            }
+            <span class="kw">for </span>context <span class="kw">in </span><span class="self">self</span>.context_stack.iter_mut().rev() {
+                <span class="comment">// Add successors of the current BCB to the appropriate context. Successors that
+                // stay within a loop are added to the BCBs context worklist. Successors that
+                // exit the loop (they are not dominated by the loop header) must be reachable
+                // from other BCBs outside the loop, and they will be added to a different
+                // worklist.
+                //
+                // Branching blocks (with more than one successor) must be processed before
+                // blocks with only one successor, to prevent unnecessarily complicating
+                // `Expression`s by creating a Counter in a `BasicCoverageBlock` that the
+                // branching block would have given an `Expression` (or vice versa).
+                </span><span class="kw">let </span>(some_successor_to_add, some_loop_header) =
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, loop_header)) = context.loop_backedges {
+                        <span class="kw">if </span>basic_coverage_blocks.is_dominated_by(successor, loop_header) {
+                            (<span class="prelude-val">Some</span>(successor), <span class="prelude-val">Some</span>(loop_header))
+                        } <span class="kw">else </span>{
+                            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+                        }
+                    } <span class="kw">else </span>{
+                        (<span class="prelude-val">Some</span>(successor), <span class="prelude-val">None</span>)
+                    };
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(successor_to_add) = some_successor_to_add {
+                    <span class="kw">if </span>basic_coverage_blocks.successors[successor_to_add].len() &gt; <span class="number">1 </span>{
+                        <span class="macro">debug!</span>(
+                            <span class="string">&quot;{:?} successor is branching. Prioritize it at the beginning of \
+                            the {}&quot;</span>,
+                            successor_to_add,
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(loop_header) = some_loop_header {
+                                <span class="macro">format!</span>(<span class="string">&quot;worklist for the loop headed by {:?}&quot;</span>, loop_header)
+                            } <span class="kw">else </span>{
+                                String::from(<span class="string">&quot;non-loop worklist&quot;</span>)
+                            },
+                        );
+                        context.worklist.insert(<span class="number">0</span>, successor_to_add);
+                    } <span class="kw">else </span>{
+                        <span class="macro">debug!</span>(
+                            <span class="string">&quot;{:?} successor is non-branching. Defer it to the end of the {}&quot;</span>,
+                            successor_to_add,
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(loop_header) = some_loop_header {
+                                <span class="macro">format!</span>(<span class="string">&quot;worklist for the loop headed by {:?}&quot;</span>, loop_header)
+                            } <span class="kw">else </span>{
+                                String::from(<span class="string">&quot;non-loop worklist&quot;</span>)
+                            },
+                        );
+                        context.worklist.push(successor_to_add);
+                    }
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>is_complete(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#636">self</a>.visited.count() == <a class="self" href="#636">self</a>.visited.domain_size()
+    }
+
+    <span class="kw">pub fn </span>unvisited(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>unvisited_set: BitSet&lt;<a href="#283-289">BasicCoverageBlock</a>&gt; =
+            BitSet::new_filled(<a class="self" href="#640">self</a>.visited.domain_size());
+        <a href="#641">unvisited_set</a>.subtract(<span class="kw-2">&amp;</span><a class="self" href="#640">self</a>.visited);
+        <a href="#641">unvisited_set</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>find_loop_backedges(
+    basic_coverage_blocks: <span class="kw-2">&amp;</span><a href="#22">CoverageGraph</a>,
+) -&gt; IndexVec&lt;<a href="#283-289">BasicCoverageBlock</a>, Vec&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;&gt; {
+    <span class="kw">let </span>num_bcbs = <a href="#649">basic_coverage_blocks</a>.<a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">num_nodes</a>();
+    <span class="kw">let </span><span class="kw-2">mut </span>backedges = IndexVec::from_elem_n(Vec::&lt;<a href="#283-289">BasicCoverageBlock</a>&gt;::new(), <a href="#651">num_bcbs</a>);
+
+    <span class="comment">// Identify loops by their backedges.
+    //
+    // The computational complexity is bounded by: n(s) x d where `n` is the number of
+    // `BasicCoverageBlock` nodes (the simplified/reduced representation of the CFG derived from the
+    // MIR); `s` is the average number of successors per node (which is most likely less than 2, and
+    // independent of the size of the function, so it can be treated as a constant);
+    // and `d` is the average number of dominators per node.
+    //
+    // The average number of dominators depends on the size and complexity of the function, and
+    // nodes near the start of the function&#39;s control flow graph typically have less dominators
+    // than nodes near the end of the CFG. Without doing a detailed mathematical analysis, I
+    // think the resulting complexity has the characteristics of O(n log n).
+    //
+    // The overall complexity appears to be comparable to many other MIR transform algorithms, and I
+    // don&#39;t expect that this function is creating a performance hot spot, but if this becomes an
+    // issue, there may be ways to optimize the `is_dominated_by` algorithm (as indicated by an
+    // existing `FIXME` comment in that code), or possibly ways to optimize it&#39;s usage here, perhaps
+    // by keeping track of results for visited `BasicCoverageBlock`s if they can be used to short
+    // circuit downstream `is_dominated_by` checks.
+    //
+    // For now, that kind of optimization seems unnecessarily complicated.
+    </span><span class="kw">for </span>(bcb, <span class="kw">_</span>) <span class="kw">in </span>basic_coverage_blocks.iter_enumerated() {
+        <span class="kw">for </span><span class="kw-2">&amp;</span>successor <span class="kw">in </span><span class="kw-2">&amp;</span>basic_coverage_blocks.successors[bcb] {
+            <span class="kw">if </span>basic_coverage_blocks.is_dominated_by(bcb, successor) {
+                <span class="kw">let </span>loop_header = successor;
+                <span class="kw">let </span>backedge_from_bcb = bcb;
+                <span class="macro">debug!</span>(
+                    <span class="string">&quot;Found BCB backedge: {:?} -&gt; loop_header: {:?}&quot;</span>,
+                    backedge_from_bcb, loop_header
+                );
+                backedges[loop_header].push(backedge_from_bcb);
+            }
+        }
+    }
+    <a href="#652">backedges</a>
+}
+
+<span class="kw">pub struct </span>ShortCircuitPreorder&lt;
+    <span class="lifetime">&#39;a</span>,
+    <span class="lifetime">&#39;tcx</span>,
+    F: Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt; + <span class="lifetime">&#39;a</span>&gt;,
+&gt; {
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    visited: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+    worklist: Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+    filtered_successors: F,
+}
+
+<span class="kw">impl</span>&lt;
+    <span class="lifetime">&#39;a</span>,
+    <span class="lifetime">&#39;tcx</span>,
+    F: Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt; + <span class="lifetime">&#39;a</span>&gt;,
+&gt; ShortCircuitPreorder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, F&gt;
+{
+    <span class="kw">pub fn </span>new(
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        filtered_successors: F,
+    ) -&gt; ShortCircuitPreorder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, F&gt; {
+        <span class="kw">let </span>worklist = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[mir::START_BLOCK];
+
+        <a href="#691-695">ShortCircuitPreorder</a> {
+            <a href="#709">body</a>,
+            visited: BitSet::new_empty(<a href="#709">body</a>.basic_blocks.len()),
+            <a href="#712">worklist</a>,
+            <a href="#710">filtered_successors</a>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;
+    <span class="lifetime">&#39;a</span>,
+    <span class="lifetime">&#39;tcx</span>,
+    F: Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>TerminatorKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Box&lt;<span class="kw">dyn </span>Iterator&lt;Item = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt; + <span class="lifetime">&#39;a</span>&gt;,
+&gt; <a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">Iterator</a> <span class="kw">for </span>ShortCircuitPreorder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, F&gt;
+{
+    <span class="kw">type </span>Item = (<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BasicBlockData&lt;<span class="lifetime">&#39;tcx</span>&gt;);
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BasicBlockData&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt; {
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(idx) = <span class="self">self</span>.worklist.pop() {
+            <span class="kw">if </span>!<span class="self">self</span>.visited.insert(idx) {
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">let </span>data = <span class="kw-2">&amp;</span><span class="self">self</span>.body[idx];
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>term) = data.terminator {
+                <span class="self">self</span>.worklist.extend((<span class="self">self</span>.filtered_successors)(<span class="kw-2">&amp;</span><span class="self">self</span>.body, <span class="kw-2">&amp;</span>term.kind));
+            }
+
+            <span class="kw">return </span><span class="prelude-val">Some</span>((idx, data));
+        }
+
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">fn </span>size_hint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;) {
+        <span class="kw">let </span>size = <a class="self" href="#749">self</a>.body.basic_blocks.len() - <a class="self" href="#749">self</a>.visited.count();
+        (<a href="#750">size</a>, <span class="prelude-val">Some</span>(<a href="#750">size</a>))
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

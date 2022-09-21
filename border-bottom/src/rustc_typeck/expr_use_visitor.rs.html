@@ -1,0 +1,1832 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/expr_use_visitor.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>expr_use_visitor.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_typeck/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+</pre><pre class="rust"><code><span class="doccomment">//! A different sort of visitor for walking fn bodies. Unlike the
+//! normal visitor, which just walks the entire body in one shot, the
+//! `ExprUseVisitor` determines how expressions are being used.
+
+</span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/slice/raw/fn.from_ref.html">std::slice::from_ref</a>;
+
+<span class="kw">use </span><a href="../../rustc_hir/def/enum.DefKind.html">hir::def::DefKind</a>;
+<span class="kw">use </span><a href="../../rustc_hir/hir/struct.Expr.html">hir::Expr</a>;
+<span class="comment">// Export these here so that Clippy can use them.
+</span><span class="kw">pub use </span>rustc_middle::hir::place::{<a href="../../rustc_typeck/expr_use_visitor/struct.Place.html">Place</a>, <a href="../../rustc_typeck/expr_use_visitor/enum.PlaceBase.html">PlaceBase</a>, <a href="../../rustc_typeck/expr_use_visitor/struct.PlaceWithHirId.html">PlaceWithHirId</a>, <a href="../../rustc_typeck/expr_use_visitor/struct.Projection.html">Projection</a>};
+
+<span class="kw">use </span><a href="../../rustc_data_structures/fx/type.FxIndexMap.html">rustc_data_structures::fx::FxIndexMap</a>;
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../rustc_hir/def/enum.Res.html">rustc_hir::def::Res</a>;
+<span class="kw">use </span><a href="../../rustc_span/def_id/struct.LocalDefId.html">rustc_hir::def_id::LocalDefId</a>;
+<span class="kw">use </span><a href="../../rustc_hir/hir/enum.PatKind.html">rustc_hir::PatKind</a>;
+<span class="kw">use </span><a href="../../rustc_index/vec/trait.Idx.html">rustc_index::vec::Idx</a>;
+<span class="kw">use </span><a href="../../rustc_infer/infer/struct.InferCtxt.html">rustc_infer::infer::InferCtxt</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/hir/place/enum.ProjectionKind.html">rustc_middle::hir::place::ProjectionKind</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.FakeReadCause.html">rustc_middle::mir::FakeReadCause</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/adjustment/index.html">adjustment</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/adt/enum.AdtKind.html">AdtKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_target/abi/struct.VariantIdx.html">rustc_target::abi::VariantIdx</a>;
+<span class="kw">use </span>ty::BorrowKind::ImmBorrow;
+
+<span class="kw">use </span><a href="lib.rs.html#98"><span class="kw">crate</span>::mem_categorization</a> <span class="kw">as </span>mc;
+
+<span class="doccomment">/// This trait defines the callbacks you can expect to receive when
+/// employing the ExprUseVisitor.
+</span><span class="kw">pub trait </span>Delegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The value found at `place` is moved, depending
+    /// on `mode`. Where `diag_expr_id` is the id used for diagnostics for `place`.
+    ///
+    /// Use of a `Copy` type in a ByValue context is considered a use
+    /// by `ImmBorrow` and `borrow` is called instead. This is because
+    /// a shared borrow is the &quot;minimum access&quot; that would be needed
+    /// to perform a copy.
+    ///
+    ///
+    /// The parameter `diag_expr_id` indicates the HIR id that ought to be used for
+    /// diagnostics. Around pattern matching such as `let pat = expr`, the diagnostic
+    /// id will be the id of the expression `expr` but the place itself will have
+    /// the id of the binding in the pattern `pat`.
+    </span><span class="kw">fn </span>consume(<span class="kw-2">&amp;mut </span><span class="self">self</span>, place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>);
+
+    <span class="doccomment">/// The value found at `place` is being borrowed with kind `bk`.
+    /// `diag_expr_id` is the id used for diagnostics (see `consume` for more details).
+    </span><span class="kw">fn </span>borrow(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+        bk: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/closure/enum.BorrowKind.html">ty::BorrowKind</a>,
+    );
+
+    <span class="doccomment">/// The value found at `place` is being copied.
+    /// `diag_expr_id` is the id used for diagnostics (see `consume` for more details).
+    </span><span class="kw">fn </span>copy(<span class="kw-2">&amp;mut </span><span class="self">self</span>, place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <span class="comment">// In most cases, copying data from `x` is equivalent to doing `*&amp;x`, so by default
+        // we treat a copy of `x` as a borrow of `x`.
+        </span><a class="self" href="#56">self</a>.<a href="#47-52">borrow</a>(<a href="#56">place_with_id</a>, <a href="#56">diag_expr_id</a>, ty::BorrowKind::ImmBorrow)
+    }
+
+    <span class="doccomment">/// The path at `assignee_place` is being assigned to.
+    /// `diag_expr_id` is the id used for diagnostics (see `consume` for more details).
+    </span><span class="kw">fn </span>mutate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, assignee_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>);
+
+    <span class="doccomment">/// The path at `binding_place` is a binding that is being initialized.
+    ///
+    /// This covers cases such as `let x = 42;`
+    </span><span class="kw">fn </span>bind(<span class="kw-2">&amp;mut </span><span class="self">self</span>, binding_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <span class="comment">// Bindings can normally be treated as a regular assignment, so by default we
+        // forward this to the mutate callback.
+        </span><a class="self" href="#69">self</a>.<a href="#64">mutate</a>(<a href="#69">binding_place</a>, <a href="#69">diag_expr_id</a>)
+    }
+
+    <span class="doccomment">/// The `place` should be a fake read because of specified `cause`.
+    </span><span class="kw">fn </span>fake_read(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cause: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.FakeReadCause.html">FakeReadCause</a>,
+        diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+    );
+}
+
+<span class="attribute">#[derive(Copy, Clone, PartialEq, Debug)]
+</span><span class="kw">enum </span>ConsumeMode {
+    <span class="doccomment">/// reference to x where x has a type that copies
+    </span>Copy,
+    <span class="doccomment">/// reference to x where x has a type that moves
+    </span>Move,
+}
+
+<span class="attribute">#[derive(Copy, Clone, PartialEq, Debug)]
+</span><span class="kw">pub enum </span>MutateMode {
+    Init,
+    <span class="doccomment">/// Example: `x = y`
+    </span>JustWrite,
+    <span class="doccomment">/// Example: `x += y`
+    </span>WriteAndRead,
+}
+
+<span class="doccomment">/// The ExprUseVisitor type
+///
+/// This is the code that actually walks the tree.
+</span><span class="kw">pub struct </span>ExprUseVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    mc: mc::MemCategorizationContext&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    body_owner: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+    delegate: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="kw">dyn </span>Delegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="doccomment">/// If the MC results in an error, it&#39;s because the type check
+/// failed (or will fail, when the error is uncovered and reported
+/// during writeback). In this case, we just ignore this part of the
+/// code.
+///
+/// Note that this macro appears similar to try!(), but, unlike try!(),
+/// it does not propagate the error.
+</span><span class="macro">macro_rules! </span>return_if_err {
+    (<span class="macro-nonterminal">$inp</span>: expr) =&gt; {
+        <span class="kw">match </span><span class="macro-nonterminal">$inp </span>{
+            <span class="prelude-val">Ok</span>(v) =&gt; v,
+            <span class="prelude-val">Err</span>(()) =&gt; {
+                <span class="macro">debug!</span>(<span class="string">&quot;mc reported err&quot;</span>);
+                <span class="kw">return</span>;
+            }
+        }
+    };
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; ExprUseVisitor&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Creates the ExprUseVisitor, configuring it with the various options provided:
+    ///
+    /// - `delegate` -- who receives the callbacks
+    /// - `param_env` --- parameter environment for trait lookups (esp. pertaining to `Copy`)
+    /// - `typeck_results` --- typeck results for the code being analyzed
+    </span><span class="kw">pub fn </span>new(
+        delegate: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>(<span class="kw">dyn </span>Delegate&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+        infcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>InferCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        body_owner: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        typeck_results: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ty::TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <a href="#104">ExprUseVisitor</a> {
+            mc: mc::MemCategorizationContext::new(<a href="#137">infcx</a>, <a href="#139">param_env</a>, <a href="#138">body_owner</a>, <a href="#140">typeck_results</a>),
+            <a href="#138">body_owner</a>,
+            <a href="#136">delegate</a>,
+        }
+    }
+
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>), level = <span class="string">&quot;debug&quot;</span>)]
+    </span><span class="kw">pub fn </span>consume_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, body: <span class="kw-2">&amp;</span>hir::Body&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">for </span>param <span class="kw">in </span>body.params {
+            <span class="kw">let </span>param_ty = <span class="macro">return_if_err!</span>(<span class="self">self</span>.mc.pat_ty_adjusted(param.pat));
+            <span class="macro">debug!</span>(<span class="string">&quot;consume_body: param_ty = {:?}&quot;</span>, param_ty);
+
+            <span class="kw">let </span>param_place = <span class="self">self</span>.mc.cat_rvalue(param.hir_id, param.pat.span, param_ty);
+
+            <span class="self">self</span>.walk_irrefutable_pat(<span class="kw-2">&amp;</span>param_place, param.pat);
+        }
+
+        <span class="self">self</span>.consume_expr(<span class="kw-2">&amp;</span>body.value);
+    }
+
+    <span class="kw">fn </span>tcx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#163">self</a>.mc.<a href="mem_categorization.rs.html#120">tcx</a>()
+    }
+
+    <span class="kw">fn </span>delegate_consume(<span class="kw-2">&amp;mut </span><span class="self">self</span>, place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>) {
+        <a href="#882-887">delegate_consume</a>(<span class="kw-2">&amp;</span><a class="self" href="#167">self</a>.mc, <a class="self" href="#167">self</a>.delegate, <a href="#167">place_with_id</a>, <a href="#167">diag_expr_id</a>)
+    }
+
+    <span class="kw">fn </span>consume_exprs(<span class="kw-2">&amp;mut </span><span class="self">self</span>, exprs: <span class="kw-2">&amp;</span>[hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;]) {
+        <span class="kw">for </span>expr <span class="kw">in </span>exprs {
+            <span class="self">self</span>.consume_expr(expr);
+        }
+    }
+
+    <span class="kw">pub fn </span>consume_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;consume_expr(expr={:?})&quot;</span>, expr);
+
+        <span class="kw">let </span>place_with_id = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(expr));
+        <a class="self" href="#177">self</a>.<a href="#167">delegate_consume</a>(<span class="kw-2">&amp;</span><a href="#180">place_with_id</a>, <a href="#180">place_with_id</a>.hir_id);
+        <a class="self" href="#177">self</a>.<a href="#204">walk_expr</a>(<a href="#177">expr</a>);
+    }
+
+    <span class="kw">fn </span>mutate_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span>place_with_id = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(expr));
+        <a class="self" href="#185">self</a>.delegate.<a href="#64">mutate</a>(<span class="kw-2">&amp;</span><a href="#186">place_with_id</a>, <a href="#186">place_with_id</a>.hir_id);
+        <a class="self" href="#185">self</a>.<a href="#204">walk_expr</a>(<a href="#185">expr</a>);
+    }
+
+    <span class="kw">fn </span>borrow_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;, bk: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/closure/enum.BorrowKind.html">ty::BorrowKind</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;borrow_expr(expr={:?}, bk={:?})&quot;</span>, expr, bk);
+
+        <span class="kw">let </span>place_with_id = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(expr));
+        <a class="self" href="#191">self</a>.delegate.<a href="#47-52">borrow</a>(<span class="kw-2">&amp;</span><a href="#194">place_with_id</a>, <a href="#194">place_with_id</a>.hir_id, <a href="#191">bk</a>);
+
+        <a class="self" href="#191">self</a>.<a href="#204">walk_expr</a>(<a href="#191">expr</a>)
+    }
+
+    <span class="kw">fn </span>select_from_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <a class="self" href="#200">self</a>.<a href="#204">walk_expr</a>(<a href="#200">expr</a>)
+    }
+
+    <span class="kw">pub fn </span>walk_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;walk_expr(expr={:?})&quot;</span>, expr);
+
+        <a class="self" href="#204">self</a>.<a href="#580">walk_adjustment</a>(<a href="#204">expr</a>);
+
+        <span class="kw">match </span><a href="#204">expr</a>.kind {
+            hir::ExprKind::Path(<span class="kw">_</span>) =&gt; {}
+
+            hir::ExprKind::Type(subexpr, <span class="kw">_</span>) =&gt; <a class="self" href="#204">self</a>.<a href="#204">walk_expr</a>(<a href="#212">subexpr</a>),
+
+            hir::ExprKind::Unary(hir::UnOp::Deref, base) =&gt; {
+                <span class="comment">// *base
+                </span><a class="self" href="#204">self</a>.<a href="#200">select_from_expr</a>(<a href="#214">base</a>);
+            }
+
+            hir::ExprKind::Field(base, <span class="kw">_</span>) =&gt; {
+                <span class="comment">// base.f
+                </span><a class="self" href="#204">self</a>.<a href="#200">select_from_expr</a>(<a href="#219">base</a>);
+            }
+
+            hir::ExprKind::Index(lhs, rhs) =&gt; {
+                <span class="comment">// lhs[rhs]
+                </span><a class="self" href="#204">self</a>.<a href="#200">select_from_expr</a>(<a href="#224">lhs</a>);
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#224">rhs</a>);
+            }
+
+            hir::ExprKind::Call(callee, args) =&gt; {
+                <span class="comment">// callee(args)
+                </span><a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#230">callee</a>);
+                <a class="self" href="#204">self</a>.<a href="#171">consume_exprs</a>(<a href="#230">args</a>);
+            }
+
+            hir::ExprKind::MethodCall(.., receiver, args, <span class="kw">_</span>) =&gt; {
+                <span class="comment">// callee.m(args)
+                </span><a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#236">receiver</a>);
+                <a class="self" href="#204">self</a>.<a href="#171">consume_exprs</a>(<a href="#236">args</a>);
+            }
+
+            hir::ExprKind::Struct(<span class="kw">_</span>, fields, <span class="kw-2">ref </span>opt_with) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#522-526">walk_struct_expr</a>(<a href="#242">fields</a>, <a href="#242">opt_with</a>);
+            }
+
+            hir::ExprKind::Tup(exprs) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#171">consume_exprs</a>(<a href="#246">exprs</a>);
+            }
+
+            hir::ExprKind::If(<span class="kw-2">ref </span>cond_expr, <span class="kw-2">ref </span>then_expr, <span class="kw-2">ref </span>opt_else_expr) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#250">cond_expr</a>);
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#250">then_expr</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>else_expr) = <span class="kw-2">*</span><a href="#250">opt_else_expr</a> {
+                    <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#253">else_expr</a>);
+                }
+            }
+
+            hir::ExprKind::Let(<a href="../../rustc_hir/hir/struct.Let.html">hir::Let</a> { pat, init, .. }) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#488-495">walk_local</a>(<a href="#258">init</a>, <a href="#258">pat</a>, <span class="prelude-val">None</span>, |t| <a href="#259">t</a>.<a href="#191">borrow_expr</a>(<a href="#258">init</a>, ty::ImmBorrow))
+            }
+
+            hir::ExprKind::Match(<span class="kw-2">ref </span>discr, arms, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>discr_place = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(discr));
+                <a class="self" href="#204">self</a>.<a href="#397-402">maybe_read_scrutinee</a>(
+                    <a href="#262">discr</a>,
+                    <a href="#263">discr_place</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+                    <a href="#262">arms</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|arm| <a href="#267">arm</a>.pat),
+                );
+
+                <span class="comment">// treatment of the discriminant is handled while walking the arms.
+                </span><span class="kw">for </span>arm <span class="kw">in </span>arms {
+                    <span class="self">self</span>.walk_arm(<span class="kw-2">&amp;</span>discr_place, arm);
+                }
+            }
+
+            hir::ExprKind::Array(exprs) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#171">consume_exprs</a>(<a href="#276">exprs</a>);
+            }
+
+            hir::ExprKind::AddrOf(<span class="kw">_</span>, m, <span class="kw-2">ref </span>base) =&gt; {
+                <span class="comment">// &amp;base
+                // make sure that the thing we are pointing out stays valid
+                // for the lifetime `scope_r` of the resulting ptr:
+                </span><span class="kw">let </span>bk = ty::BorrowKind::from_mutbl(<a href="#280">m</a>);
+                <a class="self" href="#204">self</a>.<a href="#191">borrow_expr</a>(<a href="#280">base</a>, <a href="#284">bk</a>);
+            }
+
+            hir::ExprKind::InlineAsm(asm) =&gt; {
+                <span class="kw">for </span>(op, _op_sp) <span class="kw">in </span>asm.operands {
+                    <span class="kw">match </span>op {
+                        hir::InlineAsmOperand::In { expr, .. } =&gt; <span class="self">self</span>.consume_expr(expr),
+                        hir::InlineAsmOperand::Out { expr: <span class="prelude-val">Some</span>(expr), .. }
+                        | hir::InlineAsmOperand::InOut { expr, .. } =&gt; {
+                            <span class="self">self</span>.mutate_expr(expr);
+                        }
+                        hir::InlineAsmOperand::SplitInOut { in_expr, out_expr, .. } =&gt; {
+                            <span class="self">self</span>.consume_expr(in_expr);
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(out_expr) = out_expr {
+                                <span class="self">self</span>.mutate_expr(out_expr);
+                            }
+                        }
+                        hir::InlineAsmOperand::Out { expr: <span class="prelude-val">None</span>, .. }
+                        | hir::InlineAsmOperand::Const { .. }
+                        | hir::InlineAsmOperand::SymFn { .. }
+                        | hir::InlineAsmOperand::SymStatic { .. } =&gt; {}
+                    }
+                }
+            }
+
+            hir::ExprKind::Continue(..)
+            | hir::ExprKind::Lit(..)
+            | hir::ExprKind::ConstBlock(..)
+            | hir::ExprKind::Err =&gt; {}
+
+            hir::ExprKind::Loop(blk, ..) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#510">walk_block</a>(<a href="#315">blk</a>);
+            }
+
+            hir::ExprKind::Unary(<span class="kw">_</span>, lhs) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#319">lhs</a>);
+            }
+
+            hir::ExprKind::Binary(<span class="kw">_</span>, lhs, rhs) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#323">lhs</a>);
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#323">rhs</a>);
+            }
+
+            hir::ExprKind::Block(blk, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#510">walk_block</a>(<a href="#328">blk</a>);
+            }
+
+            hir::ExprKind::Break(<span class="kw">_</span>, <span class="kw-2">ref </span>opt_expr) | hir::ExprKind::Ret(<span class="kw-2">ref </span>opt_expr) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = <span class="kw-2">*</span><a href="#332">opt_expr</a> {
+                    <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#333">expr</a>);
+                }
+            }
+
+            hir::ExprKind::Assign(lhs, rhs, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#185">mutate_expr</a>(<a href="#338">lhs</a>);
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#338">rhs</a>);
+            }
+
+            hir::ExprKind::Cast(base, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#343">base</a>);
+            }
+
+            hir::ExprKind::DropTemps(expr) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#347">expr</a>);
+            }
+
+            hir::ExprKind::AssignOp(<span class="kw">_</span>, lhs, rhs) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.mc.typeck_results.is_method_call(expr) {
+                    <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#351">lhs</a>);
+                } <span class="kw">else </span>{
+                    <a class="self" href="#204">self</a>.<a href="#185">mutate_expr</a>(<a href="#351">lhs</a>);
+                }
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#351">rhs</a>);
+            }
+
+            hir::ExprKind::Repeat(base, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#360">base</a>);
+            }
+
+            <a href="../../rustc_hir/hir/enum.ExprKind.html">hir::ExprKind::Closure</a> { .. } =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#755">walk_captures</a>(<a href="#204">expr</a>);
+            }
+
+            hir::ExprKind::Box(<span class="kw-2">ref </span>base) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#368">base</a>);
+            }
+
+            hir::ExprKind::Yield(value, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#204">self</a>.<a href="#177">consume_expr</a>(<a href="#372">value</a>);
+            }
+        }
+    }
+
+    <span class="kw">fn </span>walk_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stmt: <span class="kw-2">&amp;</span>hir::Stmt&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><a href="#378">stmt</a>.kind {
+            hir::StmtKind::Local(<a href="../../rustc_hir/hir/struct.Local.html">hir::Local</a> { pat, init: <span class="prelude-val">Some</span>(expr), els, .. }) =&gt; {
+                <a class="self" href="#378">self</a>.<a href="#488-495">walk_local</a>(<a href="#380">expr</a>, <a href="#380">pat</a>, <span class="kw-2">*</span><a href="#380">els</a>, |<span class="kw">_</span>| {})
+            }
+
+            hir::StmtKind::Local(<span class="kw">_</span>) =&gt; {}
+
+            hir::StmtKind::Item(<span class="kw">_</span>) =&gt; {
+                <span class="comment">// We don&#39;t visit nested items in this visitor,
+                // only the fn body we were given.
+            </span>}
+
+            hir::StmtKind::Expr(<span class="kw-2">ref </span>expr) | hir::StmtKind::Semi(<span class="kw-2">ref </span>expr) =&gt; {
+                <a class="self" href="#378">self</a>.<a href="#177">consume_expr</a>(<a href="#391">expr</a>);
+            }
+        }
+    }
+
+    <span class="kw">fn </span>maybe_read_scrutinee&lt;<span class="lifetime">&#39;t</span>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        discr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+        discr_place: PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        pats: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;t </span>hir::Pat&lt;<span class="lifetime">&#39;t</span>&gt;&gt;,
+    ) {
+        <span class="comment">// Matching should not always be considered a use of the place, hence
+        // discr does not necessarily need to be borrowed.
+        // We only want to borrow discr if the pattern contain something other
+        // than wildcards.
+        </span><span class="kw">let </span><a href="#104">ExprUseVisitor</a> { <span class="kw-2">ref </span>mc, body_owner: <span class="kw">_</span>, delegate: <span class="kw">_ </span>} = <span class="kw-2">*</span><a class="self" href="#398">self</a>;
+        <span class="kw">let </span><span class="kw-2">mut </span>needs_to_be_read = <span class="bool-val">false</span>;
+        <span class="kw">for </span>pat <span class="kw">in </span>pats {
+            <span class="macro">return_if_err!</span>(mc.cat_pattern(discr_place.clone(), pat, |place, pat| {
+                <span class="kw">match </span><span class="kw-2">&amp;</span>pat.kind {
+                    PatKind::Binding(.., opt_sub_pat) =&gt; {
+                        <span class="comment">// If the opt_sub_pat is None, than the binding does not count as
+                        // a wildcard for the purpose of borrowing discr.
+                        </span><span class="kw">if </span>opt_sub_pat.is_none() {
+                            needs_to_be_read = <span class="bool-val">true</span>;
+                        }
+                    }
+                    PatKind::Path(qpath) =&gt; {
+                        <span class="comment">// A `Path` pattern is just a name like `Foo`. This is either a
+                        // named constant or else it refers to an ADT variant
+
+                        </span><span class="kw">let </span>res = <span class="self">self</span>.mc.typeck_results.qpath_res(qpath, pat.hir_id);
+                        <span class="kw">match </span>res {
+                            Res::Def(DefKind::Const, <span class="kw">_</span>) | Res::Def(DefKind::AssocConst, <span class="kw">_</span>) =&gt; {
+                                <span class="comment">// Named constants have to be equated with the value
+                                // being matched, so that&#39;s a read of the value being matched.
+                                //
+                                // FIXME: We don&#39;t actually  reads for ZSTs.
+                                </span>needs_to_be_read = <span class="bool-val">true</span>;
+                            }
+                            <span class="kw">_ </span>=&gt; {
+                                <span class="comment">// Otherwise, this is a struct/enum variant, and so it&#39;s
+                                // only a read if we need to read the discriminant.
+                                </span>needs_to_be_read |= is_multivariant_adt(place.place.ty());
+                            }
+                        }
+                    }
+                    PatKind::TupleStruct(..) | PatKind::Struct(..) | PatKind::Tuple(..) =&gt; {
+                        <span class="comment">// For `Foo(..)`, `Foo { ... }` and `(...)` patterns, check if we are matching
+                        // against a multivariant enum or struct. In that case, we have to read
+                        // the discriminant. Otherwise this kind of pattern doesn&#39;t actually
+                        // read anything (we&#39;ll get invoked for the `...`, which may indeed
+                        // perform some reads).
+
+                        </span><span class="kw">let </span>place_ty = place.place.ty();
+                        needs_to_be_read |= is_multivariant_adt(place_ty);
+                    }
+                    PatKind::Lit(<span class="kw">_</span>) | PatKind::Range(..) =&gt; {
+                        <span class="comment">// If the PatKind is a Lit or a Range then we want
+                        // to borrow discr.
+                        </span>needs_to_be_read = <span class="bool-val">true</span>;
+                    }
+                    PatKind::Or(<span class="kw">_</span>)
+                    | PatKind::Box(<span class="kw">_</span>)
+                    | PatKind::Slice(..)
+                    | PatKind::Ref(..)
+                    | PatKind::Wild =&gt; {
+                        <span class="comment">// If the PatKind is Or, Box, Slice or Ref, the decision is made later
+                        // as these patterns contains subpatterns
+                        // If the PatKind is Wild, the decision is made based on the other patterns being
+                        // examined
+                    </span>}
+                }
+            }));
+        }
+
+        <span class="kw">if </span>needs_to_be_read {
+            <a class="self" href="#398">self</a>.<a href="#191">borrow_expr</a>(<a href="#399">discr</a>, ty::ImmBorrow);
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>closure_def_id = <span class="kw">match </span><a href="#400">discr_place</a>.place.base {
+                PlaceBase::Upvar(upvar_id) =&gt; <span class="prelude-val">Some</span>(<a href="#472">upvar_id</a>.closure_expr_id),
+                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+            };
+
+            <a class="self" href="#398">self</a>.delegate.<a href="#76-81">fake_read</a>(
+                <span class="kw-2">&amp;</span><a href="#400">discr_place</a>,
+                FakeReadCause::ForMatchedPlace(<a href="#471">closure_def_id</a>),
+                <a href="#400">discr_place</a>.hir_id,
+            );
+
+            <span class="comment">// We always want to walk the discriminant. We want to make sure, for instance,
+            // that the discriminant has been initialized.
+            </span><a class="self" href="#398">self</a>.<a href="#204">walk_expr</a>(<a href="#399">discr</a>);
+        }
+    }
+
+    <span class="kw">fn </span>walk_local&lt;F&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+        pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;,
+        els: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>hir::Block&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+        <span class="kw-2">mut </span>f: F,
+    ) <span class="kw">where
+        </span>F: FnMut(<span class="kw-2">&amp;mut </span><span class="self">Self</span>),
+    {
+        <a class="self" href="#489">self</a>.<a href="#204">walk_expr</a>(<a href="#490">expr</a>);
+        <span class="kw">let </span>expr_place = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(expr));
+        <a href="#493">f</a>(<a class="self" href="#489">self</a>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(els) = <a href="#492">els</a> {
+            <span class="comment">// borrowing because we need to test the discriminant
+            </span><a class="self" href="#489">self</a>.<a href="#397-402">maybe_read_scrutinee</a>(<a href="#490">expr</a>, <a href="#498">expr_place</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <a href="https://doc.rust-lang.org/nightly/core/slice/raw/fn.from_ref.html">from_ref</a>(<a href="#491">pat</a>).iter());
+            <a class="self" href="#489">self</a>.<a href="#510">walk_block</a>(<a href="#500">els</a>)
+        }
+        <a class="self" href="#489">self</a>.<a href="#668">walk_irrefutable_pat</a>(<span class="kw-2">&amp;</span><a href="#498">expr_place</a>, <span class="kw-2">&amp;</span><a href="#491">pat</a>);
+    }
+
+    <span class="doccomment">/// Indicates that the value of `blk` will be consumed, meaning either copied or moved
+    /// depending on its type.
+    </span><span class="kw">fn </span>walk_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, blk: <span class="kw-2">&amp;</span>hir::Block&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;walk_block(blk.hir_id={})&quot;</span>, blk.hir_id);
+
+        <span class="kw">for </span>stmt <span class="kw">in </span>blk.stmts {
+            <span class="self">self</span>.walk_stmt(stmt);
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>tail_expr) = <a href="#510">blk</a>.expr {
+            <a class="self" href="#510">self</a>.<a href="#177">consume_expr</a>(<a href="#517">tail_expr</a>);
+        }
+    }
+
+    <span class="kw">fn </span>walk_struct_expr&lt;<span class="lifetime">&#39;hir</span>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        fields: <span class="kw-2">&amp;</span>[hir::ExprField&lt;<span class="lifetime">&#39;_</span>&gt;],
+        opt_with: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+    ) {
+        <span class="comment">// Consume the expressions supplying values for each field.
+        </span><span class="kw">for </span>field <span class="kw">in </span>fields {
+            <span class="self">self</span>.consume_expr(field.expr);
+        }
+
+        <span class="kw">let </span>with_expr = <span class="kw">match </span><span class="kw-2">*</span><a href="#525">opt_with</a> {
+            <span class="prelude-val">Some</span>(w) =&gt; <span class="kw-2">&amp;*</span><a href="#533">w</a>,
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">return</span>;
+            }
+        };
+
+        <span class="kw">let </span>with_place = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr(with_expr));
+
+        <span class="comment">// Select just those fields of the `with`
+        // expression that will actually be used
+        </span><span class="kw">match </span><a href="#539">with_place</a>.place.ty().kind() {
+            ty::Adt(adt, substs) <span class="kw">if </span><a href="#544">adt</a>.is_struct() =&gt; {
+                <span class="comment">// Consume those fields of the with expression that are needed.
+                </span><span class="kw">for </span>(f_index, with_field) <span class="kw">in </span>adt.non_enum_variant().fields.iter().enumerate() {
+                    <span class="kw">let </span>is_mentioned = fields.iter().any(|f| {
+                        <span class="self">self</span>.tcx().field_index(f.hir_id, <span class="self">self</span>.mc.typeck_results) == f_index
+                    });
+                    <span class="kw">if </span>!is_mentioned {
+                        <span class="kw">let </span>field_place = <span class="self">self</span>.mc.cat_projection(
+                            <span class="kw-2">&amp;*</span>with_expr,
+                            with_place.clone(),
+                            with_field.ty(<span class="self">self</span>.tcx(), substs),
+                            ProjectionKind::Field(f_index <span class="kw">as </span>u32, VariantIdx::new(<span class="number">0</span>)),
+                        );
+                        <span class="self">self</span>.delegate_consume(<span class="kw-2">&amp;</span>field_place, field_place.hir_id);
+                    }
+                }
+            }
+            <span class="kw">_ </span>=&gt; {
+                <span class="comment">// the base expression should always evaluate to a
+                // struct; however, when EUV is run during typeck, it
+                // may not. This will generate an error earlier in typeck,
+                // so we can just ignore it.
+                </span><span class="kw">if </span>!<span class="self">self</span>.tcx().sess.has_errors().is_some() {
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(with_expr.span, <span class="string">&quot;with expression doesn&#39;t evaluate to a struct&quot;</span>);
+                }
+            }
+        }
+
+        <span class="comment">// walk the with expression so that complex expressions
+        // are properly handled.
+        </span><a class="self" href="#523">self</a>.<a href="#204">walk_expr</a>(<a href="#532">with_expr</a>);
+    }
+
+    <span class="doccomment">/// Invoke the appropriate delegate calls for anything that gets
+    /// consumed or borrowed as part of the automatic adjustment
+    /// process.
+    </span><span class="kw">fn </span>walk_adjustment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span>adjustments = <a class="self" href="#580">self</a>.mc.typeck_results.expr_adjustments(<a href="#580">expr</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>place_with_id = <a class="macro" href="#117-127">return_if_err!</a>(<span class="self">self</span>.mc.cat_expr_unadjusted(expr));
+        <span class="kw">for </span>adjustment <span class="kw">in </span>adjustments {
+            <span class="macro">debug!</span>(<span class="string">&quot;walk_adjustment expr={:?} adj={:?}&quot;</span>, expr, adjustment);
+            <span class="kw">match </span>adjustment.kind {
+                adjustment::Adjust::NeverToAny | adjustment::Adjust::Pointer(<span class="kw">_</span>) =&gt; {
+                    <span class="comment">// Creating a closure/fn-pointer or unsizing consumes
+                    // the input and stores it into the resulting rvalue.
+                    </span><span class="self">self</span>.delegate_consume(<span class="kw-2">&amp;</span>place_with_id, place_with_id.hir_id);
+                }
+
+                adjustment::Adjust::Deref(<span class="prelude-val">None</span>) =&gt; {}
+
+                <span class="comment">// Autoderefs for overloaded Deref calls in fact reference
+                // their receiver. That is, if we have `(*x)` where `x`
+                // is of type `Rc&lt;T&gt;`, then this in fact is equivalent to
+                // `x.deref()`. Since `deref()` is declared with `&amp;self`,
+                // this is an autoref of `x`.
+                </span>adjustment::Adjust::Deref(<span class="prelude-val">Some</span>(<span class="kw-2">ref </span>deref)) =&gt; {
+                    <span class="kw">let </span>bk = ty::BorrowKind::from_mutbl(deref.mutbl);
+                    <span class="self">self</span>.delegate.borrow(<span class="kw-2">&amp;</span>place_with_id, place_with_id.hir_id, bk);
+                }
+
+                adjustment::Adjust::Borrow(<span class="kw-2">ref </span>autoref) =&gt; {
+                    <span class="self">self</span>.walk_autoref(expr, <span class="kw-2">&amp;</span>place_with_id, autoref);
+                }
+            }
+            place_with_id =
+                <span class="macro">return_if_err!</span>(<span class="self">self</span>.mc.cat_expr_adjusted(expr, place_with_id, adjustment));
+        }
+    }
+
+    <span class="doccomment">/// Walks the autoref `autoref` applied to the autoderef&#39;d
+    /// `expr`. `base_place` is the mem-categorized form of `expr`
+    /// after all relevant autoderefs have occurred.
+    </span><span class="kw">fn </span>walk_autoref(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+        base_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        autoref: <span class="kw-2">&amp;</span>adjustment::AutoBorrow&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;walk_autoref(expr.hir_id={} base_place={:?} autoref={:?})&quot;</span>,
+            expr.hir_id, base_place, autoref
+        );
+
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#620">autoref</a> {
+            adjustment::AutoBorrow::Ref(<span class="kw">_</span>, m) =&gt; {
+                <a class="self" href="#617">self</a>.delegate.<a href="#47-52">borrow</a>(
+                    <a href="#619">base_place</a>,
+                    <a href="#619">base_place</a>.hir_id,
+                    ty::BorrowKind::from_mutbl(<a href="#628">m</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+                );
+            }
+
+            adjustment::AutoBorrow::RawPtr(m) =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;walk_autoref: expr.hir_id={} base_place={:?}&quot;</span>, expr.hir_id, base_place);
+
+                <a class="self" href="#617">self</a>.delegate.<a href="#47-52">borrow</a>(<a href="#619">base_place</a>, <a href="#619">base_place</a>.hir_id, ty::BorrowKind::from_mutbl(<a href="#636">m</a>));
+            }
+        }
+    }
+
+    <span class="kw">fn </span>walk_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, discr_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, arm: <span class="kw-2">&amp;</span>hir::Arm&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span>closure_def_id = <span class="kw">match </span><a href="#644">discr_place</a>.place.base {
+            PlaceBase::Upvar(upvar_id) =&gt; <span class="prelude-val">Some</span>(<a href="#646">upvar_id</a>.closure_expr_id),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        };
+
+        <a class="self" href="#644">self</a>.delegate.<a href="#76-81">fake_read</a>(
+            <a href="#644">discr_place</a>,
+            FakeReadCause::ForMatchedPlace(<a href="#645">closure_def_id</a>),
+            <a href="#644">discr_place</a>.hir_id,
+        );
+        <a class="self" href="#644">self</a>.<a href="#683-688">walk_pat</a>(<a href="#644">discr_place</a>, <a href="#644">arm</a>.pat, <a href="#644">arm</a>.guard.is_some());
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(hir::Guard::If(e)) = <a href="#644">arm</a>.guard {
+            <a class="self" href="#644">self</a>.<a href="#177">consume_expr</a>(<a href="#657">e</a>)
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(hir::Guard::IfLet(<span class="kw-2">ref </span>l)) = <a href="#644">arm</a>.guard {
+            <a class="self" href="#644">self</a>.<a href="#177">consume_expr</a>(<a href="#659">l</a>.init)
+        }
+
+        <a class="self" href="#644">self</a>.<a href="#177">consume_expr</a>(<a href="#644">arm</a>.body);
+    }
+
+    <span class="doccomment">/// Walks a pat that occurs in isolation (i.e., top-level of fn argument or
+    /// let binding, and *not* a match arm or nested pat.)
+    </span><span class="kw">fn </span>walk_irrefutable_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, discr_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;, pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span>closure_def_id = <span class="kw">match </span><a href="#668">discr_place</a>.place.base {
+            PlaceBase::Upvar(upvar_id) =&gt; <span class="prelude-val">Some</span>(<a href="#670">upvar_id</a>.closure_expr_id),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        };
+
+        <a class="self" href="#668">self</a>.delegate.<a href="#76-81">fake_read</a>(
+            <a href="#668">discr_place</a>,
+            FakeReadCause::ForLet(<a href="#669">closure_def_id</a>),
+            <a href="#668">discr_place</a>.hir_id,
+        );
+        <a class="self" href="#668">self</a>.<a href="#683-688">walk_pat</a>(<a href="#668">discr_place</a>, <a href="#668">pat</a>, <span class="bool-val">false</span>);
+    }
+
+    <span class="doccomment">/// The core driver for walking a pattern
+    </span><span class="kw">fn </span>walk_pat(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        discr_place: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        pat: <span class="kw-2">&amp;</span>hir::Pat&lt;<span class="lifetime">&#39;_</span>&gt;,
+        has_guard: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;walk_pat(discr_place={:?}, pat={:?}, has_guard={:?})&quot;</span>, discr_place, pat, has_guard);
+
+        <span class="kw">let </span>tcx = <a class="self" href="#684">self</a>.<a href="#163">tcx</a>();
+        <span class="kw">let </span><a href="#104">ExprUseVisitor</a> { <span class="kw-2">ref </span>mc, body_owner: <span class="kw">_</span>, <span class="kw-2">ref mut </span>delegate } = <span class="kw-2">*</span><a class="self" href="#684">self</a>;
+        <a class="macro" href="#117-127">return_if_err!</a>(mc.cat_pattern(discr_place.clone(), pat, |place, pat| {
+            <span class="kw">if let </span>PatKind::Binding(<span class="kw">_</span>, canonical_id, ..) = pat.kind {
+                <span class="macro">debug!</span>(<span class="string">&quot;walk_pat: binding place={:?} pat={:?}&quot;</span>, place, pat);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(bm) =
+                    mc.typeck_results.extract_binding_mode(tcx.sess, pat.hir_id, pat.span)
+                {
+                    <span class="macro">debug!</span>(<span class="string">&quot;walk_pat: pat.hir_id={:?} bm={:?}&quot;</span>, pat.hir_id, bm);
+
+                    <span class="comment">// pat_ty: the type of the binding being produced.
+                    </span><span class="kw">let </span>pat_ty = <span class="macro">return_if_err!</span>(mc.node_ty(pat.hir_id));
+                    <span class="macro">debug!</span>(<span class="string">&quot;walk_pat: pat_ty={:?}&quot;</span>, pat_ty);
+
+                    <span class="kw">let </span>def = Res::Local(canonical_id);
+                    <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">ref </span>binding_place) = mc.cat_res(pat.hir_id, pat.span, pat_ty, def) {
+                        delegate.bind(binding_place, binding_place.hir_id);
+                    }
+
+                    <span class="comment">// Subtle: MIR desugaring introduces immutable borrows for each pattern
+                    // binding when lowering pattern guards to ensure that the guard does not
+                    // modify the scrutinee.
+                    </span><span class="kw">if </span>has_guard {
+                        delegate.borrow(place, discr_place.hir_id, ImmBorrow);
+                    }
+
+                    <span class="comment">// It is also a borrow or copy/move of the value being matched.
+                    // In a cases of pattern like `let pat = upvar`, don&#39;t use the span
+                    // of the pattern, as this just looks confusing, instead use the span
+                    // of the discriminant.
+                    </span><span class="kw">match </span>bm {
+                        ty::BindByReference(m) =&gt; {
+                            <span class="kw">let </span>bk = ty::BorrowKind::from_mutbl(m);
+                            delegate.borrow(place, discr_place.hir_id, bk);
+                        }
+                        ty::BindByValue(..) =&gt; {
+                            <span class="macro">debug!</span>(<span class="string">&quot;walk_pat binding consuming pat&quot;</span>);
+                            delegate_consume(mc, <span class="kw-2">*</span>delegate, place, discr_place.hir_id);
+                        }
+                    }
+                }
+            }
+        }));
+    }
+
+    <span class="doccomment">/// Handle the case where the current body contains a closure.
+    ///
+    /// When the current body being handled is a closure, then we must make sure that
+    /// - The parent closure only captures Places from the nested closure that are not local to it.
+    ///
+    /// In the following example the closures `c` only captures `p.x` even though `incr`
+    /// is a capture of the nested closure
+    ///
+    /// ```
+    /// struct P { x: i32 }
+    /// let mut p = P { x: 4 };
+    /// let c = || {
+    ///    let incr = 10;
+    ///    let nested = || p.x += incr;
+    /// };
+    /// ```
+    ///
+    /// - When reporting the Place back to the Delegate, ensure that the UpvarId uses the enclosing
+    /// closure as the DefId.
+    </span><span class="kw">fn </span>walk_captures(<span class="kw-2">&amp;mut </span><span class="self">self</span>, closure_expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">fn </span>upvar_is_local_variable&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+            upvars: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>FxIndexMap&lt;<a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>, <a href="../../rustc_hir/hir/struct.Upvar.html">hir::Upvar</a>&gt;&gt;,
+            upvar_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+            body_owner_is_closure: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+            <a href="#757">upvars</a>.map(|upvars| !<a href="#761">upvars</a>.contains_key(<span class="kw-2">&amp;</span><a href="#758">upvar_id</a>)).unwrap_or(<a href="#759">body_owner_is_closure</a>)
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;walk_captures({:?})&quot;</span>, closure_expr);
+
+        <span class="kw">let </span>tcx = <a class="self" href="#755">self</a>.<a href="#163">tcx</a>();
+        <span class="kw">let </span>closure_def_id = <a href="#766">tcx</a>.hir().local_def_id(<a href="#755">closure_expr</a>.hir_id);
+        <span class="kw">let </span>upvars = <a href="#766">tcx</a>.upvars_mentioned(<a class="self" href="#755">self</a>.body_owner);
+
+        <span class="comment">// For purposes of this function, generator and closures are equivalent.
+        </span><span class="kw">let </span>body_owner_is_closure =
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(tcx.hir().body_owner_kind(<span class="self">self</span>.body_owner), hir::BodyOwnerKind::Closure,);
+
+        <span class="comment">// If we have a nested closure, we want to include the fake reads present in the nested closure.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(fake_reads) = <a class="self" href="#755">self</a>.mc.typeck_results.closure_fake_reads.get(<span class="kw-2">&amp;</span><a href="#767">closure_def_id</a>) {
+            <span class="kw">for </span>(fake_read, cause, hir_id) <span class="kw">in </span>fake_reads.iter() {
+                <span class="kw">match </span>fake_read.base {
+                    PlaceBase::Upvar(upvar_id) =&gt; {
+                        <span class="kw">if </span>upvar_is_local_variable(
+                            upvars,
+                            upvar_id.var_path.hir_id,
+                            body_owner_is_closure,
+                        ) {
+                            <span class="comment">// The nested closure might be fake reading the current (enclosing) closure&#39;s local variables.
+                            // The only places we want to fake read before creating the parent closure are the ones that
+                            // are not local to it/ defined by it.
+                            //
+                            // ```rust,ignore(cannot-test-this-because-pseudo-code)
+                            // let v1 = (0, 1);
+                            // let c = || { // fake reads: v1
+                            //    let v2 = (0, 1);
+                            //    let e = || { // fake reads: v1, v2
+                            //       let (_, t1) = v1;
+                            //       let (_, t2) = v2;
+                            //    }
+                            // }
+                            // ```
+                            // This check is performed when visiting the body of the outermost closure (`c`) and ensures
+                            // that we don&#39;t add a fake read of v2 in c.
+                            </span><span class="kw">continue</span>;
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; {
+                        <span class="macro">bug!</span>(
+                            <span class="string">&quot;Do not know how to get HirId out of Rvalue and StaticItem {:?}&quot;</span>,
+                            fake_read.base
+                        );
+                    }
+                };
+                <span class="self">self</span>.delegate.fake_read(
+                    <span class="kw-2">&amp;</span>PlaceWithHirId { place: fake_read.clone(), hir_id: <span class="kw-2">*</span>hir_id },
+                    <span class="kw-2">*</span>cause,
+                    <span class="kw-2">*</span>hir_id,
+                );
+            }
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(min_captures) = <a class="self" href="#755">self</a>.mc.typeck_results.closure_min_captures.get(<span class="kw-2">&amp;</span><a href="#767">closure_def_id</a>)
+        {
+            <span class="kw">for </span>(var_hir_id, min_list) <span class="kw">in </span>min_captures.iter() {
+                <span class="kw">if </span>upvars.map_or(body_owner_is_closure, |upvars| !upvars.contains_key(var_hir_id)) {
+                    <span class="comment">// The nested closure might be capturing the current (enclosing) closure&#39;s local variables.
+                    // We check if the root variable is ever mentioned within the enclosing closure, if not
+                    // then for the current body (if it&#39;s a closure) these aren&#39;t captures, we will ignore them.
+                    </span><span class="kw">continue</span>;
+                }
+                <span class="kw">for </span>captured_place <span class="kw">in </span>min_list {
+                    <span class="kw">let </span>place = <span class="kw-2">&amp;</span>captured_place.place;
+                    <span class="kw">let </span>capture_info = captured_place.info;
+
+                    <span class="kw">let </span>place_base = <span class="kw">if </span>body_owner_is_closure {
+                        <span class="comment">// Mark the place to be captured by the enclosing closure
+                        </span>PlaceBase::Upvar(ty::UpvarId::new(<span class="kw-2">*</span>var_hir_id, <span class="self">self</span>.body_owner))
+                    } <span class="kw">else </span>{
+                        <span class="comment">// If the body owner isn&#39;t a closure then the variable must
+                        // be a local variable
+                        </span>PlaceBase::Local(<span class="kw-2">*</span>var_hir_id)
+                    };
+                    <span class="kw">let </span>place_with_id = PlaceWithHirId::new(
+                        capture_info.path_expr_id.unwrap_or(
+                            capture_info.capture_kind_expr_id.unwrap_or(closure_expr.hir_id),
+                        ),
+                        place.base_ty,
+                        place_base,
+                        place.projections.clone(),
+                    );
+
+                    <span class="kw">match </span>capture_info.capture_kind {
+                        ty::UpvarCapture::ByValue =&gt; {
+                            <span class="self">self</span>.delegate_consume(<span class="kw-2">&amp;</span>place_with_id, place_with_id.hir_id);
+                        }
+                        ty::UpvarCapture::ByRef(upvar_borrow) =&gt; {
+                            <span class="self">self</span>.delegate.borrow(
+                                <span class="kw-2">&amp;</span>place_with_id,
+                                place_with_id.hir_id,
+                                upvar_borrow,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+<span class="kw">fn </span>copy_or_move&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    mc: <span class="kw-2">&amp;</span>mc::MemCategorizationContext&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <a href="#85">ConsumeMode</a> {
+    <span class="kw">if </span>!mc.type_is_copy_modulo_regions(
+        place_with_id.place.ty(),
+        mc.tcx().hir().span(place_with_id.hir_id),
+    ) {
+        <a href="#89">ConsumeMode::Move</a>
+    } <span class="kw">else </span>{
+        <a href="#87">ConsumeMode::Copy</a>
+    }
+}
+
+<span class="comment">// - If a place is used in a `ByValue` context then move it if it&#39;s not a `Copy` type.
+// - If the place that is a `Copy` type consider it an `ImmBorrow`.
+</span><span class="kw">fn </span>delegate_consume&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    mc: <span class="kw-2">&amp;</span>mc::MemCategorizationContext&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    delegate: <span class="kw-2">&amp;mut </span>(<span class="kw">dyn </span>Delegate&lt;<span class="lifetime">&#39;tcx</span>&gt; + <span class="lifetime">&#39;a</span>),
+    place_with_id: <span class="kw-2">&amp;</span>PlaceWithHirId&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    diag_expr_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+) {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;delegate_consume(place_with_id={:?})&quot;</span>, place_with_id);
+
+    <span class="kw">let </span>mode = <a href="#866-869">copy_or_move</a>(<a href="#883">mc</a>, <a href="#885">place_with_id</a>);
+
+    <span class="kw">match </span><a href="#890">mode</a> {
+        <a href="#89">ConsumeMode::Move</a> =&gt; <a href="#884">delegate</a>.<a href="#43">consume</a>(<a href="#885">place_with_id</a>, <a href="#886">diag_expr_id</a>),
+        <a href="#87">ConsumeMode::Copy</a> =&gt; <a href="#884">delegate</a>.<a href="#56">copy</a>(<a href="#885">place_with_id</a>, <a href="#886">diag_expr_id</a>),
+    }
+}
+
+<span class="kw">fn </span>is_multivariant_adt(ty: Ty&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">if let </span>ty::Adt(def, <span class="kw">_</span>) = <a href="#898">ty</a>.kind() {
+        <span class="comment">// Note that if a non-exhaustive SingleVariant is defined in another crate, we need
+        // to assume that more cases will be added to the variant in the future. This mean
+        // that we should handle non-exhaustive SingleVariant the same way we would handle
+        // a MultiVariant.
+        // If the variant is not local it must be defined in another crate.
+        </span><span class="kw">let </span>is_non_exhaustive = <span class="kw">match </span><a href="#899">def</a>.adt_kind() {
+            AdtKind::Struct | AdtKind::Union =&gt; {
+                <a href="#899">def</a>.non_enum_variant().is_field_list_non_exhaustive()
+            }
+            AdtKind::Enum =&gt; <a href="#899">def</a>.is_variant_list_non_exhaustive(),
+        };
+        <a href="#899">def</a>.variants().len() &gt; <span class="number">1 </span>|| (!<a href="#899">def</a>.did().is_local() &amp;&amp; <a href="#905">is_non_exhaustive</a>)
+    } <span class="kw">else </span>{
+        <span class="bool-val">false
+    </span>}
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

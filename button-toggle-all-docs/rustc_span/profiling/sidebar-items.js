@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["SpannedEventArgRecorder","Extension trait for self-profiling purposes: allows to record spans within a generic activity’s event arguments."]]};

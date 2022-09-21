@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["find_consumed_and_borrowed",""]],"struct":[["ConsumedAndBorrowedPlaces",""],["ExprUseDelegate","Works with ExprUseVisitor to find interesting values for the drop range analysis."]]};

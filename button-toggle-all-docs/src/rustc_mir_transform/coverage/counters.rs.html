@@ -1,0 +1,1230 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_transform/src/coverage/counters.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>counters.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="mod.rs.html#35"><span class="kw">super</span>::Error</a>;
+
+<span class="kw">use </span><a href="mod.rs.html#4"><span class="kw">super</span>::debug</a>;
+<span class="kw">use </span><a href="mod.rs.html#5"><span class="kw">super</span>::graph</a>;
+<span class="kw">use </span><a href="mod.rs.html#6"><span class="kw">super</span>::spans</a>;
+
+<span class="kw">use </span>debug::{<a href="debug.rs.html#260">DebugCounters</a>, <a href="debug.rs.html#129">NESTED_INDENT</a>};
+<span class="kw">use </span>graph::{<a href="graph.rs.html#283-289">BasicCoverageBlock</a>, <a href="graph.rs.html#435">BcbBranch</a>, <a href="graph.rs.html#22">CoverageGraph</a>, <a href="graph.rs.html#516">TraverseCoverageGraphWithLoops</a>};
+<span class="kw">use </span><a href="spans.rs.html#68">spans::CoverageSpan</a>;
+
+<span class="kw">use </span><a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">rustc_data_structures::graph::WithNumNodes</a>;
+<span class="kw">use </span><a href="../../../rustc_index/bit_set/struct.BitSet.html">rustc_index::bit_set::BitSet</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/index.html">rustc_middle::mir::coverage</a>::<span class="kw-2">*</span>;
+
+<span class="doccomment">/// Manages the counter and expression indexes/IDs to generate `CoverageKind` components for MIR
+/// `Coverage` statements.
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>CoverageCounters {
+    function_source_hash: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    next_counter_id: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    num_expressions: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+    <span class="kw">pub </span>debug_counters: <a href="debug.rs.html#260">DebugCounters</a>,
+}
+
+<span class="kw">impl </span><a href="#17">CoverageCounters</a> {
+    <span class="kw">pub fn </span>new(function_source_hash: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#25">function_source_hash</a>,
+            next_counter_id: CounterValueReference::START.as_u32(),
+            num_expressions: <span class="number">0</span>,
+            debug_counters: DebugCounters::new(),
+        }
+    }
+
+    <span class="doccomment">/// Activate the `DebugCounters` data structures, to provide additional debug formatting
+    /// features when formatting `CoverageKind` (counter) values.
+    </span><span class="kw">pub fn </span>enable_debug(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <a class="self" href="#36">self</a>.debug_counters.<a href="debug.rs.html#269">enable</a>();
+    }
+
+    <span class="doccomment">/// Makes `CoverageKind` `Counter`s and `Expressions` for the `BasicCoverageBlock`s directly or
+    /// indirectly associated with `CoverageSpans`, and returns additional `Expression`s
+    /// representing intermediate values.
+    </span><span class="kw">pub fn </span>make_bcb_counters(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        basic_coverage_blocks: <span class="kw-2">&amp;mut </span><a href="graph.rs.html#22">CoverageGraph</a>,
+        coverage_spans: <span class="kw-2">&amp;</span>[<a href="spans.rs.html#68">CoverageSpan</a>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;, <a href="mod.rs.html#35">Error</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>bcb_counters = BcbCounters::new(<a class="self" href="#44">self</a>, <a href="#45">basic_coverage_blocks</a>);
+        <a href="#48">bcb_counters</a>.<a href="#141-144">make_bcb_counters</a>(<a href="#46">coverage_spans</a>)
+    }
+
+    <span class="kw">fn </span>make_counter&lt;F&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, debug_block_label_fn: F) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>
+    <span class="kw">where
+        </span>F: Fn() -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    {
+        <span class="kw">let </span>counter = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind::Counter</a> {
+            function_source_hash: <a class="self" href="#52">self</a>.function_source_hash,
+            id: <a class="self" href="#52">self</a>.<a href="#96">next_counter</a>(),
+        };
+        <span class="kw">if </span><span class="self">self</span>.debug_counters.is_enabled() {
+            <a class="self" href="#52">self</a>.debug_counters.<a href="debug.rs.html#278">add_counter</a>(<span class="kw-2">&amp;</span><a href="#56">counter</a>, (<a href="#52">debug_block_label_fn</a>)());
+        }
+        <a href="#56">counter</a>
+    }
+
+    <span class="kw">fn </span>make_expression&lt;F&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        lhs: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>,
+        op: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.Op.html">Op</a>,
+        rhs: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>,
+        debug_block_label_fn: F,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>
+    <span class="kw">where
+        </span>F: Fn() -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    {
+        <span class="kw">let </span>id = <a class="self" href="#67">self</a>.<a href="#106">next_expression</a>();
+        <span class="kw">let </span>expression = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind::Expression</a> { <a href="#76">id</a>, <a href="#68">lhs</a>, <a href="#69">op</a>, <a href="#70">rhs</a> };
+        <span class="kw">if </span><span class="self">self</span>.debug_counters.is_enabled() {
+            <a class="self" href="#67">self</a>.debug_counters.<a href="debug.rs.html#278">add_counter</a>(<span class="kw-2">&amp;</span><a href="#77">expression</a>, (<a href="#71">debug_block_label_fn</a>)());
+        }
+        <a href="#77">expression</a>
+    }
+
+    <span class="kw">pub fn </span>make_identity_counter(<span class="kw-2">&amp;mut </span><span class="self">self</span>, counter_operand: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a> {
+        <span class="kw">let </span>some_debug_block_label = <span class="kw">if </span><span class="self">self</span>.debug_counters.is_enabled() {
+            <a class="self" href="#84">self</a>.debug_counters.<a href="debug.rs.html#294">some_block_label</a>(<a href="#84">counter_operand</a>).cloned()
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>};
+        <a class="self" href="#84">self</a>.<a href="#66-74">make_expression</a>(<a href="#84">counter_operand</a>, Op::Add, ExpressionOperandId::ZERO, || {
+            <a href="#85">some_debug_block_label</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+        })
+    }
+
+    <span class="doccomment">/// Counter IDs start from one and go up.
+    </span><span class="kw">fn </span>next_counter(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.CounterValueReference.html">CounterValueReference</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.next_counter_id &lt; u32::MAX - <span class="self">self</span>.num_expressions);
+        <span class="kw">let </span>next = <a class="self" href="#96">self</a>.next_counter_id;
+        <a class="self" href="#96">self</a>.next_counter_id += <span class="number">1</span>;
+        CounterValueReference::from(<a href="#98">next</a>)
+    }
+
+    <span class="doccomment">/// Expression IDs start from u32::MAX and go down because an Expression can reference
+    /// (add or subtract counts) of both Counter regions and Expression regions. The counter
+    /// expression operand IDs must be unique across both types.
+    </span><span class="kw">fn </span>next_expression(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.InjectedExpressionId.html">InjectedExpressionId</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.next_counter_id &lt; u32::MAX - <span class="self">self</span>.num_expressions);
+        <span class="kw">let </span>next = u32::MAX - <a class="self" href="#106">self</a>.num_expressions;
+        <a class="self" href="#106">self</a>.num_expressions += <span class="number">1</span>;
+        InjectedExpressionId::from(<a href="#108">next</a>)
+    }
+}
+
+<span class="doccomment">/// Traverse the `CoverageGraph` and add either a `Counter` or `Expression` to every BCB, to be
+/// injected with `CoverageSpan`s. `Expressions` have no runtime overhead, so if a viable expression
+/// (adding or subtracting two other counters or expressions) can compute the same result as an
+/// embedded counter, an `Expression` should be used.
+</span><span class="kw">struct </span>BcbCounters&lt;<span class="lifetime">&#39;a</span>&gt; {
+    coverage_counters: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="#17">CoverageCounters</a>,
+    basic_coverage_blocks: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="graph.rs.html#22">CoverageGraph</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; BcbCounters&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>new(
+        coverage_counters: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="#17">CoverageCounters</a>,
+        basic_coverage_blocks: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="graph.rs.html#22">CoverageGraph</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ <a href="#125">coverage_counters</a>, <a href="#126">basic_coverage_blocks</a> }
+    }
+
+    <span class="doccomment">/// If two `BasicCoverageBlock`s branch from another `BasicCoverageBlock`, one of the branches
+    /// can be counted by `Expression` by subtracting the other branch from the branching
+    /// block. Otherwise, the `BasicCoverageBlock` executed the least should have the `Counter`.
+    /// One way to predict which branch executes the least is by considering loops. A loop is exited
+    /// at a branch, so the branch that jumps to a `BasicCoverageBlock` outside the loop is almost
+    /// always executed less than the branch that does not exit the loop.
+    ///
+    /// Returns any non-code-span expressions created to represent intermediate values (such as to
+    /// add two counters so the result can be subtracted from another counter), or an Error with
+    /// message for subsequent debugging.
+    </span><span class="kw">fn </span>make_bcb_counters(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        coverage_spans: <span class="kw-2">&amp;</span>[<a href="spans.rs.html#68">CoverageSpan</a>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;, <a href="mod.rs.html#35">Error</a>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;make_bcb_counters(): adding a counter or expression to each BasicCoverageBlock&quot;</span>);
+        <span class="kw">let </span>num_bcbs = <a class="self" href="#142">self</a>.basic_coverage_blocks.<a href="../../../rustc_data_structures/graph/trait.WithNumNodes.html">num_nodes</a>();
+        <span class="kw">let </span><span class="kw-2">mut </span>collect_intermediate_expressions = Vec::with_capacity(<a href="#146">num_bcbs</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>bcbs_with_coverage = BitSet::new_empty(<a href="#146">num_bcbs</a>);
+        <span class="kw">for </span>covspan <span class="kw">in </span>coverage_spans {
+            bcbs_with_coverage.insert(covspan.bcb);
+        }
+
+        <span class="comment">// Walk the `CoverageGraph`. For each `BasicCoverageBlock` node with an associated
+        // `CoverageSpan`, add a counter. If the `BasicCoverageBlock` branches, add a counter or
+        // expression to each branch `BasicCoverageBlock` (if the branch BCB has only one incoming
+        // edge) or edge from the branching BCB to the branch BCB (if the branch BCB has multiple
+        // incoming edges).
+        //
+        // The `TraverseCoverageGraphWithLoops` traversal ensures that, when a loop is encountered,
+        // all `BasicCoverageBlock` nodes in the loop are visited before visiting any node outside
+        // the loop. The `traversal` state includes a `context_stack`, providing a way to know if
+        // the current BCB is in one or more nested loops or not.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>traversal = TraverseCoverageGraphWithLoops::new(<span class="kw-2">&amp;</span><a class="self" href="#142">self</a>.basic_coverage_blocks);
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(bcb) = traversal.next(<span class="self">self</span>.basic_coverage_blocks) {
+            <span class="kw">if </span>bcbs_with_coverage.contains(bcb) {
+                <span class="macro">debug!</span>(<span class="string">&quot;{:?} has at least one `CoverageSpan`. Get or make its counter&quot;</span>, bcb);
+                <span class="kw">let </span>branching_counter_operand =
+                    <span class="self">self</span>.get_or_make_counter_operand(bcb, <span class="kw-2">&amp;mut </span>collect_intermediate_expressions)<span class="question-mark">?</span>;
+
+                <span class="kw">if </span><span class="self">self</span>.bcb_needs_branch_counters(bcb) {
+                    <span class="self">self</span>.make_branch_counters(
+                        <span class="kw-2">&amp;mut </span>traversal,
+                        bcb,
+                        branching_counter_operand,
+                        <span class="kw-2">&amp;mut </span>collect_intermediate_expressions,
+                    )<span class="question-mark">?</span>;
+                }
+            } <span class="kw">else </span>{
+                <span class="macro">debug!</span>(
+                    <span class="string">&quot;{:?} does not have any `CoverageSpan`s. A counter will only be added if \
+                    and when a covered BCB has an expression dependency.&quot;</span>,
+                    bcb,
+                );
+            }
+        }
+
+        <span class="kw">if </span>traversal.is_complete() {
+            <span class="prelude-val">Ok</span>(<a href="#147">collect_intermediate_expressions</a>)
+        } <span class="kw">else </span>{
+            Error::from_string(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;`TraverseCoverageGraphWithLoops` missed some `BasicCoverageBlock`s: {:?}&quot;</span>,
+                traversal.unvisited(),
+            ))
+        }
+    }
+
+    <span class="kw">fn </span>make_branch_counters(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        traversal: <span class="kw-2">&amp;mut </span><a href="graph.rs.html#516">TraverseCoverageGraphWithLoops</a>,
+        branching_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        branching_counter_operand: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>,
+        collect_intermediate_expressions: <span class="kw-2">&amp;mut </span>Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <a href="mod.rs.html#35">Error</a>&gt; {
+        <span class="kw">let </span>branches = <a class="self" href="#199">self</a>.<a href="#584">bcb_branches</a>(<a href="#201">branching_bcb</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;{:?} has some branch(es) without counters:\n  {}&quot;</span>,
+            branching_bcb,
+            branches
+                .iter()
+                .map(|branch| {
+                    <span class="macro">format!</span>(<span class="string">&quot;{:?}: {:?}&quot;</span>, branch, branch.counter(<span class="kw-2">&amp;</span><span class="self">self</span>.basic_coverage_blocks))
+                })
+                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+                .join(<span class="string">&quot;\n  &quot;</span>),
+        );
+
+        <span class="comment">// Use the `traversal` state to decide if a subset of the branches exit a loop, making it
+        // likely that branch is executed less than branches that do not exit the same loop. In this
+        // case, any branch that does not exit the loop (and has not already been assigned a
+        // counter) should be counted by expression, if possible. (If a preferred expression branch
+        // is not selected based on the loop context, select any branch without an existing
+        // counter.)
+        </span><span class="kw">let </span>expression_branch = <a class="self" href="#199">self</a>.<a href="#465-469">choose_preferred_expression_branch</a>(<a href="#200">traversal</a>, <span class="kw-2">&amp;</span><a href="#205">branches</a>);
+
+        <span class="comment">// Assign a Counter or Expression to each branch, plus additional `Expression`s, as needed,
+        // to sum up intermediate results.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>some_sumup_counter_operand = <span class="prelude-val">None</span>;
+        <span class="kw">for </span>branch <span class="kw">in </span>branches {
+            <span class="comment">// Skip the selected `expression_branch`, if any. It&#39;s expression will be assigned after
+            // all others.
+            </span><span class="kw">if </span>branch != expression_branch {
+                <span class="kw">let </span>branch_counter_operand = <span class="kw">if </span>branch.is_only_path_to_target() {
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;  {:?} has only one incoming edge (from {:?}), so adding a \
+                        counter&quot;</span>,
+                        branch, branching_bcb
+                    );
+                    <span class="self">self</span>.get_or_make_counter_operand(
+                        branch.target_bcb,
+                        collect_intermediate_expressions,
+                    )<span class="question-mark">?
+                </span>} <span class="kw">else </span>{
+                    <span class="macro">debug!</span>(<span class="string">&quot;  {:?} has multiple incoming edges, so adding an edge counter&quot;</span>, branch);
+                    <span class="self">self</span>.get_or_make_edge_counter_operand(
+                        branching_bcb,
+                        branch.target_bcb,
+                        collect_intermediate_expressions,
+                    )<span class="question-mark">?
+                </span>};
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(sumup_counter_operand) =
+                    some_sumup_counter_operand.replace(branch_counter_operand)
+                {
+                    <span class="kw">let </span>intermediate_expression = <span class="self">self</span>.coverage_counters.make_expression(
+                        branch_counter_operand,
+                        Op::Add,
+                        sumup_counter_operand,
+                        || <span class="prelude-val">None</span>,
+                    );
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;  [new intermediate expression: {}]&quot;</span>,
+                        <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>intermediate_expression)
+                    );
+                    <span class="kw">let </span>intermediate_expression_operand = intermediate_expression.as_operand_id();
+                    collect_intermediate_expressions.push(intermediate_expression);
+                    some_sumup_counter_operand.replace(intermediate_expression_operand);
+                }
+            }
+        }
+
+        <span class="comment">// Assign the final expression to the `expression_branch` by subtracting the total of all
+        // other branches from the counter of the branching BCB.
+        </span><span class="kw">let </span>sumup_counter_operand =
+            <a href="#228">some_sumup_counter_operand</a>.expect(<span class="string">&quot;sumup_counter_operand should have a value&quot;</span>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;Making an expression for the selected expression_branch: {:?} \
+            (expression_branch predecessors: {:?})&quot;</span>,
+            expression_branch,
+            <span class="self">self</span>.bcb_predecessors(expression_branch.target_bcb),
+        );
+        <span class="kw">let </span>expression = <a class="self" href="#199">self</a>.coverage_counters.<a href="#66-74">make_expression</a>(
+            <a href="#202">branching_counter_operand</a>,
+            Op::Subtract,
+            <a href="#273">sumup_counter_operand</a>,
+            || <span class="prelude-val">Some</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, expression_branch)),
+        );
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} gets an expression: {}&quot;</span>, expression_branch, <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>expression));
+        <span class="kw">let </span>bcb = <a href="#224">expression_branch</a>.target_bcb;
+        <span class="kw">if </span>expression_branch.is_only_path_to_target() {
+            <span class="self">self</span>.basic_coverage_blocks[bcb].set_counter(expression)<span class="question-mark">?</span>;
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.basic_coverage_blocks[bcb].set_edge_counter_from(branching_bcb, expression)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>get_or_make_counter_operand(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        collect_intermediate_expressions: <span class="kw-2">&amp;mut </span>Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <a class="self" href="#298">self</a>.<a href="#305-310">recursive_get_or_make_counter_operand</a>(<a href="#299">bcb</a>, <a href="#300">collect_intermediate_expressions</a>, <span class="number">1</span>)
+    }
+
+    <span class="kw">fn </span>recursive_get_or_make_counter_operand(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        collect_intermediate_expressions: <span class="kw-2">&amp;mut </span>Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+        debug_indent_level: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <span class="comment">// If the BCB already has a counter, return it.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(counter_kind) = <a class="self" href="#306">self</a>.basic_coverage_blocks[<a href="#307">bcb</a>].<a href="graph.rs.html#369">counter</a>() {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;{}{:?} already has a counter: {}&quot;</span>,
+                NESTED_INDENT.repeat(debug_indent_level),
+                bcb,
+                <span class="self">self</span>.format_counter(counter_kind),
+            );
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#312">counter_kind</a>.as_operand_id());
+        }
+
+        <span class="comment">// A BCB with only one incoming edge gets a simple `Counter` (via `make_counter()`).
+        // Also, a BCB that loops back to itself gets a simple `Counter`. This may indicate the
+        // program results in a tight infinite loop, but it should still compile.
+        </span><span class="kw">let </span>one_path_to_target = <a class="self" href="#306">self</a>.<a href="#601">bcb_has_one_path_to_target</a>(<a href="#307">bcb</a>);
+        <span class="kw">if </span>one_path_to_target || <span class="self">self</span>.bcb_predecessors(bcb).contains(<span class="kw-2">&amp;</span>bcb) {
+            <span class="kw">let </span>counter_kind = <a class="self" href="#306">self</a>.coverage_counters.<a href="#52-54">make_counter</a>(|| <span class="prelude-val">Some</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, bcb)));
+            <span class="kw">if </span>one_path_to_target {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                    <span class="string">&quot;{}{:?} gets a new counter: {}&quot;</span>,
+                    NESTED_INDENT.repeat(debug_indent_level),
+                    bcb,
+                    <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>counter_kind),
+                );
+            } <span class="kw">else </span>{
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                    <span class="string">&quot;{}{:?} has itself as its own predecessor. It can&#39;t be part of its own \
+                    Expression sum, so it will get its own new counter: {}. (Note, the compiled \
+                    code will generate an infinite loop.)&quot;</span>,
+                    NESTED_INDENT.repeat(debug_indent_level),
+                    bcb,
+                    <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>counter_kind),
+                );
+            }
+            <span class="kw">return </span><a class="self" href="#306">self</a>.basic_coverage_blocks[<a href="#307">bcb</a>].<a href="graph.rs.html#345-348">set_counter</a>(<a href="#327">counter_kind</a>);
+        }
+
+        <span class="comment">// A BCB with multiple incoming edges can compute its count by `Expression`, summing up the
+        // counters and/or expressions of its incoming edges. This will recursively get or create
+        // counters for those incoming edges first, then call `make_expression()` to sum them up,
+        // with additional intermediate expressions as needed.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>predecessors = <a class="self" href="#306">self</a>.<a href="#574">bcb_predecessors</a>(<a href="#307">bcb</a>).<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;{}{:?} has multiple incoming edges and will get an expression that sums them up...&quot;</span>,
+            NESTED_INDENT.repeat(debug_indent_level),
+            bcb,
+        );
+        <span class="kw">let </span>first_edge_counter_operand = <span class="self">self</span>.recursive_get_or_make_edge_counter_operand(
+            predecessors.next().unwrap(),
+            bcb,
+            collect_intermediate_expressions,
+            debug_indent_level + <span class="number">1</span>,
+        )<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>some_sumup_edge_counter_operand = <span class="prelude-val">None</span>;
+        <span class="kw">for </span>predecessor <span class="kw">in </span>predecessors {
+            <span class="kw">let </span>edge_counter_operand = <span class="self">self</span>.recursive_get_or_make_edge_counter_operand(
+                predecessor,
+                bcb,
+                collect_intermediate_expressions,
+                debug_indent_level + <span class="number">1</span>,
+            )<span class="question-mark">?</span>;
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(sumup_edge_counter_operand) =
+                some_sumup_edge_counter_operand.replace(edge_counter_operand)
+            {
+                <span class="kw">let </span>intermediate_expression = <span class="self">self</span>.coverage_counters.make_expression(
+                    sumup_edge_counter_operand,
+                    Op::Add,
+                    edge_counter_operand,
+                    || <span class="prelude-val">None</span>,
+                );
+                <span class="macro">debug!</span>(
+                    <span class="string">&quot;{}new intermediate expression: {}&quot;</span>,
+                    NESTED_INDENT.repeat(debug_indent_level),
+                    <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>intermediate_expression)
+                );
+                <span class="kw">let </span>intermediate_expression_operand = intermediate_expression.as_operand_id();
+                collect_intermediate_expressions.push(intermediate_expression);
+                some_sumup_edge_counter_operand.replace(intermediate_expression_operand);
+            }
+        }
+        <span class="kw">let </span>counter_kind = <a class="self" href="#306">self</a>.coverage_counters.<a href="#66-74">make_expression</a>(
+            <a href="#358">first_edge_counter_operand</a>,
+            Op::Add,
+            <a href="#364">some_sumup_edge_counter_operand</a>.unwrap(),
+            || <span class="prelude-val">Some</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, bcb)),
+        );
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;{}{:?} gets a new counter (sum of predecessor counters): {}&quot;</span>,
+            NESTED_INDENT.repeat(debug_indent_level),
+            bcb,
+            <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>counter_kind)
+        );
+        <a class="self" href="#306">self</a>.basic_coverage_blocks[<a href="#307">bcb</a>].<a href="graph.rs.html#345-348">set_counter</a>(<a href="#391">counter_kind</a>)
+    }
+
+    <span class="kw">fn </span>get_or_make_edge_counter_operand(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        from_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        to_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        collect_intermediate_expressions: <span class="kw-2">&amp;mut </span>Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <a class="self" href="#407">self</a>.<a href="#420-426">recursive_get_or_make_edge_counter_operand</a>(
+            <a href="#408">from_bcb</a>,
+            <a href="#409">to_bcb</a>,
+            <a href="#410">collect_intermediate_expressions</a>,
+            <span class="number">1</span>,
+        )
+    }
+
+    <span class="kw">fn </span>recursive_get_or_make_edge_counter_operand(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        from_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        to_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>,
+        collect_intermediate_expressions: <span class="kw-2">&amp;mut </span>Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>&gt;,
+        debug_indent_level: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/struct.ExpressionOperandId.html">ExpressionOperandId</a>, <a href="mod.rs.html#35">Error</a>&gt; {
+        <span class="comment">// If the source BCB has only one successor (assumed to be the given target), an edge
+        // counter is unnecessary. Just get or make a counter for the source BCB.
+        </span><span class="kw">let </span>successors = <a class="self" href="#421">self</a>.<a href="#579">bcb_successors</a>(<a href="#422">from_bcb</a>).iter();
+        <span class="kw">if </span>successors.len() == <span class="number">1 </span>{
+            <span class="kw">return </span><a class="self" href="#421">self</a>.<a href="#305-310">recursive_get_or_make_counter_operand</a>(
+                <a href="#422">from_bcb</a>,
+                <a href="#424">collect_intermediate_expressions</a>,
+                <a href="#425">debug_indent_level</a> + <span class="number">1</span>,
+            );
+        }
+
+        <span class="comment">// If the edge already has a counter, return it.
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(counter_kind) = <a class="self" href="#421">self</a>.basic_coverage_blocks[<a href="#423">to_bcb</a>].<a href="graph.rs.html#410">edge_counter_from</a>(<a href="#422">from_bcb</a>) {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;{}Edge {:?}-&gt;{:?} already has a counter: {}&quot;</span>,
+                NESTED_INDENT.repeat(debug_indent_level),
+                from_bcb,
+                to_bcb,
+                <span class="self">self</span>.format_counter(counter_kind)
+            );
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#439">counter_kind</a>.as_operand_id());
+        }
+
+        <span class="comment">// Make a new counter to count this edge.
+        </span><span class="kw">let </span>counter_kind =
+            <a class="self" href="#421">self</a>.coverage_counters.<a href="#52-54">make_counter</a>(|| <span class="prelude-val">Some</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}-&gt;{:?}&quot;</span>, from_bcb, to_bcb)));
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;{}Edge {:?}-&gt;{:?} gets a new counter: {}&quot;</span>,
+            NESTED_INDENT.repeat(debug_indent_level),
+            from_bcb,
+            to_bcb,
+            <span class="self">self</span>.format_counter(<span class="kw-2">&amp;</span>counter_kind)
+        );
+        <a class="self" href="#421">self</a>.basic_coverage_blocks[<a href="#423">to_bcb</a>].<a href="graph.rs.html#378-382">set_edge_counter_from</a>(<a href="#422">from_bcb</a>, <a href="#451">counter_kind</a>)
+    }
+
+    <span class="doccomment">/// Select a branch for the expression, either the recommended `reloop_branch`, or if none was
+    /// found, select any branch.
+    </span><span class="kw">fn </span>choose_preferred_expression_branch(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        traversal: <span class="kw-2">&amp;</span><a href="graph.rs.html#516">TraverseCoverageGraphWithLoops</a>,
+        branches: <span class="kw-2">&amp;</span>[<a href="graph.rs.html#435">BcbBranch</a>],
+    ) -&gt; <a href="graph.rs.html#435">BcbBranch</a> {
+        <span class="kw">let </span>branch_needs_a_counter =
+            |branch: <span class="kw-2">&amp;</span><a href="graph.rs.html#435">BcbBranch</a>| <a href="#471">branch</a>.<a href="graph.rs.html#454-457">counter</a>(<span class="kw-2">&amp;</span><a class="self" href="#466">self</a>.basic_coverage_blocks).is_none();
+
+        <span class="kw">let </span>some_reloop_branch = <a class="self" href="#466">self</a>.<a href="#509-513">find_some_reloop_branch</a>(<a href="#467">traversal</a>, <span class="kw-2">&amp;</span><a href="#468">branches</a>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(reloop_branch_without_counter) =
+            <a href="#473">some_reloop_branch</a>.filter(<a href="#470">branch_needs_a_counter</a>)
+        {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;Selecting reloop_branch={:?} that still needs a counter, to get the \
+                `Expression`&quot;</span>,
+                reloop_branch_without_counter
+            );
+            <a href="#474">reloop_branch_without_counter</a>
+        } <span class="kw">else </span>{
+            <span class="kw">let </span><span class="kw-2">&amp;</span>branch_without_counter = <a href="#468">branches</a>
+                .iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|&amp;&amp;branch| <a href="#486">branch</a>.<a href="graph.rs.html#454-457">counter</a>(<span class="kw-2">&amp;</span><a class="self" href="#466">self</a>.basic_coverage_blocks).is_none())
+                .expect(
+                    <span class="string">&quot;needs_branch_counters was `true` so there should be at least one \
+                    branch&quot;</span>,
+                );
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;Selecting any branch={:?} that still needs a counter, to get the \
+                `Expression` because there was no `reloop_branch`, or it already had a \
+                counter&quot;</span>,
+                branch_without_counter
+            );
+            <a href="#484">branch_without_counter</a>
+        }
+    }
+
+    <span class="doccomment">/// At most, one of the branches (or its edge, from the branching_bcb, if the branch has
+    /// multiple incoming edges) can have a counter computed by expression.
+    ///
+    /// If at least one of the branches leads outside of a loop (`found_loop_exit` is
+    /// true), and at least one other branch does not exit the loop (the first of which
+    /// is captured in `some_reloop_branch`), it&#39;s likely any reloop branch will be
+    /// executed far more often than loop exit branch, making the reloop branch a better
+    /// candidate for an expression.
+    </span><span class="kw">fn </span>find_some_reloop_branch(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        traversal: <span class="kw-2">&amp;</span><a href="graph.rs.html#516">TraverseCoverageGraphWithLoops</a>,
+        branches: <span class="kw-2">&amp;</span>[<a href="graph.rs.html#435">BcbBranch</a>],
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="graph.rs.html#435">BcbBranch</a>&gt; {
+        <span class="kw">let </span>branch_needs_a_counter =
+            |branch: <span class="kw-2">&amp;</span><a href="graph.rs.html#435">BcbBranch</a>| <a href="#515">branch</a>.<a href="graph.rs.html#454-457">counter</a>(<span class="kw-2">&amp;</span><a class="self" href="#510">self</a>.basic_coverage_blocks).is_none();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>some_reloop_branch: <span class="prelude-ty">Option</span>&lt;<a href="graph.rs.html#435">BcbBranch</a>&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">for </span>context <span class="kw">in </span>traversal.context_stack.iter().rev() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((backedge_from_bcbs, <span class="kw">_</span>)) = <span class="kw-2">&amp;</span>context.loop_backedges {
+                <span class="kw">let </span><span class="kw-2">mut </span>found_loop_exit = <span class="bool-val">false</span>;
+                <span class="kw">for </span><span class="kw-2">&amp;</span>branch <span class="kw">in </span>branches.iter() {
+                    <span class="kw">if </span>backedge_from_bcbs.iter().any(|<span class="kw-2">&amp;</span>backedge_from_bcb| {
+                        <span class="self">self</span>.bcb_is_dominated_by(backedge_from_bcb, branch.target_bcb)
+                    }) {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(reloop_branch) = some_reloop_branch {
+                            <span class="kw">if </span>reloop_branch.counter(<span class="kw-2">&amp;</span><span class="self">self</span>.basic_coverage_blocks).is_none() {
+                                <span class="comment">// we already found a candidate reloop_branch that still
+                                // needs a counter
+                                </span><span class="kw">continue</span>;
+                            }
+                        }
+                        <span class="comment">// The path from branch leads back to the top of the loop. Set this
+                        // branch as the `reloop_branch`. If this branch already has a
+                        // counter, and we find another reloop branch that doesn&#39;t have a
+                        // counter yet, that branch will be selected as the `reloop_branch`
+                        // instead.
+                        </span>some_reloop_branch = <span class="prelude-val">Some</span>(branch);
+                    } <span class="kw">else </span>{
+                        <span class="comment">// The path from branch leads outside this loop
+                        </span>found_loop_exit = <span class="bool-val">true</span>;
+                    }
+                    <span class="kw">if </span>found_loop_exit
+                        &amp;&amp; some_reloop_branch.filter(branch_needs_a_counter).is_some()
+                    {
+                        <span class="comment">// Found both a branch that exits the loop and a branch that returns
+                        // to the top of the loop (`reloop_branch`), and the `reloop_branch`
+                        // doesn&#39;t already have a counter.
+                        </span><span class="kw">break</span>;
+                    }
+                }
+                <span class="kw">if </span>!found_loop_exit {
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;No branches exit the loop, so any branch without an existing \
+                        counter can have the `Expression`.&quot;
+                    </span>);
+                    <span class="kw">break</span>;
+                }
+                <span class="kw">if </span>some_reloop_branch.is_some() {
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;Found a branch that exits the loop and a branch the loops back to \
+                        the top of the loop (`reloop_branch`). The `reloop_branch` will \
+                        get the `Expression`, as long as it still needs a counter.&quot;
+                    </span>);
+                    <span class="kw">break</span>;
+                }
+                <span class="comment">// else all branches exited this loop context, so run the same checks with
+                // the outer loop(s)
+            </span>}
+        }
+        <a href="#517">some_reloop_branch</a>
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>bcb_predecessors(<span class="kw-2">&amp;</span><span class="self">self</span>, bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; <span class="kw-2">&amp;</span>[<a href="graph.rs.html#283-289">BasicCoverageBlock</a>] {
+        <span class="kw-2">&amp;</span><a class="self" href="#574">self</a>.basic_coverage_blocks.predecessors[<a href="#574">bcb</a>]
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>bcb_successors(<span class="kw-2">&amp;</span><span class="self">self</span>, bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; <span class="kw-2">&amp;</span>[<a href="graph.rs.html#283-289">BasicCoverageBlock</a>] {
+        <span class="kw-2">&amp;</span><a class="self" href="#579">self</a>.basic_coverage_blocks.successors[<a href="#579">bcb</a>]
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>bcb_branches(<span class="kw-2">&amp;</span><span class="self">self</span>, from_bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; Vec&lt;<a href="graph.rs.html#435">BcbBranch</a>&gt; {
+        <a class="self" href="#584">self</a>.<a href="#579">bcb_successors</a>(<a href="#584">from_bcb</a>)
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>to_bcb| BcbBranch::from_to(<a href="#584">from_bcb</a>, <a href="#587">to_bcb</a>, <span class="kw-2">&amp;</span><a class="self" href="#584">self</a>.basic_coverage_blocks))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+    }
+
+    <span class="kw">fn </span>bcb_needs_branch_counters(<span class="kw-2">&amp;</span><span class="self">self</span>, bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>branch_needs_a_counter =
+            |branch: <span class="kw-2">&amp;</span><a href="graph.rs.html#435">BcbBranch</a>| <a href="#593">branch</a>.<a href="graph.rs.html#454-457">counter</a>(<span class="kw-2">&amp;</span><a class="self" href="#591">self</a>.basic_coverage_blocks).is_none();
+        <span class="kw">let </span>branches = <a class="self" href="#591">self</a>.<a href="#584">bcb_branches</a>(<a href="#591">bcb</a>);
+        <a href="#594">branches</a>.len() &gt; <span class="number">1 </span>&amp;&amp; <a href="#594">branches</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">any</a>(<a href="#592">branch_needs_a_counter</a>)
+    }
+
+    <span class="doccomment">/// Returns true if the BasicCoverageBlock has zero or one incoming edge. (If zero, it should be
+    /// the entry point for the function.)
+    </span><span class="attribute">#[inline]
+    </span><span class="kw">fn </span>bcb_has_one_path_to_target(<span class="kw-2">&amp;</span><span class="self">self</span>, bcb: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#601">self</a>.<a href="#574">bcb_predecessors</a>(<a href="#601">bcb</a>).len() &lt;= <span class="number">1
+    </span>}
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>bcb_is_dominated_by(<span class="kw-2">&amp;</span><span class="self">self</span>, node: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>, dom: <a href="graph.rs.html#283-289">BasicCoverageBlock</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#606">self</a>.basic_coverage_blocks.<a href="graph.rs.html#212">is_dominated_by</a>(<a href="#606">node</a>, <a href="#606">dom</a>)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>format_counter(<span class="kw-2">&amp;</span><span class="self">self</span>, counter_kind: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/coverage/enum.CoverageKind.html">CoverageKind</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <a class="self" href="#611">self</a>.coverage_counters.debug_counters.<a href="debug.rs.html#302">format_counter</a>(<a href="#611">counter_kind</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

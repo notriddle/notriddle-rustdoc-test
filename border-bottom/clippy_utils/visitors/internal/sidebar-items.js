@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["Continue","Trait for visitor functions to control whether or not to descend to child nodes. Implemented for only two types. `()` always descends. `Descend` allows controlled descent."]]};

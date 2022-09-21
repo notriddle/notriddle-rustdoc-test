@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["find_dead_unwinds","Returns the set of basic blocks whose unwind edges are known to not be reachable, because they are `drop` terminators that can’t drop anything."]],"struct":[["ElaborateDrops",""],["ElaborateDropsCtxt",""],["Elaborator",""],["InitializationData",""]]};

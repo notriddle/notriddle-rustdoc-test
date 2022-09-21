@@ -1,0 +1,300 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_infer/src/infer/error_reporting/nice_region_error/different_lifetimes.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>different_lifetimes.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../../normalize.css"><link rel="stylesheet" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../../dark.css" disabled><link rel="stylesheet" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../../rustc_infer/index.html"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Error Reporting for Anonymous Region Lifetime Errors
+//! where both the regions are anonymous.
+
+</span><span class="kw">use </span><a href="../../../errors/mod.rs.html#334"><span class="kw">crate</span>::errors::AddLifetimeParamsSuggestion</a>;
+<span class="kw">use </span><a href="../../../errors/mod.rs.html#427"><span class="kw">crate</span>::errors::LifetimeMismatch</a>;
+<span class="kw">use </span><a href="../../../errors/mod.rs.html#275"><span class="kw">crate</span>::errors::LifetimeMismatchLabels</a>;
+<span class="kw">use </span><a href="find_anon_type.rs.html#23-27"><span class="kw">crate</span>::infer::error_reporting::nice_region_error::find_anon_type::find_anon_type</a>;
+<span class="kw">use </span><a href="util.rs.html#13"><span class="kw">crate</span>::infer::error_reporting::nice_region_error::util::AnonymousParamInfo</a>;
+<span class="kw">use </span><a href="mod.rs.html#28"><span class="kw">crate</span>::infer::error_reporting::nice_region_error::NiceRegionError</a>;
+<span class="kw">use </span><a href="../../lexical_region_resolve/mod.rs.html#67"><span class="kw">crate</span>::infer::lexical_region_resolve::RegionResolutionError</a>;
+<span class="kw">use </span><a href="../../mod.rs.html#381"><span class="kw">crate</span>::infer::SubregionOrigin</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html"><span class="kw">crate</span>::infer::TyCtxt</a>;
+
+<span class="kw">use </span><a href="../../../../../rustc_errors/diagnostic/trait.AddSubdiagnostic.html">rustc_errors::AddSubdiagnostic</a>;
+<span class="kw">use </span>rustc_errors::{<a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, <a href="../../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>};
+<span class="kw">use </span><a href="../../../../../rustc_hir/hir/struct.Ty.html">rustc_hir::Ty</a>;
+<span class="kw">use </span>rustc_middle::ty::Region;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; NiceRegionError&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Print the error message for lifetime errors when both the concerned regions are anonymous.
+    ///
+    /// Consider a case where we have
+    ///
+    /// ```compile_fail,E0623
+    /// fn foo(x: &amp;mut Vec&lt;&amp;u8&gt;, y: &amp;u8) {
+    ///     x.push(y);
+    /// }
+    /// ```
+    ///
+    /// The example gives
+    ///
+    /// ```text
+    /// fn foo(x: &amp;mut Vec&lt;&amp;u8&gt;, y: &amp;u8) {
+    ///                    ---      --- these references are declared with different lifetimes...
+    ///     x.push(y);
+    ///     ^ ...but data from `y` flows into `x` here
+    /// ```
+    ///
+    /// It has been extended for the case of structs too.
+    ///
+    /// Consider the example
+    ///
+    /// ```no_run
+    /// struct Ref&lt;&#39;a&gt; { x: &amp;&#39;a u32 }
+    /// ```
+    ///
+    /// ```text
+    /// fn foo(mut x: Vec&lt;Ref&gt;, y: Ref) {
+    ///                   ---      --- these structs are declared with different lifetimes...
+    ///     x.push(y);
+    ///     ^ ...but data from `y` flows into `x` here
+    /// }
+    /// ```
+    ///
+    /// It will later be extended to trait objects.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>try_report_anon_anon_conflict(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <span class="kw">let </span>(span, sub, sup) = <span class="self">self</span>.regions()<span class="question-mark">?</span>;
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<a href="../../lexical_region_resolve/mod.rs.html#71">RegionResolutionError::ConcreteFailure</a>(
+            <a href="../../mod.rs.html#407">SubregionOrigin::ReferenceOutlivesReferent</a>(..),
+            ..,
+        )) = <a class="self" href="#56">self</a>.error
+        {
+            <span class="comment">// This error doesn&#39;t make much sense in this case.
+            </span><span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="comment">// Determine whether the sub and sup consist of both anonymous (elided) regions.
+        </span><span class="kw">let </span>anon_reg_sup = <span class="self">self</span>.tcx().is_suitable_region(sup)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>anon_reg_sub = <span class="self">self</span>.tcx().is_suitable_region(sub)<span class="question-mark">?</span>;
+        <span class="kw">let </span>scope_def_id_sup = <a href="#69">anon_reg_sup</a>.def_id;
+        <span class="kw">let </span>bregion_sup = <a href="#69">anon_reg_sup</a>.boundregion;
+        <span class="kw">let </span>scope_def_id_sub = <a href="#71">anon_reg_sub</a>.def_id;
+        <span class="kw">let </span>bregion_sub = <a href="#71">anon_reg_sub</a>.boundregion;
+
+        <span class="kw">let </span>ty_sup = find_anon_type(<span class="self">self</span>.tcx(), sup, <span class="kw-2">&amp;</span>bregion_sup)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>ty_sub = find_anon_type(<span class="self">self</span>.tcx(), sub, <span class="kw-2">&amp;</span>bregion_sub)<span class="question-mark">?</span>;
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;try_report_anon_anon_conflict: found_param1={:?} sup={:?} br1={:?}&quot;</span>,
+            ty_sub, sup, bregion_sup
+        );
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;try_report_anon_anon_conflict: found_param2={:?} sub={:?} br2={:?}&quot;</span>,
+            ty_sup, sub, bregion_sub
+        );
+
+        <span class="kw">let </span>(ty_sup, ty_fndecl_sup) = <a href="#77">ty_sup</a>;
+        <span class="kw">let </span>(ty_sub, ty_fndecl_sub) = <a href="#79">ty_sub</a>;
+
+        <span class="kw">let </span><a href="util.rs.html#13">AnonymousParamInfo</a> { param: anon_param_sup, .. } =
+            <span class="self">self</span>.find_param_with_region(sup, sup)<span class="question-mark">?</span>;
+        <span class="kw">let </span><a href="util.rs.html#13">AnonymousParamInfo</a> { param: anon_param_sub, .. } =
+            <span class="self">self</span>.find_param_with_region(sub, sub)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>sup_is_ret_type =
+            <a class="self" href="#56">self</a>.<a href="util.rs.html#122-127">is_return_type_anon</a>(<a href="#72">scope_def_id_sup</a>, <a href="#73">bregion_sup</a>, <a href="#90">ty_fndecl_sup</a>);
+        <span class="kw">let </span>sub_is_ret_type =
+            <a class="self" href="#56">self</a>.<a href="util.rs.html#122-127">is_return_type_anon</a>(<a href="#74">scope_def_id_sub</a>, <a href="#75">bregion_sub</a>, <a href="#91">ty_fndecl_sub</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;try_report_anon_anon_conflict: sub_is_ret_type={:?} sup_is_ret_type={:?}&quot;</span>,
+            sub_is_ret_type, sup_is_ret_type
+        );
+
+        <span class="kw">let </span>labels = <span class="kw">match </span>(<a href="#98">sup_is_ret_type</a>, <a href="#100">sub_is_ret_type</a>) {
+            (ret_capture @ <span class="prelude-val">Some</span>(ret_span), <span class="kw">_</span>) | (<span class="kw">_</span>, ret_capture @ <span class="prelude-val">Some</span>(ret_span)) =&gt; {
+                <span class="kw">let </span>param_span =
+                    <span class="kw">if </span>sup_is_ret_type == ret_capture { <a href="#91">ty_sub</a>.span } <span class="kw">else </span>{ <a href="#90">ty_sup</a>.span };
+                <a href="../../../errors/mod.rs.html#276">LifetimeMismatchLabels::InRet</a> {
+                    <a href="#110">param_span</a>,
+                    <a href="#109">ret_span</a>,
+                    <a href="#57">span</a>,
+                    label_var1: <a href="#93">anon_param_sup</a>.pat.simple_ident(),
+                }
+            }
+
+            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <a href="../../../errors/mod.rs.html#282">LifetimeMismatchLabels::Normal</a> {
+                hir_equal: <a href="#90">ty_sup</a>.hir_id == <a href="#91">ty_sub</a>.hir_id,
+                ty_sup: <a href="#90">ty_sup</a>.span,
+                ty_sub: <a href="#91">ty_sub</a>.span,
+                <a href="#57">span</a>,
+                sup: <a href="#93">anon_param_sup</a>.pat.simple_ident(),
+                sub: <a href="#95">anon_param_sub</a>.pat.simple_ident(),
+            },
+        };
+
+        <span class="kw">let </span>suggestion =
+            <a href="../../../errors/mod.rs.html#334">AddLifetimeParamsSuggestion</a> { tcx: <a class="self" href="#56">self</a>.<a href="mod.rs.html#48">tcx</a>(), <a href="#57">sub</a>, <a href="#90">ty_sup</a>, <a href="#91">ty_sub</a>, add_note: <span class="bool-val">true </span>};
+        <span class="kw">let </span>err = <a href="../../../errors/mod.rs.html#427">LifetimeMismatch</a> { <a href="#57">span</a>, <a href="#108">labels</a>, <a href="#130">suggestion</a> };
+        <span class="kw">let </span>reported = <a class="self" href="#56">self</a>.<a href="mod.rs.html#48">tcx</a>().sess.emit_err(<a href="#132">err</a>);
+        <span class="prelude-val">Some</span>(<a href="#133">reported</a>)
+    }
+}
+
+<span class="doccomment">/// Currently only used in rustc_borrowck, probably should be
+/// removed in favour of public_errors::AddLifetimeParamsSuggestion
+</span><span class="kw">pub fn </span>suggest_adding_lifetime_params&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    sub: Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ty_sup: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Ty&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ty_sub: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>Ty&lt;<span class="lifetime">&#39;_</span>&gt;,
+    err: <span class="kw-2">&amp;mut </span><a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+) {
+    <span class="kw">let </span>suggestion = <a href="../../../errors/mod.rs.html#334">AddLifetimeParamsSuggestion</a> { <a href="#141">tcx</a>, <a href="#142">sub</a>, <a href="#143">ty_sup</a>, <a href="#144">ty_sub</a>, add_note: <span class="bool-val">false </span>};
+    <a href="#147">suggestion</a>.<a href="../../../../../rustc_errors/diagnostic/trait.AddSubdiagnostic.html">add_to_diagnostic</a>(<a href="#145">err</a>);
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

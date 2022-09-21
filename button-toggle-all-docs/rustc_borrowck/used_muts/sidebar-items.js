@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["GatherUsedMutsVisitor","MIR visitor for collecting used mutable variables. The ’visit lifetime represents the duration of the MIR walk."]]};

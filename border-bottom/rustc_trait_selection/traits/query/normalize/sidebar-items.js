@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["MaxEscapingBoundVarVisitor",""],["NormalizationResult","Result from the `normalize_projection_ty` query."],["QueryNormalizer",""]],"trait":[["AtExt",""]]};

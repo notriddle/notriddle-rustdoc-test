@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["PhaseChange","Changes the MIR phase without changing the MIR itself."]]};

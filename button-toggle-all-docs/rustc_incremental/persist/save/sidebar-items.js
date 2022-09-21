@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["build_dep_graph","Builds the dependency graph."],["encode_query_cache",""],["encode_work_product_index",""],["save_dep_graph","Saves and writes the [`DepGraph`] to the file system."],["save_work_product_index","Saves the work product index."]]};

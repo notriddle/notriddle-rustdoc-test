@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["CHECK_CODE_BLOCK_SYNTAX",""]],"fn":[["check_code_block_syntax",""]],"struct":[["Buffer",""],["BufferEmitter",""],["SyntaxChecker",""]]};

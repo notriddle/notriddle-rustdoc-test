@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["write_graphviz_results","Writes a DOT file containing the results of a dataflow analysis if the user requested it via `rustc_mir` attributes."]],"struct":[["Engine","A solver for dataflow problems."],["Results","A dataflow analysis that has converged to fixpoint."],["RustcMirAttrs",""]]};

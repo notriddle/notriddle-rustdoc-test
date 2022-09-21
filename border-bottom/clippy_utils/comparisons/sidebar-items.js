@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Rel","Represent a normalized comparison operator."]],"fn":[["normalize_comparison","Put the expression in the form  `lhs < rhs`, `lhs <= rhs`, `lhs == rhs` or `lhs != rhs`."]]};

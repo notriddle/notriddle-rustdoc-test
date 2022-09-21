@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["RED_ZONE",""],["STACK_PER_RECURSION",""]],"fn":[["ensure_sufficient_stack","Grows the stack on demand to prevent stack overflow. Call this in strategic locations to “break up” recursive calls. E.g. almost any call to `visit_expr` or equivalent can benefit from this."]]};

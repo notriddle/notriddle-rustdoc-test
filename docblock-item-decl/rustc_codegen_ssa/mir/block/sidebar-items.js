@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ReturnDest",""]],"struct":[["TerminatorCodegenHelper","Used by `FunctionCx::codegen_terminator` for emitting common patterns e.g., creating a basic block, calling a function, etc."]]};

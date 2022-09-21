@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["destructure_const","Destructures array, ADT or tuple constants into the constants of their fields."],["provide",""],["thir_abstract_const","Builds an abstract const, do not use this directly, but use `AbstractConst::new` instead."]],"struct":[["AbstractConstBuilder",""]]};

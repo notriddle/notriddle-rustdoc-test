@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["linux","We use `flock` rather than `fcntl` on Linux, because WSL1 does not support `fcntl`-style advisory locks properly (rust-lang/rust#72157). For other Unix targets we still use `fcntl` because it’s more portable than `flock`."]],"struct":[["Lock",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["get_macro_ident","The token is an identifier, but not `_`. We prohibit passing `_` to macros expecting `ident` for now."]]};

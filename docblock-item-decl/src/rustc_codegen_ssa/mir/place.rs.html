@@ -1,0 +1,1078 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_ssa/src/mir/place.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>place.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_ssa/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_ssa/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="operand.rs.html#21"><span class="kw">super</span>::operand::OperandValue</a>;
+<span class="kw">use super</span>::{<a href="mod.rs.html#20">FunctionCx</a>, <a href="mod.rs.html#106">LocalRef</a>};
+
+<span class="kw">use </span><a href="../common.rs.html#15"><span class="kw">crate</span>::common::IntPredicate</a>;
+<span class="kw">use </span><a href="../lib.rs.html#47"><span class="kw">crate</span>::glue</a>;
+<span class="kw">use </span><a href="../lib.rs.html#52"><span class="kw">crate</span>::traits</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="../../../rustc_middle/mir/index.html">rustc_middle::mir</a>;
+<span class="kw">use </span><a href="../../../rustc_middle/mir/tcx/struct.PlaceTy.html">rustc_middle::mir::tcx::PlaceTy</a>;
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../../rustc_middle/ty/layout/trait.HasTyCtxt.html">HasTyCtxt</a>, <a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">LayoutOf</a>, <a href="../../../rustc_middle/ty/layout/type.TyAndLayout.html">TyAndLayout</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>};
+<span class="kw">use </span>rustc_target::abi::{<a href="../../../rustc_target/abi/enum.Abi.html">Abi</a>, <a href="../../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../../rustc_target/abi/enum.FieldsShape.html">FieldsShape</a>, Int, <a href="../../../rustc_target/abi/enum.TagEncoding.html">TagEncoding</a>};
+<span class="kw">use </span>rustc_target::abi::{<a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>, <a href="../../../rustc_target/abi/enum.Variants.html">Variants</a>};
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">pub struct </span>PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, V&gt; {
+    <span class="doccomment">/// A pointer to the contents of the place.
+    </span><span class="kw">pub </span>llval: V,
+
+    <span class="doccomment">/// This place&#39;s extra data if it is unsized, or `None` if null.
+    </span><span class="kw">pub </span>llextra: <span class="prelude-ty">Option</span>&lt;V&gt;,
+
+    <span class="doccomment">/// The monomorphized type of this place, including variant information.
+    </span><span class="kw">pub </span>layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// The alignment we know for this place.
+    </span><span class="kw">pub </span>align: <a href="../../../rustc_target/abi/struct.Align.html">Align</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, V: <a href="../traits/mod.rs.html#53">CodegenObject</a>&gt; PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, V&gt; {
+    <span class="kw">pub fn </span>new_sized(llval: V, layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, V&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized());
+        <a href="#16">PlaceRef</a> { <a href="#31">llval</a>, llextra: <span class="prelude-val">None</span>, <a href="#31">layout</a>, align: <a href="#31">layout</a>.align.abi }
+    }
+
+    <span class="kw">pub fn </span>new_sized_aligned(
+        llval: V,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        align: <a href="../../../rustc_target/abi/struct.Align.html">Align</a>,
+    ) -&gt; PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, V&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized());
+        <a href="#16">PlaceRef</a> { <a href="#37">llval</a>, llextra: <span class="prelude-val">None</span>, <a href="#38">layout</a>, <a href="#39">align</a> }
+    }
+
+    <span class="comment">// FIXME(eddyb) pass something else for the name so no work is done
+    // unless LLVM IR names are turned on (e.g. for `--emit=llvm-ir`).
+    </span><span class="kw">pub fn </span>alloca&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!layout.is_unsized(), <span class="string">&quot;tried to statically allocate unsized place&quot;</span>);
+        <span class="kw">let </span>tmp = <a href="#48">bx</a>.<a href="../traits/builder.rs.html#135">alloca</a>(<a href="#48">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#49">layout</a>), <a href="#49">layout</a>.align.abi);
+        <span class="self">Self</span>::new_sized(<a href="#52">tmp</a>, <a href="#49">layout</a>)
+    }
+
+    <span class="doccomment">/// Returns a place for an indirect reference to an unsized place.
+    </span><span class="comment">// FIXME(eddyb) pass something else for the name so no work is done
+    // unless LLVM IR names are turned on (e.g. for `--emit=llvm-ir`).
+    </span><span class="kw">pub fn </span>alloca_unsized_indirect&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(layout.is_unsized(), <span class="string">&quot;tried to allocate indirect place for sized values&quot;</span>);
+        <span class="kw">let </span>ptr_ty = <a href="#60">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>().mk_mut_ptr(<a href="#61">layout</a>.ty);
+        <span class="kw">let </span>ptr_layout = <a href="#60">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#64">ptr_ty</a>);
+        <span class="self">Self</span>::alloca(<a href="#60">bx</a>, <a href="#65">ptr_layout</a>)
+    }
+
+    <span class="kw">pub fn </span>len&lt;Cx: ConstMethods&lt;<span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>Cx) -&gt; V {
+        <span class="kw">if let </span><a href="../../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Array</a> { count, .. } = <a class="self" href="#69">self</a>.layout.fields {
+            <span class="kw">if </span><span class="self">self</span>.layout.is_unsized() {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(count, <span class="number">0</span>);
+                <a class="self" href="#69">self</a>.llextra.unwrap()
+            } <span class="kw">else </span>{
+                <a href="#69">cx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#70">count</a>)
+            }
+        } <span class="kw">else </span>{
+            <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unexpected layout `{:#?}` in PlaceRef::len&quot;</span>, <span class="self">self</span>.layout)
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, V: <a href="../traits/mod.rs.html#53">CodegenObject</a>&gt; PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, V&gt; {
+    <span class="doccomment">/// Access a field, at a point when the value&#39;s case is known.
+    </span><span class="kw">pub fn </span>project_field&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        <span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        ix: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>field = <a class="self" href="#86">self</a>.layout.field(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>(), <a href="#88">ix</a>);
+        <span class="kw">let </span>offset = <a class="self" href="#86">self</a>.layout.fields.offset(<a href="#88">ix</a>);
+        <span class="kw">let </span>effective_field_align = <a class="self" href="#86">self</a>.align.restrict_for_offset(<a href="#91">offset</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>simple = || {
+            <span class="kw">let </span>llval = <span class="kw">match </span><a class="self" href="#86">self</a>.layout.abi {
+                <span class="kw">_ if </span><a href="#91">offset</a>.bytes() == <span class="number">0 </span>=&gt; {
+                    <span class="comment">// Unions and newtypes only use an offset of 0.
+                    // Also handles the first field of Scalar, ScalarPair, and Vector layouts.
+                    </span><a class="self" href="#86">self</a>.llval
+                }
+                Abi::ScalarPair(a, b)
+                    <span class="kw">if </span><a href="#91">offset</a> == <a href="#101">a</a>.size(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>()).align_to(<a href="#101">b</a>.align(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>()).abi) =&gt;
+                {
+                    <span class="comment">// Offset matches second field.
+                    </span><span class="kw">let </span>ty = <a href="#87">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a class="self" href="#86">self</a>.layout);
+                    <a href="#87">bx</a>.<a href="../traits/builder.rs.html#185">struct_gep</a>(<a href="#105">ty</a>, <a class="self" href="#86">self</a>.llval, <span class="number">1</span>)
+                }
+                Abi::Scalar(<span class="kw">_</span>) | Abi::ScalarPair(..) | <a href="../../../rustc_target/abi/enum.Abi.html">Abi::Vector</a> { .. } <span class="kw">if </span><a href="#90">field</a>.is_zst() =&gt; {
+                    <span class="comment">// ZST fields are not included in Scalar, ScalarPair, and Vector layouts, so manually offset the pointer.
+                    </span><span class="kw">let </span>byte_ptr = <a href="#87">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a class="self" href="#86">self</a>.llval, <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#45">type_i8p</a>());
+                    <a href="#87">bx</a>.<a href="../traits/builder.rs.html#178">gep</a>(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#16">type_i8</a>(), <a href="#110">byte_ptr</a>, <span class="kw-2">&amp;</span>[<a href="#87">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#91">offset</a>.bytes())])
+                }
+                Abi::Scalar(<span class="kw">_</span>) | Abi::ScalarPair(..) =&gt; {
+                    <span class="comment">// All fields of Scalar and ScalarPair layouts must have been handled by this point.
+                    // Vector layouts have additional fields for each element of the vector, so don&#39;t panic in that case.
+                    </span><a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(
+                        <span class="string">&quot;offset of non-ZST field `{:?}` does not match layout `{:#?}`&quot;</span>,
+                        field,
+                        <span class="self">self</span>.layout
+                    );
+                }
+                <span class="kw">_ </span>=&gt; {
+                    <span class="kw">let </span>ty = <a href="#87">bx</a>.<a href="../traits/type_.rs.html#103">backend_type</a>(<a class="self" href="#86">self</a>.layout);
+                    <a href="#87">bx</a>.<a href="../traits/builder.rs.html#185">struct_gep</a>(<a href="#123">ty</a>, <a class="self" href="#86">self</a>.llval, <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#111">backend_field_index</a>(<a class="self" href="#86">self</a>.layout, <a href="#88">ix</a>))
+                }
+            };
+            <a href="#16">PlaceRef</a> {
+                <span class="comment">// HACK(eddyb): have to bitcast pointers until LLVM removes pointee types.
+                </span>llval: <a href="#87">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#95">llval</a>, <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#90">field</a>))),
+                llextra: <span class="kw">if </span>bx.cx().type_has_metadata(field.ty) { <a class="self" href="#86">self</a>.llextra } <span class="kw">else </span>{ <span class="prelude-val">None </span>},
+                layout: <a href="#90">field</a>,
+                align: <a href="#92">effective_field_align</a>,
+            }
+        };
+
+        <span class="comment">// Simple cases, which don&#39;t need DST adjustment:
+        //   * no metadata available - just log the case
+        //   * known alignment - sized types, `[T]`, `str` or a foreign type
+        //   * packed struct - there is no alignment padding
+        </span><span class="kw">match </span><a href="#90">field</a>.ty.kind() {
+            <span class="kw">_ if </span><a class="self" href="#86">self</a>.llextra.is_none() =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                    <span class="string">&quot;unsized field `{}`, of `{:?}` has no metadata for adjustment&quot;</span>,
+                    ix, <span class="self">self</span>.llval
+                );
+                <span class="kw">return </span><a href="#94">simple</a>();
+            }
+            <span class="kw">_ if </span>!<a href="#90">field</a>.is_unsized() =&gt; <span class="kw">return </span><a href="#94">simple</a>(),
+            ty::Slice(..) | ty::Str | ty::Foreign(..) =&gt; <span class="kw">return </span><a href="#94">simple</a>(),
+            ty::Adt(def, <span class="kw">_</span>) =&gt; {
+                <span class="kw">if </span>def.repr().packed() {
+                    <span class="comment">// FIXME(eddyb) generalize the adjustment when we
+                    // start supporting packing to larger alignments.
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(<span class="self">self</span>.layout.align.abi.bytes(), <span class="number">1</span>);
+                    <span class="kw">return </span><a href="#94">simple</a>();
+                }
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+
+        <span class="comment">// We need to get the pointer manually now.
+        // We do this by casting to a `*i8`, then offsetting it by the appropriate amount.
+        // We do this instead of, say, simply adjusting the pointer from the result of a GEP
+        // because the field may have an arbitrary alignment in the LLVM representation
+        // anyway.
+        //
+        // To demonstrate:
+        //
+        //     struct Foo&lt;T: ?Sized&gt; {
+        //         x: u16,
+        //         y: T
+        //     }
+        //
+        // The type `Foo&lt;Foo&lt;Trait&gt;&gt;` is represented in LLVM as `{ u16, { u16, u8 }}`, meaning that
+        // the `y` field has 16-bit alignment.
+
+        </span><span class="kw">let </span>meta = <a class="self" href="#86">self</a>.llextra;
+
+        <span class="kw">let </span>unaligned_offset = <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/consts.rs.html#19">const_usize</a>(<a href="#91">offset</a>.bytes());
+
+        <span class="comment">// Get the alignment of the field
+        </span><span class="kw">let </span>(<span class="kw">_</span>, unsized_align) = <a href="../glue.rs.html#11-15">glue::size_and_align_of_dst</a>(<a href="#87">bx</a>, <a href="#90">field</a>.ty, <a href="#177">meta</a>);
+
+        <span class="comment">// Bump the unaligned offset up to the appropriate alignment
+        </span><span class="kw">let </span>offset = <a href="#498-502">round_up_const_value_to_alignment</a>(<a href="#87">bx</a>, <a href="#179">unaligned_offset</a>, <a href="#182">unsized_align</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;struct_field_ptr: DST field offset: {:?}&quot;</span>, offset);
+
+        <span class="comment">// Cast and adjust pointer.
+        </span><span class="kw">let </span>byte_ptr = <a href="#87">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a class="self" href="#86">self</a>.llval, <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#45">type_i8p</a>());
+        <span class="kw">let </span>byte_ptr = <a href="#87">bx</a>.<a href="../traits/builder.rs.html#178">gep</a>(<a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#16">type_i8</a>(), <a href="#190">byte_ptr</a>, <span class="kw-2">&amp;</span>[<a href="#185">offset</a>]);
+
+        <span class="comment">// Finally, cast back to the type expected.
+        </span><span class="kw">let </span>ll_fty = <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#90">field</a>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;struct_field_ptr: Field type is {:?}&quot;</span>, ll_fty);
+
+        <a href="#16">PlaceRef</a> {
+            llval: <a href="#87">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#191">byte_ptr</a>, <a href="#87">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#194">ll_fty</a>)),
+            llextra: <a class="self" href="#86">self</a>.llextra,
+            layout: <a href="#90">field</a>,
+            align: <a href="#92">effective_field_align</a>,
+        }
+    }
+
+    <span class="doccomment">/// Obtain the actual discriminant of a value.
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(bx))]
+    </span><span class="kw">pub fn </span>codegen_get_discr&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        <span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        cast_to: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; V {
+        <span class="kw">let </span>cast_to = bx.cx().immediate_backend_type(bx.cx().layout_of(cast_to));
+        <span class="kw">if </span><span class="self">self</span>.layout.abi.is_uninhabited() {
+            <span class="kw">return </span>bx.cx().const_undef(cast_to);
+        }
+        <span class="kw">let </span>(tag_scalar, tag_encoding, tag_field) = <span class="kw">match </span><span class="self">self</span>.layout.variants {
+            Variants::Single { index } =&gt; {
+                <span class="kw">let </span>discr_val = <span class="self">self
+                    </span>.layout
+                    .ty
+                    .discriminant_for_variant(bx.cx().tcx(), index)
+                    .map_or(index.as_u32() <span class="kw">as </span>u128, |discr| discr.val);
+                <span class="kw">return </span>bx.cx().const_uint_big(cast_to, discr_val);
+            }
+            Variants::Multiple { tag, <span class="kw-2">ref </span>tag_encoding, tag_field, .. } =&gt; {
+                (tag, tag_encoding, tag_field)
+            }
+        };
+
+        <span class="comment">// Read the tag/niche-encoded discriminant from memory.
+        </span><span class="kw">let </span>tag = <span class="self">self</span>.project_field(bx, tag_field);
+        <span class="kw">let </span>tag = bx.load_operand(tag);
+
+        <span class="comment">// Decode the discriminant (specifically if it&#39;s niche-encoded).
+        </span><span class="kw">match </span><span class="kw-2">*</span>tag_encoding {
+            TagEncoding::Direct =&gt; {
+                <span class="kw">let </span>signed = <span class="kw">match </span>tag_scalar.primitive() {
+                    <span class="comment">// We use `i1` for bytes that are always `0` or `1`,
+                    // e.g., `#[repr(i8)] enum E { A, B }`, but we can&#39;t
+                    // let LLVM interpret the `i1` as signed, because
+                    // then `i1 1` (i.e., `E::B`) is effectively `i8 -1`.
+                    </span>Int(<span class="kw">_</span>, signed) =&gt; !tag_scalar.is_bool() &amp;&amp; signed,
+                    <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+                };
+                bx.intcast(tag.immediate(), cast_to, signed)
+            }
+            TagEncoding::Niche { untagged_variant, <span class="kw-2">ref </span>niche_variants, niche_start } =&gt; {
+                <span class="comment">// Rebase from niche values to discriminants, and check
+                // whether the result is in range for the niche variants.
+                </span><span class="kw">let </span>niche_llty = bx.cx().immediate_backend_type(tag.layout);
+                <span class="kw">let </span>tag = tag.immediate();
+
+                <span class="comment">// We first compute the &quot;relative discriminant&quot; (wrt `niche_variants`),
+                // that is, if `n = niche_variants.end() - niche_variants.start()`,
+                // we remap `niche_start..=niche_start + n` (which may wrap around)
+                // to (non-wrap-around) `0..=n`, to be able to check whether the
+                // discriminant corresponds to a niche variant with one comparison.
+                // We also can&#39;t go directly to the (variant index) discriminant
+                // and check that it is in the range `niche_variants`, because
+                // that might not fit in the same type, on top of needing an extra
+                // comparison (see also the comment on `let niche_discr`).
+                </span><span class="kw">let </span>relative_discr = <span class="kw">if </span>niche_start == <span class="number">0 </span>{
+                    <span class="comment">// Avoid subtracting `0`, which wouldn&#39;t work for pointers.
+                    // FIXME(eddyb) check the actual primitive type here.
+                    </span>tag
+                } <span class="kw">else </span>{
+                    bx.sub(tag, bx.cx().const_uint_big(niche_llty, niche_start))
+                };
+                <span class="kw">let </span>relative_max = niche_variants.end().as_u32() - niche_variants.start().as_u32();
+                <span class="kw">let </span>is_niche = <span class="kw">if </span>relative_max == <span class="number">0 </span>{
+                    <span class="comment">// Avoid calling `const_uint`, which wouldn&#39;t work for pointers.
+                    // Also use canonical == 0 instead of non-canonical u&lt;= 0.
+                    // FIXME(eddyb) check the actual primitive type here.
+                    </span>bx.icmp(IntPredicate::IntEQ, relative_discr, bx.cx().const_null(niche_llty))
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>relative_max = bx.cx().const_uint(niche_llty, relative_max <span class="kw">as </span>u64);
+                    bx.icmp(IntPredicate::IntULE, relative_discr, relative_max)
+                };
+
+                <span class="comment">// NOTE(eddyb) this addition needs to be performed on the final
+                // type, in case the niche itself can&#39;t represent all variant
+                // indices (e.g. `u8` niche with more than `256` variants,
+                // but enough uninhabited variants so that the remaining variants
+                // fit in the niche).
+                // In other words, `niche_variants.end - niche_variants.start`
+                // is representable in the niche, but `niche_variants.end`
+                // might not be, in extreme cases.
+                </span><span class="kw">let </span>niche_discr = {
+                    <span class="kw">let </span>relative_discr = <span class="kw">if </span>relative_max == <span class="number">0 </span>{
+                        <span class="comment">// HACK(eddyb) since we have only one niche, we know which
+                        // one it is, and we can avoid having a dynamic value here.
+                        </span>bx.cx().const_uint(cast_to, <span class="number">0</span>)
+                    } <span class="kw">else </span>{
+                        bx.intcast(relative_discr, cast_to, <span class="bool-val">false</span>)
+                    };
+                    bx.add(
+                        relative_discr,
+                        bx.cx().const_uint(cast_to, niche_variants.start().as_u32() <span class="kw">as </span>u64),
+                    )
+                };
+
+                bx.select(
+                    is_niche,
+                    niche_discr,
+                    bx.cx().const_uint(cast_to, untagged_variant.as_u32() <span class="kw">as </span>u64),
+                )
+            }
+        }
+    }
+
+    <span class="doccomment">/// Sets the discriminant for a new value of the given case of the given
+    /// representation.
+    </span><span class="kw">pub fn </span>codegen_set_discr&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        variant_index: <a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>,
+    ) {
+        <span class="kw">if </span><span class="self">self</span>.layout.for_variant(bx.cx(), variant_index).abi.is_uninhabited() {
+            <span class="comment">// We play it safe by using a well-defined `abort`, but we could go for immediate UB
+            // if that turns out to be helpful.
+            </span><a href="#315">bx</a>.<a href="../traits/intrinsic.rs.html#20">abort</a>();
+            <span class="kw">return</span>;
+        }
+        <span class="kw">match </span><a class="self" href="#314">self</a>.layout.variants {
+            <a href="../../../rustc_target/abi/enum.Variants.html">Variants::Single</a> { index } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(index, variant_index);
+            }
+            <a href="../../../rustc_target/abi/enum.Variants.html">Variants::Multiple</a> { tag_encoding: TagEncoding::Direct, tag_field, .. } =&gt; {
+                <span class="kw">let </span>ptr = <a class="self" href="#314">self</a>.<a href="#85-89">project_field</a>(<a href="#315">bx</a>, <a href="#328">tag_field</a>);
+                <span class="kw">let </span>to =
+                    <a class="self" href="#314">self</a>.layout.ty.discriminant_for_variant(<a href="#315">bx</a>.<a href="../../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>(), <a href="#316">variant_index</a>).unwrap().val;
+                <a href="#315">bx</a>.<a href="../traits/builder.rs.html#162">store</a>(
+                    <a href="#315">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/consts.rs.html#13">const_uint_big</a>(<a href="#315">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#329">ptr</a>.layout), <a href="#330">to</a>),
+                    <a href="#329">ptr</a>.llval,
+                    <a href="#329">ptr</a>.align,
+                );
+            }
+            <a href="../../../rustc_target/abi/enum.Variants.html">Variants::Multiple</a> {
+                tag_encoding:
+                    <a href="../../../rustc_target/abi/enum.TagEncoding.html">TagEncoding::Niche</a> { untagged_variant, <span class="kw-2">ref </span>niche_variants, niche_start },
+                tag_field,
+                ..
+            } =&gt; {
+                <span class="kw">if </span>variant_index != untagged_variant {
+                    <span class="kw">let </span>niche = <a class="self" href="#314">self</a>.<a href="#85-89">project_field</a>(<a href="#315">bx</a>, <a href="#341">tag_field</a>);
+                    <span class="kw">let </span>niche_llty = <a href="#315">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#108">immediate_backend_type</a>(<a href="#345">niche</a>.layout);
+                    <span class="kw">let </span>niche_value = <a href="#316">variant_index</a>.as_u32() - <a href="#340">niche_variants</a>.start().as_u32();
+                    <span class="kw">let </span>niche_value = (<a href="#347">niche_value</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u128.html">u128</a>).wrapping_add(<a href="#340">niche_start</a>);
+                    <span class="comment">// FIXME(eddyb): check the actual primitive type here.
+                    </span><span class="kw">let </span>niche_llval = <span class="kw">if </span>niche_value == <span class="number">0 </span>{
+                        <span class="comment">// HACK(eddyb): using `c_null` as it works on all types.
+                        </span><a href="#315">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/consts.rs.html#9">const_null</a>(<a href="#346">niche_llty</a>)
+                    } <span class="kw">else </span>{
+                        <a href="#315">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/consts.rs.html#13">const_uint_big</a>(<a href="#346">niche_llty</a>, <a href="#348">niche_value</a>)
+                    };
+                    <a href="operand.rs.html#28">OperandValue::Immediate</a>(<a href="#350">niche_llval</a>).<a href="operand.rs.html#246-250">store</a>(<a href="#315">bx</a>, <a href="#345">niche</a>);
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>project_index&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        llindex: V,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="comment">// Statically compute the offset if we can, otherwise just use the element size,
+        // as this will yield the lowest alignment.
+        </span><span class="kw">let </span>layout = <a class="self" href="#363">self</a>.layout.field(<a href="#364">bx</a>, <span class="number">0</span>);
+        <span class="kw">let </span>offset = <span class="kw">if let </span><span class="prelude-val">Some</span>(llindex) = <a href="#364">bx</a>.<a href="../traits/consts.rs.html#26">const_to_opt_uint</a>(<a href="#365">llindex</a>) {
+            <a href="#369">layout</a>.size.checked_mul(<a href="#370">llindex</a>, <a href="#364">bx</a>).unwrap_or(<a href="#369">layout</a>.size)
+        } <span class="kw">else </span>{
+            <a href="#369">layout</a>.size
+        };
+
+        <a href="#16">PlaceRef</a> {
+            llval: <a href="#364">bx</a>.<a href="../traits/builder.rs.html#179-184">inbounds_gep</a>(
+                <a href="#364">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a class="self" href="#363">self</a>.layout),
+                <a class="self" href="#363">self</a>.llval,
+                <span class="kw-2">&amp;</span>[<a href="#364">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/consts.rs.html#19">const_usize</a>(<span class="number">0</span>), <a href="#365">llindex</a>],
+            ),
+            llextra: <span class="prelude-val">None</span>,
+            <a href="#369">layout</a>,
+            align: <a class="self" href="#363">self</a>.align.restrict_for_offset(<a href="#370">offset</a>),
+        }
+    }
+
+    <span class="kw">pub fn </span>project_downcast&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        variant_index: <a href="../../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>downcast = <span class="kw-2">*</span><a class="self" href="#389">self</a>;
+        <a href="#393">downcast</a>.layout = <a class="self" href="#389">self</a>.layout.for_variant(<a href="#390">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>(), <a href="#391">variant_index</a>);
+
+        <span class="comment">// Cast to the appropriate variant struct type.
+        </span><span class="kw">let </span>variant_ty = <a href="#390">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#103">backend_type</a>(<a href="#393">downcast</a>.layout);
+        <a href="#393">downcast</a>.llval = <a href="#390">bx</a>.<a href="../traits/builder.rs.html#201">pointercast</a>(<a href="#393">downcast</a>.llval, <a href="#390">bx</a>.<a href="../traits/builder.rs.html#44">cx</a>().<a href="../traits/type_.rs.html#29">type_ptr_to</a>(<a href="#397">variant_ty</a>));
+
+        <a href="#393">downcast</a>
+    }
+
+    <span class="kw">pub fn </span>storage_live&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, bx: <span class="kw-2">&amp;mut </span>Bx) {
+        <a href="#403">bx</a>.<a href="../traits/builder.rs.html#307">lifetime_start</a>(<a class="self" href="#403">self</a>.llval, <a class="self" href="#403">self</a>.layout.size);
+    }
+
+    <span class="kw">pub fn </span>storage_dead&lt;Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Value = V&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, bx: <span class="kw-2">&amp;mut </span>Bx) {
+        <a href="#407">bx</a>.<a href="../traits/builder.rs.html#310">lifetime_end</a>(<a class="self" href="#407">self</a>.llval, <a class="self" href="#407">self</a>.layout.size);
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; FunctionCx&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx&gt; {
+    <span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>, bx))]
+    </span><span class="kw">pub fn </span>codegen_place(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Bx,
+        place_ref: mir::PlaceRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, Bx::Value&gt; {
+        <span class="kw">let </span>cx = <span class="self">self</span>.cx;
+        <span class="kw">let </span>tcx = <span class="self">self</span>.cx.tcx();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>base = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>cg_base = <span class="kw">match </span><span class="self">self</span>.locals[place_ref.local] {
+            LocalRef::Place(place) =&gt; place,
+            LocalRef::UnsizedPlace(place) =&gt; bx.load_operand(place).deref(cx),
+            LocalRef::Operand(..) =&gt; {
+                <span class="kw">if </span>place_ref.has_deref() {
+                    base = <span class="number">1</span>;
+                    <span class="kw">let </span>cg_base = <span class="self">self</span>.codegen_consume(
+                        bx,
+                        mir::PlaceRef { projection: <span class="kw-2">&amp;</span>place_ref.projection[..<span class="number">0</span>], ..place_ref },
+                    );
+                    cg_base.deref(bx.cx())
+                } <span class="kw">else </span>{
+                    <span class="macro">bug!</span>(<span class="string">&quot;using operand local {:?} as place&quot;</span>, place_ref);
+                }
+            }
+        };
+        <span class="kw">for </span>elem <span class="kw">in </span>place_ref.projection[base..].iter() {
+            cg_base = <span class="kw">match </span><span class="kw-2">*</span>elem {
+                mir::ProjectionElem::Deref =&gt; bx.load_operand(cg_base).deref(bx.cx()),
+                mir::ProjectionElem::Field(<span class="kw-2">ref </span>field, <span class="kw">_</span>) =&gt; {
+                    cg_base.project_field(bx, field.index())
+                }
+                mir::ProjectionElem::Index(index) =&gt; {
+                    <span class="kw">let </span>index = <span class="kw-2">&amp;</span>mir::Operand::Copy(mir::Place::from(index));
+                    <span class="kw">let </span>index = <span class="self">self</span>.codegen_operand(bx, index);
+                    <span class="kw">let </span>llindex = index.immediate();
+                    cg_base.project_index(bx, llindex)
+                }
+                mir::ProjectionElem::ConstantIndex { offset, from_end: <span class="bool-val">false</span>, min_length: <span class="kw">_ </span>} =&gt; {
+                    <span class="kw">let </span>lloffset = bx.cx().const_usize(offset <span class="kw">as </span>u64);
+                    cg_base.project_index(bx, lloffset)
+                }
+                mir::ProjectionElem::ConstantIndex { offset, from_end: <span class="bool-val">true</span>, min_length: <span class="kw">_ </span>} =&gt; {
+                    <span class="kw">let </span>lloffset = bx.cx().const_usize(offset <span class="kw">as </span>u64);
+                    <span class="kw">let </span>lllen = cg_base.len(bx.cx());
+                    <span class="kw">let </span>llindex = bx.sub(lllen, lloffset);
+                    cg_base.project_index(bx, llindex)
+                }
+                mir::ProjectionElem::Subslice { from, to, from_end } =&gt; {
+                    <span class="kw">let </span><span class="kw-2">mut </span>subslice = cg_base.project_index(bx, bx.cx().const_usize(from <span class="kw">as </span>u64));
+                    <span class="kw">let </span>projected_ty =
+                        PlaceTy::from_ty(cg_base.layout.ty).projection_ty(tcx, <span class="kw-2">*</span>elem).ty;
+                    subslice.layout = bx.cx().layout_of(<span class="self">self</span>.monomorphize(projected_ty));
+
+                    <span class="kw">if </span>subslice.layout.is_unsized() {
+                        <span class="macro">assert!</span>(from_end, <span class="string">&quot;slice subslices should be `from_end`&quot;</span>);
+                        subslice.llextra = <span class="prelude-val">Some</span>(bx.sub(
+                            cg_base.llextra.unwrap(),
+                            bx.cx().const_usize((from <span class="kw">as </span>u64) + (to <span class="kw">as </span>u64)),
+                        ));
+                    }
+
+                    <span class="comment">// Cast the place pointer type to the new
+                    // array or slice type (`*[%_; new_len]`).
+                    </span>subslice.llval = bx.pointercast(
+                        subslice.llval,
+                        bx.cx().type_ptr_to(bx.cx().backend_type(subslice.layout)),
+                    );
+
+                    subslice
+                }
+                mir::ProjectionElem::Downcast(<span class="kw">_</span>, v) =&gt; cg_base.project_downcast(bx, v),
+            };
+        }
+        <span class="macro">debug!</span>(<span class="string">&quot;codegen_place(place={:?}) =&gt; {:?}&quot;</span>, place_ref, cg_base);
+        cg_base
+    }
+
+    <span class="kw">pub fn </span>monomorphized_place_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, place_ref: mir::PlaceRef&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>tcx = <a class="self" href="#491">self</a>.cx.<a href="../../../rustc_middle/ty/layout/trait.HasTyCtxt.html">tcx</a>();
+        <span class="kw">let </span>place_ty = <a href="#491">place_ref</a>.ty(<a class="self" href="#491">self</a>.mir, <a href="#492">tcx</a>);
+        <a class="self" href="#491">self</a>.<a href="mod.rs.html#93-95">monomorphize</a>(<a href="#493">place_ty</a>.ty)
+    }
+}
+
+<span class="kw">fn </span>round_up_const_value_to_alignment&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, Bx: BuilderMethods&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;(
+    bx: <span class="kw-2">&amp;mut </span>Bx,
+    value: Bx::Value,
+    align: Bx::Value,
+) -&gt; Bx::Value {
+    <span class="comment">// In pseudo code:
+    //
+    //     if value &amp; (align - 1) == 0 {
+    //         value
+    //     } else {
+    //         (value &amp; !(align - 1)) + align
+    //     }
+    //
+    // Usually this is written without branches as
+    //
+    //     (value + align - 1) &amp; !(align - 1)
+    //
+    // But this formula cannot take advantage of constant `value`. E.g. if `value` is known
+    // at compile time to be `1`, this expression should be optimized to `align`. However,
+    // optimization only holds if `align` is a power of two. Since the optimizer doesn&#39;t know
+    // that `align` is a power of two, it cannot perform this optimization.
+    //
+    // Instead we use
+    //
+    //     value + (-value &amp; (align - 1))
+    //
+    // Since `align` is used only once, the expression can be optimized. For `value = 0`
+    // its optimized to `0` even in debug mode.
+    //
+    // NB: The previous version of this code used
+    //
+    //     (value + align - 1) &amp; -align
+    //
+    // Even though `-align == !(align - 1)`, LLVM failed to optimize this even for
+    // `value = 0`. Bug report: https://bugs.llvm.org/show_bug.cgi?id=48559
+    </span><span class="kw">let </span>one = <a href="#499">bx</a>.<a href="../traits/consts.rs.html#19">const_usize</a>(<span class="number">1</span>);
+    <span class="kw">let </span>align_minus_1 = <a href="#499">bx</a>.<a href="../traits/builder.rs.html#85">sub</a>(<a href="#501">align</a>, <a href="#533">one</a>);
+    <span class="kw">let </span>neg_value = <a href="#499">bx</a>.<a href="../traits/builder.rs.html#113">neg</a>(<a href="#500">value</a>);
+    <span class="kw">let </span>offset = <a href="#499">bx</a>.<a href="../traits/builder.rs.html#110">and</a>(<a href="#535">neg_value</a>, <a href="#534">align_minus_1</a>);
+    <a href="#499">bx</a>.<a href="../traits/builder.rs.html#82">add</a>(<a href="#500">value</a>, <a href="#536">offset</a>)
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_ssa" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

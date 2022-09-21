@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["LINKER_SCRIPT",""]],"fn":[["target","A base target for Nintendo Switch devices using a pure LLVM toolchain."]]};

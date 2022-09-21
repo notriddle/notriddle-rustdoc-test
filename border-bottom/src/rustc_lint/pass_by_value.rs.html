@@ -1,0 +1,194 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_lint/src/pass_by_value.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>pass_by_value.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_lint/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_lint/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_lint/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+</pre><pre class="rust"><code><span class="kw">use crate</span>::{<a href="context.rs.html#530">LateContext</a>, <a href="passes.rs.html#83">LateLintPass</a>, <a href="context.rs.html#573">LintContext</a>};
+<span class="kw">use </span>rustc_errors::{<a href="../../rustc_error_messages/fluent_generated/index.html">fluent</a>, <a href="../../rustc_lint_defs/enum.Applicability.html">Applicability</a>};
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../rustc_hir/def/enum.Res.html">rustc_hir::def::Res</a>;
+<span class="kw">use </span>rustc_hir::{<a href="../../rustc_hir/hir/enum.GenericArg.html">GenericArg</a>, <a href="../../rustc_hir/hir/struct.PathSegment.html">PathSegment</a>, <a href="../../rustc_hir/hir/enum.QPath.html">QPath</a>, <a href="../../rustc_hir/hir/enum.TyKind.html">TyKind</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">rustc_middle::ty</a>;
+<span class="kw">use </span><a href="../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+
+<a class="macro" href="../../rustc_lint_defs/macro.declare_tool_lint.html">declare_tool_lint! </a>{
+    <span class="doccomment">/// The `rustc_pass_by_value` lint marks a type with `#[rustc_pass_by_value]` requiring it to
+    /// always be passed by value. This is usually used for types that are thin wrappers around
+    /// references, so there is no benefit to an extra layer of indirection. (Example: `Ty` which
+    /// is a reference to an `Interned&lt;TyS&gt;`)
+    </span><span class="kw">pub </span>rustc::PASS_BY_VALUE,
+    Warn,
+    <span class="string">&quot;pass by reference of a type flagged as `#[rustc_pass_by_value]`&quot;</span>,
+    report_in_external_macro: <span class="bool-val">true
+</span>}
+
+<a class="macro" href="../../rustc_lint_defs/macro.declare_lint_pass.html">declare_lint_pass!</a>(PassByValue =&gt; [PASS_BY_VALUE]);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; LateLintPass&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="#20">PassByValue</a> {
+    <span class="kw">fn </span>check_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#23">ty</a>.kind {
+            TyKind::Rptr(<span class="kw">_</span>, <a href="../../rustc_hir/hir/struct.MutTy.html">hir::MutTy</a> { ty: inner_ty, mutbl: hir::Mutability::Not }) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(impl_did) = <a href="#23">cx</a>.tcx.impl_of_method(<a href="#23">ty</a>.hir_id.owner.to_def_id()) {
+                    <span class="kw">if </span>cx.tcx.impl_trait_ref(impl_did).is_some() {
+                        <span class="kw">return</span>;
+                    }
+                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = <a href="#51">path_for_pass_by_value</a>(<a href="#23">cx</a>, <span class="kw-2">&amp;</span><a href="#25">inner_ty</a>) {
+                    <a href="#23">cx</a>.<a href="context.rs.html#894-899">struct_span_lint</a>(<a href="#9-18">PASS_BY_VALUE</a>, <a href="#23">ty</a>.span, |lint| {
+                        <a href="#32">lint</a>.build(fluent::lint::pass_by_value)
+                            .set_arg(<span class="string">&quot;ty&quot;</span>, <a href="#31">t</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>())
+                            .span_suggestion(
+                                <a href="#23">ty</a>.span,
+                                fluent::lint::suggestion,
+                                <a href="#31">t</a>,
+                                <span class="comment">// Changing type of function argument
+                                </span>Applicability::MaybeIncorrect,
+                            )
+                            .emit();
+                    })
+                }
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+    }
+}
+
+<span class="kw">fn </span>path_for_pass_by_value(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, ty: <span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt; {
+    <span class="kw">if let </span>TyKind::Path(QPath::Resolved(<span class="kw">_</span>, path)) = <span class="kw-2">&amp;</span><a href="#51">ty</a>.kind {
+        <span class="kw">match </span><a href="#52">path</a>.res {
+            Res::Def(<span class="kw">_</span>, def_id) <span class="kw">if </span><a href="#51">cx</a>.tcx.has_attr(<a href="#54">def_id</a>, sym::rustc_pass_by_value) =&gt; {
+                <span class="kw">let </span>name = <a href="#51">cx</a>.tcx.item_name(<a href="#54">def_id</a>).to_ident_string();
+                <span class="kw">let </span>path_segment = <a href="#52">path</a>.segments.last().unwrap();
+                <span class="kw">return </span><span class="prelude-val">Some</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}{}&quot;</span>, name, gen_args(cx, path_segment)));
+            }
+            <a href="../../rustc_hir/def/enum.Res.html">Res::SelfTy</a> { trait_: <span class="prelude-val">None</span>, alias_to: <span class="prelude-val">Some</span>((did, <span class="kw">_</span>)) } =&gt; {
+                <span class="kw">if let </span>ty::Adt(adt, substs) = <a href="#51">cx</a>.tcx.type_of(<a href="#59">did</a>).kind() {
+                    <span class="kw">if </span>cx.tcx.has_attr(adt.did(), sym::rustc_pass_by_value) {
+                        <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#51">cx</a>.tcx.def_path_str_with_substs(<a href="#60">adt</a>.did(), <a href="#60">substs</a>));
+                    }
+                }
+            }
+            <span class="kw">_ </span>=&gt; (),
+        }
+    }
+
+    <span class="prelude-val">None
+</span>}
+
+<span class="kw">fn </span>gen_args(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, segment: <span class="kw-2">&amp;</span>PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(args) = <span class="kw-2">&amp;</span><a href="#73">segment</a>.args {
+        <span class="kw">let </span>params = <a href="#74">args</a>
+            .args
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|arg| <span class="kw">match </span><a href="#78">arg</a> {
+                GenericArg::Lifetime(lt) =&gt; <a href="#79">lt</a>.name.ident().<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(),
+                GenericArg::Type(ty) =&gt; {
+                    <a href="#73">cx</a>.tcx.sess.source_map().span_to_snippet(<a href="#80">ty</a>.span).unwrap_or_else(|<span class="kw">_</span>| <span class="string">&quot;_&quot;</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+                }
+                GenericArg::Const(c) =&gt; {
+                    <a href="#73">cx</a>.tcx.sess.source_map().span_to_snippet(<a href="#83">c</a>.span).unwrap_or_else(|<span class="kw">_</span>| <span class="string">&quot;_&quot;</span>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>())
+                }
+                GenericArg::Infer(<span class="kw">_</span>) =&gt; String::from(<span class="string">&quot;_&quot;</span>),
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+        <span class="kw">if </span>!params.is_empty() {
+            <span class="kw">return </span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;&lt;{}&gt;&quot;</span>, params.join(<span class="string">&quot;, &quot;</span>));
+        }
+    }
+
+    String::new()
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_lint" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

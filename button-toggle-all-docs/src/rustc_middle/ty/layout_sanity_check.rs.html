@@ -1,0 +1,608 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/ty/layout_sanity_check.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>layout_sanity_check.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::ty::{
+    layout::{<a href="layout.rs.html#267">LayoutCx</a>, <a href="layout.rs.html#2279">TyAndLayout</a>},
+    <a href="context.rs.html#1029">TyCtxt</a>,
+};
+<span class="kw">use </span><a href="../../../rustc_target/abi/index.html">rustc_target::abi</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cmp/index.html">std::cmp</a>;
+
+<span class="doccomment">/// Enforce some basic invariants on layouts.
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>sanity_check_layout&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    cx: <span class="kw-2">&amp;</span>LayoutCx&lt;<span class="lifetime">&#39;tcx</span>, TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    layout: <span class="kw-2">&amp;</span>TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) {
+    <span class="comment">// Type-level uninhabitedness should always imply ABI uninhabitedness.
+    </span><span class="kw">if </span>cx.tcx.conservative_is_privately_uninhabited(cx.param_env.and(layout.ty)) {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(layout.abi.is_uninhabited());
+    }
+
+    <span class="kw">if </span>layout.size.bytes() % layout.align.abi.bytes() != <span class="number">0 </span>{
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;size is not a multiple of align, in the following layout:\n{layout:#?}&quot;</span>);
+    }
+
+    <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.cfg.html">cfg!</a>(debug_assertions) {
+        <span class="doccomment">/// Yields non-ZST fields of the type
+        </span><span class="kw">fn </span>non_zst_fields&lt;<span class="lifetime">&#39;tcx</span>, <span class="lifetime">&#39;a</span>&gt;(
+            cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>LayoutCx&lt;<span class="lifetime">&#39;tcx</span>, TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+            layout: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<a href="../../../rustc_target/abi/struct.Size.html">Size</a>, TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt; + <span class="lifetime">&#39;a </span>{
+            (<span class="number">0</span>..<a href="#27">layout</a>.layout.fields().count()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|i| {
+                <span class="kw">let </span>field = <a href="#27">layout</a>.field(<a href="#26">cx</a>, <a href="#29">i</a>);
+                <span class="comment">// Also checking `align == 1` here leads to test failures in
+                // `layout/zero-sized-array-union.rs`, where a type has a zero-size field with
+                // alignment 4 that still gets ignored during layout computation (which is okay
+                // since other fields already force alignment 4).
+                </span><span class="kw">let </span>zst = <a href="#30">field</a>.is_zst();
+                (!<a href="#35">zst</a>).then(|| (<a href="#27">layout</a>.fields.offset(<a href="#29">i</a>), <a href="#30">field</a>))
+            })
+        }
+
+        <span class="kw">fn </span>skip_newtypes&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+            cx: <span class="kw-2">&amp;</span>LayoutCx&lt;<span class="lifetime">&#39;tcx</span>, TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+            layout: <span class="kw-2">&amp;</span>TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        ) -&gt; TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(layout.layout.variants(), Variants::Multiple { .. }) {
+                <span class="comment">// Definitely not a newtype of anything.
+                </span><span class="kw">return </span><span class="kw-2">*</span><a href="#42">layout</a>;
+            }
+            <span class="kw">let </span><span class="kw-2">mut </span>fields = <a href="#25-28">non_zst_fields</a>(<a href="#41">cx</a>, <a href="#42">layout</a>);
+            <span class="kw">let </span><span class="prelude-val">Some</span>(first) = <a href="#48">fields</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>() <span class="kw">else </span>{
+                <span class="comment">// No fields here, so this could be a primitive or enum -- either way it&#39;s not a newtype around a thing
+                </span><span class="kw">return </span><span class="kw-2">*</span><a href="#42">layout</a>
+            };
+            <span class="kw">if </span>fields.next().is_none() {
+                <span class="kw">let </span>(offset, first) = <a href="#49">first</a>;
+                <span class="kw">if </span>offset == Size::ZERO &amp;&amp; first.layout.size() == layout.size {
+                    <span class="comment">// This is a newtype, so keep recursing.
+                    // FIXME(RalfJung): I don&#39;t think it would be correct to do any checks for
+                    // alignment here, so we don&#39;t. Is that correct?
+                    </span><span class="kw">return </span><a href="#40-43">skip_newtypes</a>(<a href="#41">cx</a>, <span class="kw-2">&amp;</span><a href="#54">first</a>);
+                }
+            }
+            <span class="comment">// No more newtypes here.
+            </span><span class="kw-2">*</span><a href="#42">layout</a>
+        }
+
+        <span class="kw">fn </span>check_layout_abi&lt;<span class="lifetime">&#39;tcx</span>&gt;(cx: <span class="kw-2">&amp;</span>LayoutCx&lt;<span class="lifetime">&#39;tcx</span>, TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, layout: <span class="kw-2">&amp;</span>TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+            <span class="kw">match </span><a href="#66">layout</a>.layout.abi() {
+                Abi::Scalar(scalar) =&gt; {
+                    <span class="comment">// No padding in scalars.
+                    </span><span class="kw">let </span>size = <a href="#68">scalar</a>.size(<a href="#66">cx</a>);
+                    <span class="kw">let </span>align = <a href="#68">scalar</a>.align(<a href="#66">cx</a>).abi;
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        layout.layout.size(),
+                        size,
+                        <span class="string">&quot;size mismatch between ABI and layout in {layout:#?}&quot;
+                    </span>);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        layout.layout.align().abi,
+                        align,
+                        <span class="string">&quot;alignment mismatch between ABI and layout in {layout:#?}&quot;
+                    </span>);
+                    <span class="comment">// Check that this matches the underlying field.
+                    </span><span class="kw">let </span>inner = <a href="#40-43">skip_newtypes</a>(<a href="#66">cx</a>, <a href="#66">layout</a>);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        <span class="macro">matches!</span>(inner.layout.abi(), Abi::Scalar(<span class="kw">_</span>)),
+                        <span class="string">&quot;`Scalar` type {} is newtype around non-`Scalar` type {}&quot;</span>,
+                        layout.ty,
+                        inner.ty
+                    );
+                    <span class="kw">match </span><a href="#83">inner</a>.layout.fields() {
+                        FieldsShape::Primitive =&gt; {
+                            <span class="comment">// Fine.
+                        </span>}
+                        FieldsShape::Union(..) =&gt; {
+                            <span class="comment">// FIXME: I guess we could also check something here? Like, look at all fields?
+                            </span><span class="kw">return</span>;
+                        }
+                        <a href="../../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Arbitrary</a> { .. } =&gt; {
+                            <span class="comment">// Should be an enum, the only field is the discriminant.
+                            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                                inner.ty.is_enum(),
+                                <span class="string">&quot;`Scalar` layout for non-primitive non-enum type {}&quot;</span>,
+                                inner.ty
+                            );
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                                inner.layout.fields().count(),
+                                <span class="number">1</span>,
+                                <span class="string">&quot;`Scalar` layout for multiple-field type in {inner:#?}&quot;</span>,
+                            );
+                            <span class="kw">let </span>offset = <a href="#83">inner</a>.layout.fields().offset(<span class="number">0</span>);
+                            <span class="kw">let </span>field = <a href="#83">inner</a>.field(<a href="#66">cx</a>, <span class="number">0</span>);
+                            <span class="comment">// The field should be at the right offset, and match the `scalar` layout.
+                            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                                offset,
+                                Size::ZERO,
+                                <span class="string">&quot;`Scalar` field at non-0 offset in {inner:#?}&quot;</span>,
+                            );
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                                field.size, size,
+                                <span class="string">&quot;`Scalar` field with bad size in {inner:#?}&quot;</span>,
+                            );
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                                field.align.abi, align,
+                                <span class="string">&quot;`Scalar` field with bad align in {inner:#?}&quot;</span>,
+                            );
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                                <span class="macro">matches!</span>(field.abi, Abi::Scalar(<span class="kw">_</span>)),
+                                <span class="string">&quot;`Scalar` field with bad ABI in {inner:#?}&quot;</span>,
+                            );
+                        }
+                        <span class="kw">_ </span>=&gt; {
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`Scalar` layout for non-primitive non-enum type {}&quot;</span>, inner.ty);
+                        }
+                    }
+                }
+                Abi::ScalarPair(scalar1, scalar2) =&gt; {
+                    <span class="comment">// Sanity-check scalar pairs. These are a bit more flexible and support
+                    // padding, but we can at least ensure both fields actually fit into the layout
+                    // and the alignment requirement has not been weakened.
+                    </span><span class="kw">let </span>size1 = <a href="#136">scalar1</a>.size(<a href="#66">cx</a>);
+                    <span class="kw">let </span>align1 = <a href="#136">scalar1</a>.align(<a href="#66">cx</a>).abi;
+                    <span class="kw">let </span>size2 = <a href="#136">scalar2</a>.size(<a href="#66">cx</a>);
+                    <span class="kw">let </span>align2 = <a href="#136">scalar2</a>.align(<a href="#66">cx</a>).abi;
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        layout.layout.align().abi &gt;= cmp::max(align1, align2),
+                        <span class="string">&quot;alignment mismatch between ABI and layout in {layout:#?}&quot;</span>,
+                    );
+                    <span class="kw">let </span>field2_offset = <a href="#140">size1</a>.align_to(<a href="#143">align2</a>);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        layout.layout.size() &gt;= field2_offset + size2,
+                        <span class="string">&quot;size mismatch between ABI and layout in {layout:#?}&quot;
+                    </span>);
+                    <span class="comment">// Check that the underlying pair of fields matches.
+                    </span><span class="kw">let </span>inner = <a href="#40-43">skip_newtypes</a>(<a href="#66">cx</a>, <a href="#66">layout</a>);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        <span class="macro">matches!</span>(inner.layout.abi(), Abi::ScalarPair(..)),
+                        <span class="string">&quot;`ScalarPair` type {} is newtype around non-`ScalarPair` type {}&quot;</span>,
+                        layout.ty,
+                        inner.ty
+                    );
+                    <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(inner.layout.variants(), Variants::Multiple { .. }) {
+                        <span class="comment">// FIXME: ScalarPair for enums is enormously complicated and it is very hard
+                        // to check anything about them.
+                        </span><span class="kw">return</span>;
+                    }
+                    <span class="kw">match </span><a href="#154">inner</a>.layout.fields() {
+                        <a href="../../../rustc_target/abi/enum.FieldsShape.html">FieldsShape::Arbitrary</a> { .. } =&gt; {
+                            <span class="comment">// Checked below.
+                        </span>}
+                        FieldsShape::Union(..) =&gt; {
+                            <span class="comment">// FIXME: I guess we could also check something here? Like, look at all fields?
+                            </span><span class="kw">return</span>;
+                        }
+                        <span class="kw">_ </span>=&gt; {
+                            <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`ScalarPair` layout with unexpected field shape in {inner:#?}&quot;</span>);
+                        }
+                    }
+                    <span class="kw">let </span><span class="kw-2">mut </span>fields = <a href="#25-28">non_zst_fields</a>(<a href="#66">cx</a>, <span class="kw-2">&amp;</span><a href="#154">inner</a>);
+                    <span class="kw">let </span>(offset1, field1) = <a href="#178">fields</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap_or_else(|| {
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`ScalarPair` layout for type with not even one non-ZST field: {inner:#?}&quot;</span>)
+                    });
+                    <span class="kw">let </span>(offset2, field2) = <a href="#178">fields</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap_or_else(|| {
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`ScalarPair` layout for type with less than two non-ZST fields: {inner:#?}&quot;</span>)
+                    });
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        fields.next().is_none(),
+                        <span class="string">&quot;`ScalarPair` layout for type with at least three non-ZST fields: {inner:#?}&quot;
+                    </span>);
+                    <span class="comment">// The fields might be in opposite order.
+                    </span><span class="kw">let </span>(offset1, field1, offset2, field2) = <span class="kw">if </span>offset1 &lt;= offset2 {
+                        (<a href="#179">offset1</a>, <a href="#179">field1</a>, <a href="#182">offset2</a>, <a href="#182">field2</a>)
+                    } <span class="kw">else </span>{
+                        (<a href="#182">offset2</a>, <a href="#182">field2</a>, <a href="#179">offset1</a>, <a href="#179">field1</a>)
+                    };
+                    <span class="comment">// The fields should be at the right offset, and match the `scalar` layout.
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        offset1,
+                        Size::ZERO,
+                        <span class="string">&quot;`ScalarPair` first field at non-0 offset in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        field1.size, size1,
+                        <span class="string">&quot;`ScalarPair` first field with bad size in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        field1.align.abi, align1,
+                        <span class="string">&quot;`ScalarPair` first field with bad align in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        <span class="macro">matches!</span>(field1.abi, Abi::Scalar(<span class="kw">_</span>)),
+                        <span class="string">&quot;`ScalarPair` first field with bad ABI in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        offset2, field2_offset,
+                        <span class="string">&quot;`ScalarPair` second field at bad offset in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        field2.size, size2,
+                        <span class="string">&quot;`ScalarPair` second field with bad size in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        field2.align.abi, align2,
+                        <span class="string">&quot;`ScalarPair` second field with bad align in {inner:#?}&quot;</span>,
+                    );
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        <span class="macro">matches!</span>(field2.abi, Abi::Scalar(<span class="kw">_</span>)),
+                        <span class="string">&quot;`ScalarPair` second field with bad ABI in {inner:#?}&quot;</span>,
+                    );
+                }
+                <a href="../../../rustc_target/abi/enum.Abi.html">Abi::Vector</a> { count, element } =&gt; {
+                    <span class="comment">// No padding in vectors. Alignment can be strengthened, though.
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        layout.layout.align().abi &gt;= element.align(cx).abi,
+                        <span class="string">&quot;alignment mismatch between ABI and layout in {layout:#?}&quot;
+                    </span>);
+                    <span class="kw">let </span>size = <a href="#230">element</a>.size(<a href="#66">cx</a>) * <a href="#230">count</a>;
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        layout.layout.size(),
+                        size.align_to(cx.data_layout().vector_align(size).abi),
+                        <span class="string">&quot;size mismatch between ABI and layout in {layout:#?}&quot;
+                    </span>);
+                }
+                Abi::Uninhabited | <a href="../../../rustc_target/abi/enum.Abi.html">Abi::Aggregate</a> { .. } =&gt; {} <span class="comment">// Nothing to check.
+            </span>}
+        }
+
+        <a href="#66">check_layout_abi</a>(<a href="#11">cx</a>, <a href="#12">layout</a>);
+
+        <span class="kw">if let </span><a href="../../../rustc_target/abi/enum.Variants.html">Variants::Multiple</a> { variants, .. } = <span class="kw-2">&amp;</span><a href="#12">layout</a>.variants {
+            <span class="kw">for </span>variant <span class="kw">in </span>variants.iter() {
+                <span class="comment">// No nested &quot;multiple&quot;.
+                </span><span class="macro">assert!</span>(<span class="macro">matches!</span>(variant.variants(), Variants::Single { .. }));
+                <span class="comment">// Variants should have the same or a smaller size as the full thing,
+                // and same for alignment.
+                </span><span class="kw">if </span>variant.size() &gt; layout.size {
+                    <span class="macro">bug!</span>(
+                        <span class="string">&quot;Type with size {} bytes has variant with size {} bytes: {layout:#?}&quot;</span>,
+                        layout.size.bytes(),
+                        variant.size().bytes(),
+                    )
+                }
+                <span class="kw">if </span>variant.align().abi &gt; layout.align.abi {
+                    <span class="macro">bug!</span>(
+                        <span class="string">&quot;Type with alignment {} bytes has variant with alignment {} bytes: {layout:#?}&quot;</span>,
+                        layout.align.abi.bytes(),
+                        variant.align().abi.bytes(),
+                    )
+                }
+                <span class="comment">// Skip empty variants.
+                </span><span class="kw">if </span>variant.size() == Size::ZERO
+                    || variant.fields().count() == <span class="number">0
+                    </span>|| variant.abi().is_uninhabited()
+                {
+                    <span class="comment">// These are never actually accessed anyway, so we can skip the coherence check
+                    // for them. They also fail that check, since they have
+                    // `Aggregate`/`Uninhbaited` ABI even when the main type is
+                    // `Scalar`/`ScalarPair`. (Note that sometimes, variants with fields have size
+                    // 0, and sometimes, variants without fields have non-0 size.)
+                    </span><span class="kw">continue</span>;
+                }
+                <span class="comment">// The top-level ABI and the ABI of the variants should be coherent.
+                </span><span class="kw">let </span>scalar_coherent = |s1: Scalar, s2: Scalar| {
+                    s1.size(cx) == s2.size(cx) &amp;&amp; s1.align(cx) == s2.align(cx)
+                };
+                <span class="kw">let </span>abi_coherent = <span class="kw">match </span>(layout.abi, variant.abi()) {
+                    (Abi::Scalar(s1), Abi::Scalar(s2)) =&gt; scalar_coherent(s1, s2),
+                    (Abi::ScalarPair(a1, b1), Abi::ScalarPair(a2, b2)) =&gt; {
+                        scalar_coherent(a1, a2) &amp;&amp; scalar_coherent(b1, b2)
+                    }
+                    (Abi::Uninhabited, <span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+                    (Abi::Aggregate { .. }, <span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+                    <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+                };
+                <span class="kw">if </span>!abi_coherent {
+                    <span class="macro">bug!</span>(
+                        <span class="string">&quot;Variant ABI is incompatible with top-level ABI:\nvariant={:#?}\nTop-level: {layout:#?}&quot;</span>,
+                        variant
+                    );
+                }
+            }
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

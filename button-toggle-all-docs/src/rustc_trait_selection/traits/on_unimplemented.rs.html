@@ -1,0 +1,786 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_trait_selection/src/traits/on_unimplemented.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>on_unimplemented.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_trait_selection/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_trait_selection/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_trait_selection/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+</pre><pre class="rust"><code><span class="kw">use </span>rustc_ast::{<a href="../../../rustc_ast/ast/struct.MetaItem.html">MetaItem</a>, <a href="../../../rustc_ast/ast/enum.NestedMetaItem.html">NestedMetaItem</a>};
+<span class="kw">use </span><a href="../../../rustc_attr/index.html">rustc_attr</a> <span class="kw">as </span>attr;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span>rustc_errors::{<a href="../../../rustc_errors/macro.struct_span_err.html">struct_span_err</a>, <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>};
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/enum.GenericParamDefKind.html">GenericParamDefKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span>rustc_parse_format::{<a href="../../../rustc_parse_format/enum.ParseMode.html">ParseMode</a>, <a href="../../../rustc_parse_format/struct.Parser.html">Parser</a>, <a href="../../../rustc_parse_format/enum.Piece.html">Piece</a>, <a href="../../../rustc_parse_format/enum.Position.html">Position</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+
+<span class="kw">use </span><span class="kw">crate</span>::errors::{
+    <a href="../errors.rs.html#38">EmptyOnClauseInOnUnimplemented</a>, <a href="../errors.rs.html#46">InvalidOnClauseInOnUnimplemented</a>, <a href="../errors.rs.html#55">NoValueInOnUnimplemented</a>,
+};
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>OnUnimplementedFormatString(<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>);
+
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>OnUnimplementedDirective {
+    <span class="kw">pub </span>condition: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_ast/ast/struct.MetaItem.html">MetaItem</a>&gt;,
+    <span class="kw">pub </span>subcommands: Vec&lt;<a href="#19">OnUnimplementedDirective</a>&gt;,
+    <span class="kw">pub </span>message: <span class="prelude-ty">Option</span>&lt;<a href="#16">OnUnimplementedFormatString</a>&gt;,
+    <span class="kw">pub </span>label: <span class="prelude-ty">Option</span>&lt;<a href="#16">OnUnimplementedFormatString</a>&gt;,
+    <span class="kw">pub </span>note: <span class="prelude-ty">Option</span>&lt;<a href="#16">OnUnimplementedFormatString</a>&gt;,
+    <span class="kw">pub </span>parent_label: <span class="prelude-ty">Option</span>&lt;<a href="#16">OnUnimplementedFormatString</a>&gt;,
+    <span class="kw">pub </span>append_const_msg: <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;,
+}
+
+<span class="attribute">#[derive(Default)]
+</span><span class="kw">pub struct </span>OnUnimplementedNote {
+    <span class="kw">pub </span>message: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    <span class="kw">pub </span>label: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    <span class="kw">pub </span>note: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    <span class="kw">pub </span>parent_label: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    <span class="doccomment">/// Append a message for `~const Trait` errors. `None` means not requested and
+    /// should fallback to a generic message, `Some(None)` suggests using the default
+    /// appended message, `Some(Some(s))` suggests use the `s` message instead of the
+    /// default one..
+    </span><span class="kw">pub </span>append_const_msg: <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="#19">OnUnimplementedDirective</a> {
+    <span class="kw">fn </span>parse(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        item_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        items: <span class="kw-2">&amp;</span>[<a href="../../../rustc_ast/ast/enum.NestedMetaItem.html">NestedMetaItem</a>],
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        is_root: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>errored = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>item_iter = <a href="#46">items</a>.iter();
+
+        <span class="kw">let </span>parse_value = |value_str| {
+            OnUnimplementedFormatString::try_parse(<a href="#44">tcx</a>, <a href="#45">item_def_id</a>, <a href="#53">value_str</a>, <a href="#47">span</a>).map(<span class="prelude-val">Some</span>)
+        };
+
+        <span class="kw">let </span>condition = <span class="kw">if </span>is_root {
+            <span class="prelude-val">None
+        </span>} <span class="kw">else </span>{
+            <span class="kw">let </span>cond = item_iter
+                .next()
+                .ok_or_else(|| tcx.sess.emit_err(EmptyOnClauseInOnUnimplemented { span }))<span class="question-mark">?
+                </span>.meta_item()
+                .ok_or_else(|| tcx.sess.emit_err(InvalidOnClauseInOnUnimplemented { span }))<span class="question-mark">?</span>;
+            attr::eval_condition(<a href="#60">cond</a>, <span class="kw-2">&amp;</span><a href="#44">tcx</a>.sess.parse_sess, <span class="prelude-val">Some</span>(<a href="#44">tcx</a>.features()), <span class="kw-2">&amp;mut </span>|cfg| {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <a href="#65">cfg</a>.value &amp;&amp; <span class="kw">let </span><span class="prelude-val">Err</span>(guar) = <a href="#53">parse_value</a>(<a href="#66">value</a>) {
+                    <a href="#50">errored</a> = <span class="prelude-val">Some</span>(<a href="#66">guar</a>);
+                }
+                <span class="bool-val">true
+            </span>});
+            <span class="prelude-val">Some</span>(<a href="#60">cond</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>())
+        };
+
+        <span class="kw">let </span><span class="kw-2">mut </span>message = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>label = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>note = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>parent_label = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>subcommands = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <span class="kw">let </span><span class="kw-2">mut </span>append_const_msg = <span class="prelude-val">None</span>;
+
+        <span class="kw">for </span>item <span class="kw">in </span>item_iter {
+            <span class="kw">if </span>item.has_name(sym::message) &amp;&amp; message.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(message_) = item.value_str() {
+                    message = parse_value(message_)<span class="question-mark">?</span>;
+                    <span class="kw">continue</span>;
+                }
+            } <span class="kw">else if </span>item.has_name(sym::label) &amp;&amp; label.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(label_) = item.value_str() {
+                    label = parse_value(label_)<span class="question-mark">?</span>;
+                    <span class="kw">continue</span>;
+                }
+            } <span class="kw">else if </span>item.has_name(sym::note) &amp;&amp; note.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(note_) = item.value_str() {
+                    note = parse_value(note_)<span class="question-mark">?</span>;
+                    <span class="kw">continue</span>;
+                }
+            } <span class="kw">else if </span>item.has_name(sym::parent_label) &amp;&amp; parent_label.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(parent_label_) = item.value_str() {
+                    parent_label = parse_value(parent_label_)<span class="question-mark">?</span>;
+                    <span class="kw">continue</span>;
+                }
+            } <span class="kw">else if </span>item.has_name(sym::on)
+                &amp;&amp; is_root
+                &amp;&amp; message.is_none()
+                &amp;&amp; label.is_none()
+                &amp;&amp; note.is_none()
+            {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(items) = item.meta_item_list() {
+                    <span class="kw">match </span><span class="self">Self</span>::parse(tcx, item_def_id, <span class="kw-2">&amp;</span>items, item.span(), <span class="bool-val">false</span>) {
+                        <span class="prelude-val">Ok</span>(subcommand) =&gt; subcommands.push(subcommand),
+                        <span class="prelude-val">Err</span>(reported) =&gt; errored = <span class="prelude-val">Some</span>(reported),
+                    };
+                    <span class="kw">continue</span>;
+                }
+            } <span class="kw">else if </span>item.has_name(sym::append_const_msg) &amp;&amp; append_const_msg.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(msg) = item.value_str() {
+                    append_const_msg = <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(msg));
+                    <span class="kw">continue</span>;
+                } <span class="kw">else if </span>item.is_word() {
+                    append_const_msg = <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>);
+                    <span class="kw">continue</span>;
+                }
+            }
+
+            <span class="comment">// nothing found
+            </span>tcx.sess.emit_err(NoValueInOnUnimplemented { span: item.span() });
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(reported) = <a href="#50">errored</a> {
+            <span class="prelude-val">Err</span>(<a href="#129">reported</a>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<a href="#19">OnUnimplementedDirective</a> {
+                <a href="#57">condition</a>,
+                <a href="#78">subcommands</a>,
+                <a href="#74">message</a>,
+                <a href="#75">label</a>,
+                <a href="#76">note</a>,
+                <a href="#77">parent_label</a>,
+                <a href="#79">append_const_msg</a>,
+            })
+        }
+    }
+
+    <span class="kw">pub fn </span>of_item(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, item_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;, <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(attr) = <a href="#144">tcx</a>.get_attr(<a href="#144">item_def_id</a>, sym::rustc_on_unimplemented) <span class="kw">else </span>{
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+        };
+
+        <span class="kw">let </span>result = <span class="kw">if let </span><span class="prelude-val">Some</span>(items) = <a href="#145">attr</a>.meta_item_list() {
+            <span class="self">Self</span>::parse(<a href="#144">tcx</a>, <a href="#144">item_def_id</a>, <span class="kw-2">&amp;</span><a href="#149">items</a>, <a href="#145">attr</a>.span, <span class="bool-val">true</span>).map(<span class="prelude-val">Some</span>)
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(value) = <a href="#145">attr</a>.value_str() {
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<a href="#19">OnUnimplementedDirective</a> {
+                condition: <span class="prelude-val">None</span>,
+                message: <span class="prelude-val">None</span>,
+                subcommands: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[],
+                label: <span class="prelude-val">Some</span>(OnUnimplementedFormatString::try_parse(
+                    tcx,
+                    item_def_id,
+                    value,
+                    attr.span,
+                )<span class="question-mark">?</span>),
+                note: <span class="prelude-val">None</span>,
+                parent_label: <span class="prelude-val">None</span>,
+                append_const_msg: <span class="prelude-val">None</span>,
+            }))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>reported =
+                <a href="#144">tcx</a>.sess.delay_span_bug(<a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>, <span class="string">&quot;of_item: neither meta_item_list nor value_str&quot;</span>);
+            <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="#167">reported</a>);
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;of_item({:?}) = {:?}&quot;</span>, item_def_id, result);
+        <a href="#149">result</a>
+    }
+
+    <span class="kw">pub fn </span>evaluate(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        trait_ref: ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        options: <span class="kw-2">&amp;</span>[(<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;)],
+    ) -&gt; <a href="#30">OnUnimplementedNote</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>message = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>label = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>note = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>parent_label = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>append_const_msg = <span class="prelude-val">None</span>;
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;evaluate({:?}, trait_ref={:?}, options={:?})&quot;</span>, <span class="self">self</span>, trait_ref, options);
+
+        <span class="kw">let </span>options_map: FxHashMap&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt; =
+            <a href="#179">options</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|(k, v)| <a href="#189">v</a>.as_ref().map(|v| (<span class="kw-2">*</span><a href="#189">k</a>, <a href="#189">v</a>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>()))).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">for </span>command <span class="kw">in </span><span class="self">self</span>.subcommands.iter().chain(<span class="prelude-val">Some</span>(<span class="self">self</span>)).rev() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>condition) = command.condition &amp;&amp; !attr::eval_condition(
+                condition,
+                <span class="kw-2">&amp;</span>tcx.sess.parse_sess,
+                <span class="prelude-val">Some</span>(tcx.features()),
+                <span class="kw-2">&amp;mut </span>|cfg| {
+                    <span class="kw">let </span>value = cfg.value.map(|v| {
+                        OnUnimplementedFormatString(v).format(tcx, trait_ref, <span class="kw-2">&amp;</span>options_map)
+                    });
+
+                    options.contains(<span class="kw-2">&amp;</span>(cfg.name, value))
+                },
+            ) {
+                <span class="macro">debug!</span>(<span class="string">&quot;evaluate: skipping {:?} due to condition&quot;</span>, command);
+                <span class="kw">continue</span>;
+            }
+            <span class="macro">debug!</span>(<span class="string">&quot;evaluate: {:?} succeeded&quot;</span>, command);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>message_) = command.message {
+                message = <span class="prelude-val">Some</span>(message_.clone());
+            }
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>label_) = command.label {
+                label = <span class="prelude-val">Some</span>(label_.clone());
+            }
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>note_) = command.note {
+                note = <span class="prelude-val">Some</span>(note_.clone());
+            }
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>parent_label_) = command.parent_label {
+                parent_label = <span class="prelude-val">Some</span>(parent_label_.clone());
+            }
+
+            append_const_msg = command.append_const_msg;
+        }
+
+        <a href="#30">OnUnimplementedNote</a> {
+            label: <a href="#182">label</a>.map(|l| <a href="#228">l</a>.<a href="#324-329">format</a>(<a href="#177">tcx</a>, <a href="#178">trait_ref</a>, <span class="kw-2">&amp;</span><a href="#188">options_map</a>)),
+            message: <a href="#181">message</a>.map(|m| <a href="#229">m</a>.<a href="#324-329">format</a>(<a href="#177">tcx</a>, <a href="#178">trait_ref</a>, <span class="kw-2">&amp;</span><a href="#188">options_map</a>)),
+            note: <a href="#183">note</a>.map(|n| <a href="#230">n</a>.<a href="#324-329">format</a>(<a href="#177">tcx</a>, <a href="#178">trait_ref</a>, <span class="kw-2">&amp;</span><a href="#188">options_map</a>)),
+            parent_label: <a href="#184">parent_label</a>.map(|e_s| <a href="#231">e_s</a>.<a href="#324-329">format</a>(<a href="#177">tcx</a>, <a href="#178">trait_ref</a>, <span class="kw-2">&amp;</span><a href="#188">options_map</a>)),
+            <a href="#185">append_const_msg</a>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="#16">OnUnimplementedFormatString</a> {
+    <span class="kw">fn </span>try_parse(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        item_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        from: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+        err_sp: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <span class="kw">let </span>result = <a href="#16">OnUnimplementedFormatString</a>(<a href="#241">from</a>);
+        result.verify(tcx, item_def_id, err_sp)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="#244">result</a>)
+    }
+
+    <span class="kw">fn </span>verify(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        item_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <span class="kw">let </span>trait_def_id = <span class="kw">if </span>tcx.is_trait(item_def_id) {
+            <a href="#252">item_def_id</a>
+        } <span class="kw">else </span>{
+            <a href="#251">tcx</a>.trait_id_of_impl(<a href="#252">item_def_id</a>)
+                .expect(<span class="string">&quot;expected `on_unimplemented` to correspond to a trait&quot;</span>)
+        };
+        <span class="kw">let </span>trait_name = <a href="#251">tcx</a>.item_name(<a href="#255">trait_def_id</a>);
+        <span class="kw">let </span>generics = <a href="#251">tcx</a>.generics_of(<a href="#252">item_def_id</a>);
+        <span class="kw">let </span>s = <a class="self" href="#250">self</a>.<span class="number">0</span>.as_str();
+        <span class="kw">let </span>parser = Parser::new(<a href="#263">s</a>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="bool-val">false</span>, ParseMode::Format);
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">Ok</span>(());
+        <span class="kw">for </span>token <span class="kw">in </span>parser {
+            <span class="kw">match </span>token {
+                Piece::String(<span class="kw">_</span>) =&gt; (), <span class="comment">// Normal string, no need to check it
+                </span>Piece::NextArgument(a) =&gt; <span class="kw">match </span>a.position {
+                    Position::ArgumentNamed(s) =&gt; {
+                        <span class="kw">match </span>Symbol::intern(s) {
+                            <span class="comment">// `{Self}` is allowed
+                            </span>kw::SelfUpper =&gt; (),
+                            <span class="comment">// `{ThisTraitsName}` is allowed
+                            </span>s <span class="kw">if </span>s == trait_name =&gt; (),
+                            <span class="comment">// `{from_method}` is allowed
+                            </span>sym::from_method =&gt; (),
+                            <span class="comment">// `{from_desugaring}` is allowed
+                            </span>sym::from_desugaring =&gt; (),
+                            <span class="comment">// `{ItemContext}` is allowed
+                            </span>sym::ItemContext =&gt; (),
+                            <span class="comment">// `{integral}` and `{integer}` and `{float}` are allowed
+                            </span>sym::integral | sym::integer_ | sym::float =&gt; (),
+                            <span class="comment">// So is `{A}` if A is a type parameter
+                            </span>s =&gt; <span class="kw">match </span>generics.params.iter().find(|param| param.name == s) {
+                                <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; (),
+                                <span class="prelude-val">None </span>=&gt; {
+                                    <span class="kw">let </span>reported = <span class="macro">struct_span_err!</span>(
+                                        tcx.sess,
+                                        span,
+                                        E0230,
+                                        <span class="string">&quot;there is no parameter `{}` on {}&quot;</span>,
+                                        s,
+                                        <span class="kw">if </span>trait_def_id == item_def_id {
+                                            <span class="macro">format!</span>(<span class="string">&quot;trait `{}`&quot;</span>, trait_name)
+                                        } <span class="kw">else </span>{
+                                            <span class="string">&quot;impl&quot;</span>.to_string()
+                                        }
+                                    )
+                                    .emit();
+                                    result = <span class="prelude-val">Err</span>(reported);
+                                }
+                            },
+                        }
+                    }
+                    <span class="comment">// `{:1}` and `{}` are not to be used
+                    </span>Position::ArgumentIs(..) | Position::ArgumentImplicitlyIs(<span class="kw">_</span>) =&gt; {
+                        <span class="kw">let </span>reported = <span class="macro">struct_span_err!</span>(
+                            tcx.sess,
+                            span,
+                            E0231,
+                            <span class="string">&quot;only named substitution parameters are allowed&quot;
+                        </span>)
+                        .emit();
+                        result = <span class="prelude-val">Err</span>(reported);
+                    }
+                },
+            }
+        }
+
+        <a href="#265">result</a>
+    }
+
+    <span class="kw">pub fn </span>format(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        trait_ref: ty::TraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        options: <span class="kw-2">&amp;</span>FxHashMap&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <span class="kw">let </span>name = <a href="#326">tcx</a>.item_name(<a href="#327">trait_ref</a>.def_id);
+        <span class="kw">let </span>trait_str = <a href="#326">tcx</a>.def_path_str(<a href="#327">trait_ref</a>.def_id);
+        <span class="kw">let </span>generics = <a href="#326">tcx</a>.generics_of(<a href="#327">trait_ref</a>.def_id);
+        <span class="kw">let </span>generic_map = <a href="#332">generics</a>
+            .params
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|param| {
+                <span class="kw">let </span>value = <span class="kw">match </span><a href="#336">param</a>.kind {
+                    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/enum.GenericParamDefKind.html">GenericParamDefKind::Type</a> { .. } | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/enum.GenericParamDefKind.html">GenericParamDefKind::Const</a> { .. } =&gt; {
+                        <a href="#327">trait_ref</a>.substs[<a href="#336">param</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>].<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+                    }
+                    GenericParamDefKind::Lifetime =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+                };
+                <span class="kw">let </span>name = <a href="#336">param</a>.name;
+                <span class="prelude-val">Some</span>((<a href="#343">name</a>, <a href="#337">value</a>))
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;FxHashMap&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;&gt;();
+        <span class="kw">let </span>empty_string = String::new();
+
+        <span class="kw">let </span>s = <a class="self" href="#325">self</a>.<span class="number">0</span>.as_str();
+        <span class="kw">let </span>parser = Parser::new(<a href="#349">s</a>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="bool-val">false</span>, ParseMode::Format);
+        <span class="kw">let </span>item_context = (<a href="#328">options</a>.get(<span class="kw-2">&amp;</span>sym::ItemContext)).unwrap_or(<span class="kw-2">&amp;</span><a href="#347">empty_string</a>);
+        <a href="#350">parser</a>
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|p| <span class="kw">match </span><a href="#353">p</a> {
+                Piece::String(s) =&gt; <a href="#354">s</a>,
+                Piece::NextArgument(a) =&gt; <span class="kw">match </span><a href="#355">a</a>.position {
+                    Position::ArgumentNamed(s) =&gt; {
+                        <span class="kw">let </span>s = Symbol::intern(<a href="#356">s</a>);
+                        <span class="kw">match </span><a href="#333">generic_map</a>.get(<span class="kw-2">&amp;</span><a href="#357">s</a>) {
+                            <span class="prelude-val">Some</span>(val) =&gt; <a href="#359">val</a>,
+                            <span class="prelude-val">None </span><span class="kw">if </span><a href="#357">s</a> == <a href="#330">name</a> =&gt; <span class="kw-2">&amp;</span><a href="#331">trait_str</a>,
+                            <span class="prelude-val">None </span>=&gt; {
+                                <span class="kw">if let </span><span class="prelude-val">Some</span>(val) = <a href="#328">options</a>.get(<span class="kw-2">&amp;</span><a href="#357">s</a>) {
+                                    <a href="#362">val</a>
+                                } <span class="kw">else if </span>s == sym::from_desugaring || s == sym::from_method {
+                                    <span class="comment">// don&#39;t break messages using these two arguments incorrectly
+                                    </span><span class="kw-2">&amp;</span><a href="#347">empty_string</a>
+                                } <span class="kw">else if </span>s == sym::ItemContext {
+                                    <span class="kw-2">&amp;</span><a href="#351">item_context</a>
+                                } <span class="kw">else if </span>s == sym::integral {
+                                    <span class="string">&quot;{integral}&quot;
+                                </span>} <span class="kw">else if </span>s == sym::integer_ {
+                                    <span class="string">&quot;{integer}&quot;
+                                </span>} <span class="kw">else if </span>s == sym::float {
+                                    <span class="string">&quot;{float}&quot;
+                                </span>} <span class="kw">else </span>{
+                                    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(
+                                        <span class="string">&quot;broken on_unimplemented {:?} for {:?}: \
+                                      no argument matching {:?}&quot;</span>,
+                                        <span class="self">self</span>.<span class="number">0</span>,
+                                        trait_ref,
+                                        s
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;broken on_unimplemented {:?} - bad format arg&quot;</span>, <span class="self">self</span>.<span class="number">0</span>),
+                },
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_trait_selection" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

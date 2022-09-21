@@ -1,0 +1,1206 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_llvm/src/abi.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>abi.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_codegen_llvm/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="lib.rs.html#56"><span class="kw">crate</span>::attributes</a>;
+<span class="kw">use </span><a href="builder.rs.html#33"><span class="kw">crate</span>::builder::Builder</a>;
+<span class="kw">use </span><a href="context.rs.html#42"><span class="kw">crate</span>::context::CodegenCx</a>;
+<span class="kw">use </span><span class="kw">crate</span>::llvm::{<a class="self" href="lib.rs.html#71">self</a>, <a href="llvm/ffi.rs.html#640">Attribute</a>, <a href="llvm/mod.rs.html#107">AttributePlace</a>};
+<span class="kw">use </span><a href="llvm/ffi.rs.html#631"><span class="kw">crate</span>::type_::Type</a>;
+<span class="kw">use </span><a href="type_of.rs.html#179"><span class="kw">crate</span>::type_of::LayoutLlvmExt</a>;
+<span class="kw">use </span><a href="llvm/ffi.rs.html#634"><span class="kw">crate</span>::value::Value</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/mir/operand/enum.OperandValue.html">rustc_codegen_ssa::mir::operand::OperandValue</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/mir/place/struct.PlaceRef.html">rustc_codegen_ssa::mir::place::PlaceRef</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/index.html">rustc_codegen_ssa::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/struct.MemFlags.html">rustc_codegen_ssa::MemFlags</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">rustc_middle::bug</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">rustc_middle::ty::layout::LayoutOf</a>;
+<span class="kw">pub use </span>rustc_middle::ty::layout::{<a href="../../rustc_codegen_llvm/abi/constant.FAT_PTR_ADDR.html">FAT_PTR_ADDR</a>, <a href="../../rustc_codegen_llvm/abi/constant.FAT_PTR_EXTRA.html">FAT_PTR_EXTRA</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">rustc_middle::ty::Ty</a>;
+<span class="kw">use </span><a href="../../rustc_session/config/index.html">rustc_session::config</a>;
+<span class="kw">use </span><a href="../../rustc_codegen_llvm/abi/struct.ArgAbi.html">rustc_target::abi::call::ArgAbi</a>;
+<span class="kw">pub use </span>rustc_target::abi::call::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_target::abi::{<a class="self" href="../../rustc_target/abi/index.html">self</a>, <a href="../../rustc_target/abi/trait.HasDataLayout.html">HasDataLayout</a>, Int};
+<span class="kw">pub use </span><a href="../../rustc_codegen_llvm/abi/enum.Abi.html">rustc_target::spec::abi::Abi</a>;
+<span class="kw">use </span><a href="../../rustc_target/spec/struct.SanitizerSet.html">rustc_target::spec::SanitizerSet</a>;
+
+<span class="kw">use </span><a href="https://docs.rs/libc/0.2.131/libc/unix/type.c_uint.html">libc::c_uint</a>;
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">smallvec::SmallVec</a>;
+
+<span class="kw">pub trait </span>ArgAttributesExt {
+    <span class="kw">fn </span>apply_attrs_to_llfn(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: <a href="llvm/mod.rs.html#107">AttributePlace</a>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;, llfn: <span class="kw-2">&amp;</span><a href="llvm/ffi.rs.html#634">Value</a>);
+    <span class="kw">fn </span>apply_attrs_to_callsite(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        idx: <a href="llvm/mod.rs.html#107">AttributePlace</a>,
+        cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+        callsite: <span class="kw-2">&amp;</span><a href="llvm/ffi.rs.html#634">Value</a>,
+    );
+}
+
+<span class="kw">fn </span>should_use_mutable_noalias(cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="comment">// LLVM prior to version 12 had known miscompiles in the presence of
+    // noalias attributes (see #54878), but we don&#39;t support earlier
+    // versions at all anymore. We now enable mutable noalias by default.
+    </span><a href="#37">cx</a>.tcx.sess.opts.unstable_opts.mutable_noalias.unwrap_or(<span class="bool-val">true</span>)
+}
+
+<span class="kw">const </span>ABI_AFFECTING_ATTRIBUTES: [(<a href="../../rustc_codegen_llvm/abi/struct.ArgAttribute.html">ArgAttribute</a>, <a href="llvm/ffi.rs.html#158">llvm::AttributeKind</a>); <span class="number">1</span>] =
+    [(ArgAttribute::InReg, <a href="llvm/ffi.rs.html#178">llvm::AttributeKind::InReg</a>)];
+
+<span class="kw">const </span>OPTIMIZATION_ATTRIBUTES: [(<a href="../../rustc_codegen_llvm/abi/struct.ArgAttribute.html">ArgAttribute</a>, <a href="llvm/ffi.rs.html#158">llvm::AttributeKind</a>); <span class="number">5</span>] = [
+    (ArgAttribute::NoAlias, <a href="llvm/ffi.rs.html#165">llvm::AttributeKind::NoAlias</a>),
+    (ArgAttribute::NoCapture, <a href="llvm/ffi.rs.html#166">llvm::AttributeKind::NoCapture</a>),
+    (ArgAttribute::NonNull, <a href="llvm/ffi.rs.html#168">llvm::AttributeKind::NonNull</a>),
+    (ArgAttribute::ReadOnly, <a href="llvm/ffi.rs.html#173">llvm::AttributeKind::ReadOnly</a>),
+    (ArgAttribute::NoUndef, <a href="llvm/ffi.rs.html#192">llvm::AttributeKind::NoUndef</a>),
+];
+
+<span class="kw">fn </span>get_attrs&lt;<span class="lifetime">&#39;ll</span>&gt;(this: <span class="kw-2">&amp;</span><a href="../../rustc_codegen_llvm/abi/struct.ArgAttributes.html">ArgAttributes</a>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; SmallVec&lt;[<span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#640">Attribute</a>; <span class="number">8</span>]&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>regular = <a href="#55">this</a>.regular;
+
+    <span class="kw">let </span><span class="kw-2">mut </span>attrs = SmallVec::new();
+
+    <span class="comment">// ABI-affecting attributes must always be applied
+    </span><span class="kw">for </span>(attr, llattr) <span class="kw">in </span>ABI_AFFECTING_ATTRIBUTES {
+        <span class="kw">if </span>regular.contains(attr) {
+            attrs.push(llattr.create_attr(cx.llcx));
+        }
+    }
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(align) = <a href="#55">this</a>.pointee_align {
+        <a href="#58">attrs</a>.push(<a href="llvm/mod.rs.html#74">llvm::CreateAlignmentAttr</a>(<a href="#55">cx</a>.llcx, <a href="#66">align</a>.bytes()));
+    }
+    <span class="kw">match </span><a href="#55">this</a>.arg_ext {
+        ArgExtension::None =&gt; {}
+        ArgExtension::Zext =&gt; <a href="#58">attrs</a>.push(<a href="llvm/ffi.rs.html#177">llvm::AttributeKind::ZExt</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#55">cx</a>.llcx)),
+        ArgExtension::Sext =&gt; <a href="#58">attrs</a>.push(<a href="llvm/ffi.rs.html#174">llvm::AttributeKind::SExt</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#55">cx</a>.llcx)),
+    }
+
+    <span class="comment">// Only apply remaining attributes when optimizing
+    </span><span class="kw">if </span>cx.sess().opts.optimize != config::OptLevel::No {
+        <span class="kw">let </span>deref = <a href="#55">this</a>.pointee_size.bytes();
+        <span class="kw">if </span>deref != <span class="number">0 </span>{
+            <span class="kw">if </span>regular.contains(ArgAttribute::NonNull) {
+                <a href="#58">attrs</a>.push(<a href="llvm/mod.rs.html#78">llvm::CreateDereferenceableAttr</a>(<a href="#55">cx</a>.llcx, <a href="#77">deref</a>));
+            } <span class="kw">else </span>{
+                <a href="#58">attrs</a>.push(<a href="llvm/mod.rs.html#82">llvm::CreateDereferenceableOrNullAttr</a>(<a href="#55">cx</a>.llcx, <a href="#77">deref</a>));
+            }
+            <a href="#56">regular</a> -= ArgAttribute::NonNull;
+        }
+        <span class="kw">for </span>(attr, llattr) <span class="kw">in </span>OPTIMIZATION_ATTRIBUTES {
+            <span class="kw">if </span>regular.contains(attr) {
+                attrs.push(llattr.create_attr(cx.llcx));
+            }
+        }
+        <span class="kw">if </span>regular.contains(ArgAttribute::NoAliasMutRef) &amp;&amp; should_use_mutable_noalias(cx) {
+            <a href="#58">attrs</a>.push(<a href="llvm/ffi.rs.html#165">llvm::AttributeKind::NoAlias</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#55">cx</a>.llcx));
+        }
+    } <span class="kw">else if </span>cx.tcx.sess.opts.unstable_opts.sanitizer.contains(SanitizerSet::MEMORY) {
+        <span class="comment">// If we&#39;re not optimising, *but* memory sanitizer is on, emit noundef, since it affects
+        // memory sanitizer&#39;s behavior.
+
+        </span><span class="kw">if </span>regular.contains(ArgAttribute::NoUndef) {
+            <a href="#58">attrs</a>.push(<a href="llvm/ffi.rs.html#192">llvm::AttributeKind::NoUndef</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#55">cx</a>.llcx));
+        }
+    }
+
+    <a href="#58">attrs</a>
+}
+
+<span class="kw">impl </span><a href="#27">ArgAttributesExt</a> <span class="kw">for </span><a href="../../rustc_codegen_llvm/abi/struct.ArgAttributes.html">ArgAttributes</a> {
+    <span class="kw">fn </span>apply_attrs_to_llfn(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: <a href="llvm/mod.rs.html#107">AttributePlace</a>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;, llfn: <span class="kw-2">&amp;</span><a href="llvm/ffi.rs.html#634">Value</a>) {
+        <span class="kw">let </span>attrs = <a href="#55">get_attrs</a>(<a class="self" href="#107">self</a>, <a href="#107">cx</a>);
+        <a href="attributes.rs.html#23">attributes::apply_to_llfn</a>(<a href="#107">llfn</a>, <a href="#107">idx</a>, <span class="kw-2">&amp;</span><a href="#108">attrs</a>);
+    }
+
+    <span class="kw">fn </span>apply_attrs_to_callsite(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        idx: <a href="llvm/mod.rs.html#107">AttributePlace</a>,
+        cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+        callsite: <span class="kw-2">&amp;</span><a href="llvm/ffi.rs.html#634">Value</a>,
+    ) {
+        <span class="kw">let </span>attrs = <a href="#55">get_attrs</a>(<a class="self" href="#113">self</a>, <a href="#115">cx</a>);
+        <a href="attributes.rs.html#29">attributes::apply_to_callsite</a>(<a href="#116">callsite</a>, <a href="#114">idx</a>, <span class="kw-2">&amp;</span><a href="#118">attrs</a>);
+    }
+}
+
+<span class="kw">pub trait </span>LlvmType {
+    <span class="kw">fn </span>llvm_type&lt;<span class="lifetime">&#39;ll</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a>;
+}
+
+<span class="kw">impl </span><a href="#123">LlvmType</a> <span class="kw">for </span><a href="../../rustc_codegen_llvm/abi/struct.Reg.html">Reg</a> {
+    <span class="kw">fn </span>llvm_type&lt;<span class="lifetime">&#39;ll</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <span class="kw">match </span><a class="self" href="#128">self</a>.kind {
+            RegKind::Integer =&gt; <a href="#128">cx</a>.<a href="type_.rs.html#60">type_ix</a>(<a class="self" href="#128">self</a>.size.bits()),
+            RegKind::Float =&gt; <span class="kw">match </span><a class="self" href="#128">self</a>.size.bits() {
+                <span class="number">32 </span>=&gt; <a href="#128">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_f32</a>(),
+                <span class="number">64 </span>=&gt; <a href="#128">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_f64</a>(),
+                <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unsupported float: {:?}&quot;</span>, <span class="self">self</span>),
+            },
+            RegKind::Vector =&gt; <a href="#128">cx</a>.<a href="type_.rs.html#64">type_vector</a>(<a href="#128">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_i8</a>(), <a class="self" href="#128">self</a>.size.bytes()),
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="#123">LlvmType</a> <span class="kw">for </span><a href="../../rustc_codegen_llvm/abi/struct.CastTarget.html">CastTarget</a> {
+    <span class="kw">fn </span>llvm_type&lt;<span class="lifetime">&#39;ll</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <span class="kw">let </span>rest_ll_unit = <a class="self" href="#142">self</a>.rest.unit.<a href="#124">llvm_type</a>(<a href="#142">cx</a>);
+        <span class="kw">let </span>(rest_count, rem_bytes) = <span class="kw">if </span><span class="self">self</span>.rest.unit.size.bytes() == <span class="number">0 </span>{
+            (<span class="number">0</span>, <span class="number">0</span>)
+        } <span class="kw">else </span>{
+            (
+                <a class="self" href="#142">self</a>.rest.total.bytes() / <a class="self" href="#142">self</a>.rest.unit.size.bytes(),
+                <a class="self" href="#142">self</a>.rest.total.bytes() % <a class="self" href="#142">self</a>.rest.unit.size.bytes(),
+            )
+        };
+
+        <span class="kw">if </span><span class="self">self</span>.prefix.iter().all(|x| x.is_none()) {
+            <span class="comment">// Simplify to a single unit when there is no prefix and size &lt;= unit size
+            </span><span class="kw">if </span><span class="self">self</span>.rest.total &lt;= <span class="self">self</span>.rest.unit.size {
+                <span class="kw">return </span><a href="#143">rest_ll_unit</a>;
+            }
+
+            <span class="comment">// Simplify to array when all chunks are the same size and type
+            </span><span class="kw">if </span>rem_bytes == <span class="number">0 </span>{
+                <span class="kw">return </span><a href="#142">cx</a>.<a href="type_.rs.html#131">type_array</a>(<a href="#143">rest_ll_unit</a>, <a href="#144">rest_count</a>);
+            }
+        }
+
+        <span class="comment">// Create list of fields in the main structure
+        </span><span class="kw">let </span><span class="kw-2">mut </span>args: Vec&lt;<span class="kw">_</span>&gt; = <span class="self"><a href="#142">self</a>
+            </span>.prefix
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|option_reg| <a href="#169">option_reg</a>.map(|reg| <a href="#169">reg</a>.<a href="#124">llvm_type</a>(<a href="#142">cx</a>)))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>((<span class="number">0</span>..<a href="#144">rest_count</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw">_</span>| <a href="#143">rest_ll_unit</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="comment">// Append final integer
+        </span><span class="kw">if </span>rem_bytes != <span class="number">0 </span>{
+            <span class="comment">// Only integers can be really split further.
+            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(<span class="self">self</span>.rest.unit.kind, RegKind::Integer);
+            <a href="#166">args</a>.push(<a href="#142">cx</a>.<a href="type_.rs.html#60">type_ix</a>(<a href="#144">rem_bytes</a> * <span class="number">8</span>));
+        }
+
+        <a href="#142">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_struct</a>(<span class="kw-2">&amp;</span><a href="#166">args</a>, <span class="bool-val">false</span>)
+    }
+}
+
+<span class="kw">pub trait </span>ArgAbiExt&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>memory_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a>;
+    <span class="kw">fn </span>store(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        val: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>&gt;,
+    );
+    <span class="kw">fn </span>store_fn_arg(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        idx: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>&gt;,
+    );
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; ArgAbiExt&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="doccomment">/// Gets the LLVM type for a place of the original Rust type of
+    /// this argument/return, i.e., the result of `type_of::type_of`.
+    </span><span class="kw">fn </span>memory_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <a class="self" href="#203">self</a>.layout.<a href="type_of.rs.html#182">llvm_type</a>(<a href="#203">cx</a>)
+    }
+
+    <span class="doccomment">/// Stores a direct/indirect value described by this ArgAbi into a
+    /// place for the original Rust type of this argument/return.
+    /// Can be used for both storing formal arguments into Rust variables
+    /// or results of call/invoke instructions into their destinations.
+    </span><span class="kw">fn </span>store(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        val: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>&gt;,
+    ) {
+        <span class="kw">if </span><span class="self">self</span>.is_ignore() {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if </span><span class="self">self</span>.is_sized_indirect() {
+            OperandValue::Ref(<a href="#214">val</a>, <span class="prelude-val">None</span>, <a class="self" href="#212">self</a>.layout.align.abi).store(<a href="#213">bx</a>, <a href="#215">dst</a>)
+        } <span class="kw">else if </span><span class="self">self</span>.is_unsized_indirect() {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;unsized `ArgAbi` must be handled through `store_fn_arg`&quot;</span>);
+        } <span class="kw">else if let </span>PassMode::Cast(cast, <span class="kw">_</span>) = <span class="kw-2">&amp;</span><a class="self" href="#212">self</a>.mode {
+            <span class="comment">// FIXME(eddyb): Figure out when the simpler Store is safe, clang
+            // uses it for i16 -&gt; {i8, i8}, but not for i24 -&gt; {i8, i8, i8}.
+            </span><span class="kw">let </span>can_store_through_cast_ptr = <span class="bool-val">false</span>;
+            <span class="kw">if </span>can_store_through_cast_ptr {
+                <span class="kw">let </span>cast_ptr_llty = <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_ptr_to</a>(<a href="#224">cast</a>.<a href="#124">llvm_type</a>(<a href="#213">bx</a>));
+                <span class="kw">let </span>cast_dst = <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">pointercast</a>(<a href="#215">dst</a>.llval, <a href="#229">cast_ptr_llty</a>);
+                <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">store</a>(<a href="#214">val</a>, <a href="#230">cast_dst</a>, <a class="self" href="#212">self</a>.layout.align.abi);
+            } <span class="kw">else </span>{
+                <span class="comment">// The actual return type is a struct, but the ABI
+                // adaptation code has cast it into some scalar type.  The
+                // code that follows is the only reliable way I have
+                // found to do a transform like i64 -&gt; {i32,i32}.
+                // Basically we dump the data onto the stack then memcpy it.
+                //
+                // Other approaches I tried:
+                // - Casting rust ret pointer to the foreign type and using Store
+                //   is (a) unsafe if size of foreign type &gt; size of rust type and
+                //   (b) runs afoul of strict aliasing rules, yielding invalid
+                //   assembly under -O (specifically, the store gets removed).
+                // - Truncating foreign type to correct integral type and then
+                //   bitcasting to the struct type yields invalid cast errors.
+
+                // We instead thus allocate some scratch space...
+                </span><span class="kw">let </span>scratch_size = <a href="#224">cast</a>.size(<a href="#213">bx</a>);
+                <span class="kw">let </span>scratch_align = <a href="#224">cast</a>.align(<a href="#213">bx</a>);
+                <span class="kw">let </span>llscratch = <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">alloca</a>(<a href="#224">cast</a>.<a href="#124">llvm_type</a>(<a href="#213">bx</a>), <a href="#249">scratch_align</a>);
+                <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">lifetime_start</a>(<a href="#250">llscratch</a>, <a href="#248">scratch_size</a>);
+
+                <span class="comment">// ... where we first store the value...
+                </span><a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">store</a>(<a href="#214">val</a>, <a href="#250">llscratch</a>, <a href="#249">scratch_align</a>);
+
+                <span class="comment">// ... and then memcpy it to the intended destination.
+                </span><a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">memcpy</a>(
+                    <a href="#215">dst</a>.llval,
+                    <a class="self" href="#212">self</a>.layout.align.abi,
+                    <a href="#250">llscratch</a>,
+                    <a href="#249">scratch_align</a>,
+                    <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/consts/trait.ConstMethods.html">const_usize</a>(<a class="self" href="#212">self</a>.layout.size.bytes()),
+                    MemFlags::empty(),
+                );
+
+                <a href="#213">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">lifetime_end</a>(<a href="#250">llscratch</a>, <a href="#248">scratch_size</a>);
+            }
+        } <span class="kw">else </span>{
+            OperandValue::Immediate(<a href="#214">val</a>).store(<a href="#213">bx</a>, <a href="#215">dst</a>);
+        }
+    }
+
+    <span class="kw">fn </span>store_fn_arg(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        idx: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>&gt;,
+    ) {
+        <span class="kw">let </span><span class="kw-2">mut </span>next = || {
+            <span class="kw">let </span>val = <a href="llvm/mod.rs.html#237">llvm::get_param</a>(<a href="#275">bx</a>.<a href="builder.rs.html#1188">llfn</a>(), <span class="kw-2">*</span><a href="#276">idx</a> <span class="kw">as </span><a href="https://docs.rs/libc/0.2.131/libc/unix/type.c_uint.html">c_uint</a>);
+            <span class="kw-2">*</span><a href="#276">idx</a> += <span class="number">1</span>;
+            <a href="#280">val</a>
+        };
+        <span class="kw">match </span><a class="self" href="#274">self</a>.mode {
+            PassMode::Ignore =&gt; {}
+            PassMode::Pair(..) =&gt; {
+                OperandValue::Pair(<a href="#279">next</a>(), <a href="#279">next</a>()).store(<a href="#275">bx</a>, <a href="#277">dst</a>);
+            }
+            <a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { attrs: <span class="kw">_</span>, extra_attrs: <span class="prelude-val">Some</span>(<span class="kw">_</span>), on_stack: <span class="kw">_ </span>} =&gt; {
+                OperandValue::Ref(<a href="#279">next</a>(), <span class="prelude-val">Some</span>(<a href="#279">next</a>()), <a class="self" href="#274">self</a>.layout.align.abi).store(<a href="#275">bx</a>, <a href="#277">dst</a>);
+            }
+            PassMode::Direct(<span class="kw">_</span>)
+            | <a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { attrs: <span class="kw">_</span>, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="kw">_ </span>}
+            | PassMode::Cast(..) =&gt; {
+                <span class="kw">let </span>next_arg = <a href="#279">next</a>();
+                <a class="self" href="#274">self</a>.<a href="#186-191">store</a>(<a href="#275">bx</a>, <a href="#295">next_arg</a>, <a href="#277">dst</a>);
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; ArgAbiMethods&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>store_fn_arg(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        arg_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        idx: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>::Value&gt;,
+    ) {
+        <a href="#305">arg_abi</a>.<a href="#192-197">store_fn_arg</a>(<a class="self" href="#304">self</a>, <a href="#306">idx</a>, <a href="#307">dst</a>)
+    }
+    <span class="kw">fn </span>store_arg(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        arg_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        val: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>,
+        dst: PlaceRef&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>&gt;,
+    ) {
+        <a href="#313">arg_abi</a>.<a href="#186-191">store</a>(<a class="self" href="#312">self</a>, <a href="#314">val</a>, <a href="#315">dst</a>)
+    }
+    <span class="kw">fn </span>arg_memory_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, arg_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <a href="#319">arg_abi</a>.<a href="#185">memory_ty</a>(<a class="self" href="#319">self</a>)
+    }
+}
+
+<span class="kw">pub trait </span>FnAbiLlvmExt&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>llvm_type(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a>;
+    <span class="kw">fn </span>ptr_to_llvm_type(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a>;
+    <span class="kw">fn </span>llvm_cconv(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="llvm/ffi.rs.html#89">llvm::CallConv</a>;
+    <span class="kw">fn </span>apply_attrs_llfn(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;, llfn: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>);
+    <span class="kw">fn </span>apply_attrs_callsite(<span class="kw-2">&amp;</span><span class="self">self</span>, bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;, callsite: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>);
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; FnAbiLlvmExt&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>FnAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">fn </span>llvm_type(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <span class="comment">// Ignore &quot;extra&quot; args from the call site for C variadic functions.
+        // Only the &quot;fixed&quot; args are part of the LLVM function signature.
+        </span><span class="kw">let </span>args =
+            <span class="kw">if </span><span class="self">self</span>.c_variadic { <span class="kw-2">&amp;</span><a class="self" href="#333">self</a>.args[..<a class="self" href="#333">self</a>.fixed_count <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>] } <span class="kw">else </span>{ <span class="kw-2">&amp;</span><a class="self" href="#333">self</a>.args };
+
+        <span class="comment">// This capacity calculation is approximate.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>llargument_tys = Vec::with_capacity(
+            <a class="self" href="#333">self</a>.args.len() + <span class="kw">if let </span><a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { .. } = <a class="self" href="#333">self</a>.ret.mode { <span class="number">1 </span>} <span class="kw">else </span>{ <span class="number">0 </span>},
+        );
+
+        <span class="kw">let </span>llreturn_ty = <span class="kw">match </span><span class="kw-2">&amp;</span><a class="self" href="#333">self</a>.ret.mode {
+            PassMode::Ignore =&gt; <a href="#333">cx</a>.<a href="type_.rs.html#51">type_void</a>(),
+            PassMode::Direct(<span class="kw">_</span>) | PassMode::Pair(..) =&gt; <a class="self" href="#333">self</a>.ret.layout.<a href="type_of.rs.html#183">immediate_llvm_type</a>(<a href="#333">cx</a>),
+            PassMode::Cast(cast, <span class="kw">_</span>) =&gt; <a href="#347">cast</a>.<a href="#124">llvm_type</a>(<a href="#333">cx</a>),
+            <a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { .. } =&gt; {
+                <a href="#340">llargument_tys</a>.push(<a href="#333">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_ptr_to</a>(<a class="self" href="#333">self</a>.ret.<a href="#185">memory_ty</a>(<a href="#333">cx</a>)));
+                <a href="#333">cx</a>.<a href="type_.rs.html#51">type_void</a>()
+            }
+        };
+
+        <span class="kw">for </span>arg <span class="kw">in </span>args {
+            <span class="kw">let </span>llarg_ty = <span class="kw">match </span><span class="kw-2">&amp;</span>arg.mode {
+                PassMode::Ignore =&gt; <span class="kw">continue</span>,
+                PassMode::Direct(<span class="kw">_</span>) =&gt; arg.layout.immediate_llvm_type(cx),
+                PassMode::Pair(..) =&gt; {
+                    llargument_tys.push(arg.layout.scalar_pair_element_llvm_type(cx, <span class="number">0</span>, <span class="bool-val">true</span>));
+                    llargument_tys.push(arg.layout.scalar_pair_element_llvm_type(cx, <span class="number">1</span>, <span class="bool-val">true</span>));
+                    <span class="kw">continue</span>;
+                }
+                PassMode::Indirect { attrs: <span class="kw">_</span>, extra_attrs: <span class="prelude-val">Some</span>(<span class="kw">_</span>), on_stack: <span class="kw">_ </span>} =&gt; {
+                    <span class="kw">let </span>ptr_ty = cx.tcx.mk_mut_ptr(arg.layout.ty);
+                    <span class="kw">let </span>ptr_layout = cx.layout_of(ptr_ty);
+                    llargument_tys.push(ptr_layout.scalar_pair_element_llvm_type(cx, <span class="number">0</span>, <span class="bool-val">true</span>));
+                    llargument_tys.push(ptr_layout.scalar_pair_element_llvm_type(cx, <span class="number">1</span>, <span class="bool-val">true</span>));
+                    <span class="kw">continue</span>;
+                }
+                PassMode::Cast(cast, pad_i32) =&gt; {
+                    <span class="comment">// add padding
+                    </span><span class="kw">if </span><span class="kw-2">*</span>pad_i32 {
+                        llargument_tys.push(Reg::i32().llvm_type(cx));
+                    }
+                    cast.llvm_type(cx)
+                }
+                PassMode::Indirect { attrs: <span class="kw">_</span>, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="kw">_ </span>} =&gt; {
+                    cx.type_ptr_to(arg.memory_ty(cx))
+                }
+            };
+            llargument_tys.push(llarg_ty);
+        }
+
+        <span class="kw">if </span><span class="self">self</span>.c_variadic {
+            <a href="#333">cx</a>.<a href="type_.rs.html#127">type_variadic_func</a>(<span class="kw-2">&amp;</span><a href="#340">llargument_tys</a>, <a href="#344">llreturn_ty</a>)
+        } <span class="kw">else </span>{
+            <a href="#333">cx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/type_/trait.BaseTypeMethods.html">type_func</a>(<span class="kw-2">&amp;</span><a href="#340">llargument_tys</a>, <a href="#344">llreturn_ty</a>)
+        }
+    }
+
+    <span class="kw">fn </span>ptr_to_llvm_type(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#631">Type</a> {
+        <span class="kw">unsafe </span>{
+            <a href="llvm/ffi.rs.html#1057">llvm::LLVMPointerType</a>(
+                <a class="self" href="#391">self</a>.<a href="#325">llvm_type</a>(<a href="#391">cx</a>),
+                <a href="#391">cx</a>.<a href="../../rustc_target/abi/trait.HasDataLayout.html">data_layout</a>().instruction_address_space.<span class="number">0 </span><span class="kw">as </span><a href="https://docs.rs/libc/0.2.131/libc/unix/type.c_uint.html">c_uint</a>,
+            )
+        }
+    }
+
+    <span class="kw">fn </span>llvm_cconv(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="llvm/ffi.rs.html#89">llvm::CallConv</a> {
+        <span class="kw">match </span><a class="self" href="#400">self</a>.conv {
+            Conv::C | Conv::Rust | Conv::CCmseNonSecureCall =&gt; <a href="llvm/ffi.rs.html#90">llvm::CCallConv</a>,
+            Conv::RustCold =&gt; <a href="llvm/ffi.rs.html#92">llvm::ColdCallConv</a>,
+            Conv::AmdGpuKernel =&gt; <a href="llvm/ffi.rs.html#105">llvm::AmdGpuKernel</a>,
+            Conv::AvrInterrupt =&gt; <a href="llvm/ffi.rs.html#104">llvm::AvrInterrupt</a>,
+            Conv::AvrNonBlockingInterrupt =&gt; <a href="llvm/ffi.rs.html#103">llvm::AvrNonBlockingInterrupt</a>,
+            Conv::ArmAapcs =&gt; <a href="llvm/ffi.rs.html#95">llvm::ArmAapcsCallConv</a>,
+            Conv::Msp430Intr =&gt; <a href="llvm/ffi.rs.html#96">llvm::Msp430Intr</a>,
+            Conv::PtxKernel =&gt; <a href="llvm/ffi.rs.html#98">llvm::PtxKernel</a>,
+            Conv::X86Fastcall =&gt; <a href="llvm/ffi.rs.html#94">llvm::X86FastcallCallConv</a>,
+            Conv::X86Intr =&gt; <a href="llvm/ffi.rs.html#102">llvm::X86_Intr</a>,
+            Conv::X86Stdcall =&gt; <a href="llvm/ffi.rs.html#93">llvm::X86StdcallCallConv</a>,
+            Conv::X86ThisCall =&gt; <a href="llvm/ffi.rs.html#97">llvm::X86_ThisCall</a>,
+            Conv::X86VectorCall =&gt; <a href="llvm/ffi.rs.html#101">llvm::X86_VectorCall</a>,
+            Conv::X86_64SysV =&gt; <a href="llvm/ffi.rs.html#99">llvm::X86_64_SysV</a>,
+            Conv::X86_64Win64 =&gt; <a href="llvm/ffi.rs.html#100">llvm::X86_64_Win64</a>,
+        }
+    }
+
+    <span class="kw">fn </span>apply_attrs_llfn(<span class="kw-2">&amp;</span><span class="self">self</span>, cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;, llfn: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>) {
+        <span class="kw">let </span><span class="kw-2">mut </span>func_attrs = SmallVec::&lt;[<span class="kw">_</span>; <span class="number">2</span>]&gt;::new();
+        <span class="kw">if </span><span class="self">self</span>.ret.layout.abi.is_uninhabited() {
+            <a href="#421">func_attrs</a>.push(<a href="llvm/ffi.rs.html#170">llvm::AttributeKind::NoReturn</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#420">cx</a>.llcx));
+        }
+        <span class="kw">if </span>!<span class="self">self</span>.can_unwind {
+            <a href="#421">func_attrs</a>.push(<a href="llvm/ffi.rs.html#171">llvm::AttributeKind::NoUnwind</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#420">cx</a>.llcx));
+        }
+        <a href="attributes.rs.html#23">attributes::apply_to_llfn</a>(<a href="#420">llfn</a>, <a href="llvm/mod.rs.html#110">llvm::AttributePlace::Function</a>, <span class="kw-2">&amp;</span>{ <a href="#421">func_attrs</a> });
+
+        <span class="kw">let </span><span class="kw-2">mut </span>i = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>apply = |attrs: <span class="kw-2">&amp;</span><a href="../../rustc_codegen_llvm/abi/struct.ArgAttributes.html">ArgAttributes</a>| {
+            <a href="#431">attrs</a>.<a href="#28">apply_attrs_to_llfn</a>(<a href="llvm/mod.rs.html#109">llvm::AttributePlace::Argument</a>(<a href="#430">i</a>), <a href="#420">cx</a>, <a href="#420">llfn</a>);
+            <a href="#430">i</a> += <span class="number">1</span>;
+            <a href="#430">i</a> - <span class="number">1
+        </span>};
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a class="self" href="#420">self</a>.ret.mode {
+            PassMode::Direct(attrs) =&gt; {
+                <a href="#437">attrs</a>.<a href="#28">apply_attrs_to_llfn</a>(<a href="llvm/mod.rs.html#108">llvm::AttributePlace::ReturnValue</a>, <a href="#420">cx</a>, <a href="#420">llfn</a>);
+            }
+            <a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { attrs, extra_attrs: <span class="kw">_</span>, on_stack } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!on_stack);
+                <span class="kw">let </span>i = <a href="#431">apply</a>(<a href="#440">attrs</a>);
+                <span class="kw">let </span>sret = <a href="llvm/mod.rs.html#90">llvm::CreateStructRetAttr</a>(<a href="#420">cx</a>.llcx, <a class="self" href="#420">self</a>.ret.layout.<a href="type_of.rs.html#182">llvm_type</a>(<a href="#420">cx</a>));
+                <a href="attributes.rs.html#23">attributes::apply_to_llfn</a>(<a href="#420">llfn</a>, <a href="llvm/mod.rs.html#109">llvm::AttributePlace::Argument</a>(<a href="#442">i</a>), <span class="kw-2">&amp;</span>[<a href="#443">sret</a>]);
+            }
+            PassMode::Cast(cast, <span class="kw">_</span>) =&gt; {
+                <a href="#446">cast</a>.attrs.<a href="#28">apply_attrs_to_llfn</a>(<a href="llvm/mod.rs.html#108">llvm::AttributePlace::ReturnValue</a>, <a href="#420">cx</a>, <a href="#420">llfn</a>);
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+        <span class="kw">for </span>arg <span class="kw">in </span><span class="self">self</span>.args.iter() {
+            <span class="kw">match </span><span class="kw-2">&amp;</span>arg.mode {
+                PassMode::Ignore =&gt; {}
+                PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="bool-val">true </span>} =&gt; {
+                    <span class="kw">let </span>i = apply(attrs);
+                    <span class="kw">let </span>byval = llvm::CreateByValAttr(cx.llcx, arg.layout.llvm_type(cx));
+                    attributes::apply_to_llfn(llfn, llvm::AttributePlace::Argument(i), <span class="kw-2">&amp;</span>[byval]);
+                }
+                PassMode::Direct(attrs)
+                | PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="bool-val">false </span>} =&gt; {
+                    apply(attrs);
+                }
+                PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">Some</span>(extra_attrs), on_stack } =&gt; {
+                    <span class="macro">assert!</span>(!on_stack);
+                    apply(attrs);
+                    apply(extra_attrs);
+                }
+                PassMode::Pair(a, b) =&gt; {
+                    apply(a);
+                    apply(b);
+                }
+                PassMode::Cast(cast, pad_i32) =&gt; {
+                    <span class="kw">if </span><span class="kw-2">*</span>pad_i32 {
+                        apply(<span class="kw-2">&amp;</span>ArgAttributes::new());
+                    }
+                    apply(<span class="kw-2">&amp;</span>cast.attrs);
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>apply_attrs_callsite(<span class="kw-2">&amp;</span><span class="self">self</span>, bx: <span class="kw-2">&amp;mut </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;ll</span>, <span class="lifetime">&#39;tcx</span>&gt;, callsite: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ll </span><a href="llvm/ffi.rs.html#634">Value</a>) {
+        <span class="kw">let </span><span class="kw-2">mut </span>func_attrs = SmallVec::&lt;[<span class="kw">_</span>; <span class="number">2</span>]&gt;::new();
+        <span class="kw">if </span><span class="self">self</span>.ret.layout.abi.is_uninhabited() {
+            <a href="#483">func_attrs</a>.push(<a href="llvm/ffi.rs.html#170">llvm::AttributeKind::NoReturn</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#482">bx</a>.cx.llcx));
+        }
+        <span class="kw">if </span>!<span class="self">self</span>.can_unwind {
+            <a href="#483">func_attrs</a>.push(<a href="llvm/ffi.rs.html#171">llvm::AttributeKind::NoUnwind</a>.<a href="llvm/mod.rs.html#183">create_attr</a>(<a href="#482">bx</a>.cx.llcx));
+        }
+        <a href="attributes.rs.html#29">attributes::apply_to_callsite</a>(<a href="#482">callsite</a>, <a href="llvm/mod.rs.html#110">llvm::AttributePlace::Function</a>, <span class="kw-2">&amp;</span>{ <a href="#483">func_attrs</a> });
+
+        <span class="kw">let </span><span class="kw-2">mut </span>i = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>apply = |cx: <span class="kw-2">&amp;</span>CodegenCx&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;, attrs: <span class="kw-2">&amp;</span><a href="../../rustc_codegen_llvm/abi/struct.ArgAttributes.html">ArgAttributes</a>| {
+            <a href="#493">attrs</a>.<a href="#29-34">apply_attrs_to_callsite</a>(<a href="llvm/mod.rs.html#109">llvm::AttributePlace::Argument</a>(<a href="#492">i</a>), <a href="#493">cx</a>, <a href="#482">callsite</a>);
+            <a href="#492">i</a> += <span class="number">1</span>;
+            <a href="#492">i</a> - <span class="number">1
+        </span>};
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a class="self" href="#482">self</a>.ret.mode {
+            PassMode::Direct(attrs) =&gt; {
+                <a href="#499">attrs</a>.<a href="#29-34">apply_attrs_to_callsite</a>(<a href="llvm/mod.rs.html#108">llvm::AttributePlace::ReturnValue</a>, <a href="#482">bx</a>.cx, <a href="#482">callsite</a>);
+            }
+            <a href="../../rustc_codegen_llvm/abi/enum.PassMode.html">PassMode::Indirect</a> { attrs, extra_attrs: <span class="kw">_</span>, on_stack } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!on_stack);
+                <span class="kw">let </span>i = <a href="#493">apply</a>(<a href="#482">bx</a>.cx, <a href="#502">attrs</a>);
+                <span class="kw">let </span>sret = <a href="llvm/mod.rs.html#90">llvm::CreateStructRetAttr</a>(<a href="#482">bx</a>.cx.llcx, <a class="self" href="#482">self</a>.ret.layout.<a href="type_of.rs.html#182">llvm_type</a>(<a href="#482">bx</a>));
+                <a href="attributes.rs.html#29">attributes::apply_to_callsite</a>(<a href="#482">callsite</a>, <a href="llvm/mod.rs.html#109">llvm::AttributePlace::Argument</a>(<a href="#504">i</a>), <span class="kw-2">&amp;</span>[<a href="#505">sret</a>]);
+            }
+            PassMode::Cast(cast, <span class="kw">_</span>) =&gt; {
+                <a href="#508">cast</a>.attrs.<a href="#29-34">apply_attrs_to_callsite</a>(
+                    <a href="llvm/mod.rs.html#108">llvm::AttributePlace::ReturnValue</a>,
+                    <span class="kw-2">&amp;</span><a href="#482">bx</a>.cx,
+                    <a href="#482">callsite</a>,
+                );
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+        <span class="kw">if let </span>abi::Abi::Scalar(scalar) = <a class="self" href="#482">self</a>.ret.layout.abi {
+            <span class="comment">// If the value is a boolean, the range is 0..2 and that ultimately
+            // become 0..0 when the type becomes i1, which would be rejected
+            // by the LLVM verifier.
+            </span><span class="kw">if let </span>Int(..) = <a href="#517">scalar</a>.primitive() {
+                <span class="kw">if </span>!scalar.is_bool() &amp;&amp; !scalar.is_always_valid(bx) {
+                    <a href="#482">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/builder/trait.BuilderMethods.html">range_metadata</a>(<a href="#482">callsite</a>, <a href="#517">scalar</a>.valid_range(<a href="#482">bx</a>));
+                }
+            }
+        }
+        <span class="kw">for </span>arg <span class="kw">in </span><span class="self">self</span>.args.iter() {
+            <span class="kw">match </span><span class="kw-2">&amp;</span>arg.mode {
+                PassMode::Ignore =&gt; {}
+                PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="bool-val">true </span>} =&gt; {
+                    <span class="kw">let </span>i = apply(bx.cx, attrs);
+                    <span class="kw">let </span>byval = llvm::CreateByValAttr(bx.cx.llcx, arg.layout.llvm_type(bx));
+                    attributes::apply_to_callsite(
+                        callsite,
+                        llvm::AttributePlace::Argument(i),
+                        <span class="kw-2">&amp;</span>[byval],
+                    );
+                }
+                PassMode::Direct(attrs)
+                | PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">None</span>, on_stack: <span class="bool-val">false </span>} =&gt; {
+                    apply(bx.cx, attrs);
+                }
+                PassMode::Indirect { attrs, extra_attrs: <span class="prelude-val">Some</span>(extra_attrs), on_stack: <span class="kw">_ </span>} =&gt; {
+                    apply(bx.cx, attrs);
+                    apply(bx.cx, extra_attrs);
+                }
+                PassMode::Pair(a, b) =&gt; {
+                    apply(bx.cx, a);
+                    apply(bx.cx, b);
+                }
+                PassMode::Cast(cast, pad_i32) =&gt; {
+                    <span class="kw">if </span><span class="kw-2">*</span>pad_i32 {
+                        apply(bx.cx, <span class="kw-2">&amp;</span>ArgAttributes::new());
+                    }
+                    apply(bx.cx, <span class="kw-2">&amp;</span>cast.attrs);
+                }
+            }
+        }
+
+        <span class="kw">let </span>cconv = <a class="self" href="#482">self</a>.<a href="#327">llvm_cconv</a>();
+        <span class="kw">if </span>cconv != llvm::CCallConv {
+            <a href="llvm/mod.rs.html#145">llvm::SetInstructionCallConv</a>(<a href="#482">callsite</a>, <a href="#560">cconv</a>);
+        }
+
+        <span class="kw">if </span><span class="self">self</span>.conv == Conv::CCmseNonSecureCall {
+            <span class="comment">// This will probably get ignored on all targets but those supporting the TrustZone-M
+            // extension (thumbv8m targets).
+            </span><span class="kw">let </span>cmse_nonsecure_call = <a href="llvm/mod.rs.html#62">llvm::CreateAttrString</a>(<a href="#482">bx</a>.cx.llcx, <span class="string">&quot;cmse_nonsecure_call&quot;</span>);
+            <a href="attributes.rs.html#29">attributes::apply_to_callsite</a>(
+                <a href="#482">callsite</a>,
+                <a href="llvm/mod.rs.html#110">llvm::AttributePlace::Function</a>,
+                <span class="kw-2">&amp;</span>[<a href="#568">cmse_nonsecure_call</a>],
+            );
+        }
+
+        <span class="comment">// Some intrinsics require that an elementtype attribute (with the pointee type of a
+        // pointer argument) is added to the callsite.
+        </span><span class="kw">let </span>element_type_index = <span class="kw">unsafe </span>{ <a href="llvm/ffi.rs.html#2553">llvm::LLVMRustGetElementTypeArgIndex</a>(<a href="#482">callsite</a>) };
+        <span class="kw">if </span>element_type_index &gt;= <span class="number">0 </span>{
+            <span class="kw">let </span>arg_ty = <a class="self" href="#482">self</a>.args[<a href="#578">element_type_index</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>].layout.ty;
+            <span class="kw">let </span>pointee_ty = <a href="#580">arg_ty</a>.builtin_deref(<span class="bool-val">true</span>).expect(<span class="string">&quot;Must be pointer argument&quot;</span>).ty;
+            <span class="kw">let </span>element_type_attr = <span class="kw">unsafe </span>{
+                <a href="llvm/ffi.rs.html#1195">llvm::LLVMRustCreateElementTypeAttr</a>(<a href="#482">bx</a>.llcx, <a href="#482">bx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/trait.LayoutOf.html">layout_of</a>(<a href="#581">pointee_ty</a>).<a href="type_of.rs.html#182">llvm_type</a>(<a href="#482">bx</a>))
+            };
+            <a href="attributes.rs.html#29">attributes::apply_to_callsite</a>(
+                <a href="#482">callsite</a>,
+                <a href="llvm/mod.rs.html#109">llvm::AttributePlace::Argument</a>(<a href="#578">element_type_index</a> <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>),
+                <span class="kw-2">&amp;</span>[<a href="#582">element_type_attr</a>],
+            );
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; AbiBuilderMethods&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Builder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>apply_attrs_callsite(<span class="kw-2">&amp;mut </span><span class="self">self</span>, fn_abi: <span class="kw-2">&amp;</span>FnAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, callsite: <span class="self">Self</span>::Value) {
+        <a href="#595">fn_abi</a>.<a href="#329">apply_attrs_callsite</a>(<a class="self" href="#595">self</a>, <a href="#595">callsite</a>)
+    }
+
+    <span class="kw">fn </span>get_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="self">Self</span>::Value {
+        <a href="llvm/mod.rs.html#237">llvm::get_param</a>(<a class="self" href="#599">self</a>.<a href="builder.rs.html#1188">llfn</a>(), <a href="#599">index</a> <span class="kw">as </span><a href="https://docs.rs/libc/0.2.131/libc/unix/type.c_uint.html">c_uint</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_codegen_llvm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Propagates assignment destinations backwards in the CFG to eliminate redundant assignments."><meta name="keywords" content="rust, rustlang, rust-lang, dest_prop"><title>rustc_mir_transform::dest_prop - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module dest_prop</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#constants">Constants</a></li><li><a href="#functions">Functions</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../index.html">rustc_mir_transform</a>::<wbr><a class="mod" href="#">dest_prop</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../src/rustc_mir_transform/dest_prop.rs.html#1-917">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Propagates assignment destinations backwards in the CFG to eliminate redundant assignments.</p>
+<h2 id="motivation"><a href="#motivation">Motivation</a></h2>
+<p>MIR building can insert a lot of redundant copies, and Rust code in general often tends to move
+values around a lot. The result is a lot of assignments of the form <code>dest = {move} src;</code> in MIR.
+MIR building for constants in particular tends to create additional locals that are only used
+inside a single block to shuffle a value around unnecessarily.</p>
+<p>LLVM by itself is not good enough at eliminating these redundant copies (eg. see
+<a href="https://github.com/rust-lang/rust/issues/32966">https://github.com/rust-lang/rust/issues/32966</a>), so this leaves some performance on the table
+that we can regain by implementing an optimization for removing these assign statements in rustc
+itself. When this optimization runs fast enough, it can also speed up the constant evaluation
+and code generation phases of rustc due to the reduced number of statements and locals.</p>
+<h2 id="the-optimization"><a href="#the-optimization">The Optimization</a></h2>
+<p>Conceptually, this optimization is “destination propagation”. It is similar to the Named Return
+Value Optimization, or NRVO, known from the C++ world, except that it isn’t limited to return
+values or the return place <code>_0</code>. On a very high level, independent of the actual implementation
+details, it does the following:</p>
+<ol>
+<li>Identify <code>dest = src;</code> statements that can be soundly eliminated.</li>
+<li>Replace all mentions of <code>src</code> with <code>dest</code> (“unifying” them and propagating the destination
+backwards).</li>
+<li>Delete the <code>dest = src;</code> statement (by making it a <code>nop</code>).</li>
+</ol>
+<p>Step 1) is by far the hardest, so it is explained in more detail below.</p>
+<h3 id="soundness"><a href="#soundness">Soundness</a></h3>
+<p>Given an <code>Assign</code> statement <code>dest = src;</code>, where <code>dest</code> is a <code>Place</code> and <code>src</code> is an <code>Rvalue</code>,
+there are a few requirements that must hold for the optimization to be sound:</p>
+<ul>
+<li>
+<p><code>dest</code> must not contain any <em>indirection</em> through a pointer. It must access part of the base
+local. Otherwise it might point to arbitrary memory that is hard to track.</p>
+<p>It must also not contain any indexing projections, since those take an arbitrary <code>Local</code> as
+the index, and that local might only be initialized shortly before <code>dest</code> is used.</p>
+</li>
+<li>
+<p><code>src</code> must be a bare <code>Local</code> without any indirections or field projections (FIXME: Is this a
+fundamental restriction or just current impl state?). It can be copied or moved by the
+assignment.</p>
+</li>
+<li>
+<p>The <code>dest</code> and <code>src</code> locals must never be <a href="https://en.wikipedia.org/wiki/Live_variable_analysis"><em>live</em></a> at the same time. If they are, it
+means that they both hold a (potentially different) value that is needed by a future use of
+the locals. Unifying them would overwrite one of the values.</p>
+<p>Note that computing liveness of locals that have had their address taken is more difficult:
+Short of doing full escape analysis on the address/pointer/reference, the pass would need to
+assume that any operation that can potentially involve opaque user code (such as function
+calls, destructors, and inline assembly) may access any local that had its address taken
+before that point.</p>
+</li>
+</ul>
+<p>Here, the first two conditions are simple structural requirements on the <code>Assign</code> statements
+that can be trivially checked. The liveness requirement however is more difficult and costly to
+check.</p>
+<h3 id="previous-work"><a href="#previous-work">Previous Work</a></h3>
+<p>A <a href="https://github.com/rust-lang/rust/pull/47954">previous attempt</a> at implementing an optimization like this turned out to be a significant
+regression in compiler performance. Fixing the regressions introduced a lot of undesirable
+complexity to the implementation.</p>
+<p>A <a href="https://github.com/rust-lang/rust/pull/71003">subsequent approach</a> tried to avoid the costly computation by limiting itself to acyclic
+CFGs, but still turned out to be far too costly to run due to suboptimal performance within
+individual basic blocks, requiring a walk across the entire block for every assignment found
+within the block. For the <code>tuple-stress</code> benchmark, which has 458745 statements in a single
+block, this proved to be far too costly.</p>
+<p>Since the first attempt at this, the compiler has improved dramatically, and new analysis
+frameworks have been added that should make this approach viable without requiring a limited
+approach that only works for some classes of CFGs:</p>
+<ul>
+<li>rustc now has a powerful dataflow analysis framework that can handle forwards and backwards
+analyses efficiently.</li>
+<li>Layout optimizations for generators have been added to improve code generation for
+async/await, which are very similar in spirit to what this optimization does. Both walk the
+MIR and record conflicting uses of locals in a <code>BitMatrix</code>.</li>
+</ul>
+<p>Also, rustc now has a simple NRVO pass (see <code>nrvo.rs</code>), which handles a subset of the cases that
+this destination propagation pass handles, proving that similar optimizations can be performed
+on MIR.</p>
+<h3 id="prepost-optimization"><a href="#prepost-optimization">Pre/Post Optimization</a></h3>
+<p>It is recommended to run <code>SimplifyCfg</code> and then <code>SimplifyLocals</code> some time after this pass, as
+it replaces the eliminated assign statements with <code>nop</code>s and leaves unused locals behind.</p>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.CandidateAssignment.html" title="rustc_mir_transform::dest_prop::CandidateAssignment struct">CandidateAssignment</a><span title="Restricted Visibility">&nbsp;🔒</span> </div><div class="item-right docblock-short">A <code>dest = {move} src;</code> statement at <code>loc</code>.</div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.Conflicts.html" title="rustc_mir_transform::dest_prop::Conflicts struct">Conflicts</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.DestinationPropagation.html" title="rustc_mir_transform::dest_prop::DestinationPropagation struct">DestinationPropagation</a></div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.FindAssignments.html" title="rustc_mir_transform::dest_prop::FindAssignments struct">FindAssignments</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.IndexCollector.html" title="rustc_mir_transform::dest_prop::IndexCollector struct">IndexCollector</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.Replacements.html" title="rustc_mir_transform::dest_prop::Replacements struct">Replacements</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.Replacer.html" title="rustc_mir_transform::dest_prop::Replacer struct">Replacer</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.UnifyLocal.html" title="rustc_mir_transform::dest_prop::UnifyLocal struct">UnifyLocal</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="constants" class="small-section-header"><a href="#constants">Constants</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="constant" href="constant.MAX_BLOCKS.html" title="rustc_mir_transform::dest_prop::MAX_BLOCKS constant">MAX_BLOCKS</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="constant" href="constant.MAX_LOCALS.html" title="rustc_mir_transform::dest_prop::MAX_LOCALS constant">MAX_LOCALS</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="functions" class="small-section-header"><a href="#functions">Functions</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.find_candidates.html" title="rustc_mir_transform::dest_prop::find_candidates fn">find_candidates</a><span title="Restricted Visibility">&nbsp;🔒</span> </div><div class="item-right docblock-short">Scans the MIR for assignments between locals that we might want to consider merging.</div></div><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.is_local_required.html" title="rustc_mir_transform::dest_prop::is_local_required fn">is_local_required</a><span title="Restricted Visibility">&nbsp;🔒</span> </div><div class="item-right docblock-short">Some locals are part of the function’s interface and can not be removed.</div></div><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.locals_used_as_array_index.html" title="rustc_mir_transform::dest_prop::locals_used_as_array_index fn">locals_used_as_array_index</a><span title="Restricted Visibility">&nbsp;🔒</span> </div><div class="item-right docblock-short"><code>PlaceElem::Index</code> only stores a <code>Local</code>, so we can’t replace that with a full <code>Place</code>.</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

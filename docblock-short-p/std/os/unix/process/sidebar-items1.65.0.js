@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["parent_id","Returns the OS-assigned process identifier associated with this process’s parent."]],"trait":[["CommandExt","Unix-specific extensions to the [`process::Command`] builder."],["ExitStatusExt","Unix-specific extensions to [`process::ExitStatus`] and `ExitStatusError`."]]};

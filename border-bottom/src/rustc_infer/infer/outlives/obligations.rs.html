@@ -1,0 +1,944 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_infer/src/infer/outlives/obligations.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>obligations.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_infer/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Code that handles &quot;type-outlives&quot; constraints like `T: &#39;a`. This
+//! is based on the `push_outlives_components` function defined in rustc_infer,
+//! but it adds a bit of heuristics on top, in particular to deal with
+//! associated types and projections.
+//!
+//! When we process a given `T: &#39;a` obligation, we may produce two
+//! kinds of constraints for the region inferencer:
+//!
+//! - Relationships between inference variables and other regions.
+//!   For example, if we have `&amp;&#39;?0 u32: &#39;a`, then we would produce
+//!   a constraint that `&#39;a &lt;= &#39;?0`.
+//! - &quot;Verifys&quot; that must be checked after inferencing is done.
+//!   For example, if we know that, for some type parameter `T`,
+//!   `T: &#39;a + &#39;b`, and we have a requirement that `T: &#39;?1`,
+//!   then we add a &quot;verify&quot; that checks that `&#39;?1 &lt;= &#39;a || &#39;?1 &lt;= &#39;b`.
+//!   - Note the difference with the previous case: here, the region
+//!     variable must be less than something else, so this doesn&#39;t
+//!     affect how inference works (it finds the smallest region that
+//!     will do); it&#39;s just a post-condition that we have to check.
+//!
+//! **The key point is that once this function is done, we have
+//! reduced all of our &quot;type-region outlives&quot; obligations into relationships
+//! between individual regions.**
+//!
+//! One key input to this function is the set of &quot;region-bound pairs&quot;.
+//! These are basically the relationships between type parameters and
+//! regions that are in scope at the point where the outlives
+//! obligation was incurred. **When type-checking a function,
+//! particularly in the face of closures, this is not known until
+//! regionck runs!** This is because some of those bounds come
+//! from things we have yet to infer.
+//!
+//! Consider:
+//!
+//! ```
+//! fn bar&lt;T&gt;(a: T, b: impl for&lt;&#39;a&gt; Fn(&amp;&#39;a T)) {}
+//! fn foo&lt;T&gt;(x: T) {
+//!     bar(x, |y| { /* ... */})
+//!          // ^ closure arg
+//! }
+//! ```
+//!
+//! Here, the type of `y` may involve inference variables and the
+//! like, and it may also contain implied bounds that are needed to
+//! type-check the closure body (e.g., here it informs us that `T`
+//! outlives the late-bound region `&#39;a`).
+//!
+//! Note that by delaying the gathering of implied bounds until all
+//! inference information is known, we may find relationships between
+//! bound regions and other regions in the environment. For example,
+//! when we first check a closure like the one expected as argument
+//! to `foo`:
+//!
+//! ```
+//! fn foo&lt;U, F: for&lt;&#39;a&gt; FnMut(&amp;&#39;a U)&gt;(_f: F) {}
+//! ```
+//!
+//! the type of the closure&#39;s first argument would be `&amp;&#39;a ?U`. We
+//! might later infer `?U` to something like `&amp;&#39;b u32`, which would
+//! imply that `&#39;b: &#39;a`.
+
+</span><span class="kw">use </span><span class="kw">crate</span>::infer::outlives::components::{<a href="components.rs.html#52-56">push_outlives_components</a>, <a href="components.rs.html#11">Component</a>};
+<span class="kw">use </span><a href="env.rs.html#30"><span class="kw">crate</span>::infer::outlives::env::OutlivesEnvironment</a>;
+<span class="kw">use </span><a href="env.rs.html#65"><span class="kw">crate</span>::infer::outlives::env::RegionBoundPairs</a>;
+<span class="kw">use </span><a href="verify.rs.html#19"><span class="kw">crate</span>::infer::outlives::verify::VerifyBoundCx</a>;
+<span class="kw">use </span><span class="kw">crate</span>::infer::{
+    <a class="self" href="../../lib.rs.html#39">self</a>, <a href="../region_constraints/mod.rs.html#168">GenericKind</a>, <a href="../mod.rs.html#254">InferCtxt</a>, <a href="../mod.rs.html#510">RegionObligation</a>, <a href="../mod.rs.html#381">SubregionOrigin</a>, <a href="../undo_log.rs.html#21">UndoLog</a>, <a href="../region_constraints/mod.rs.html#191">VerifyBound</a>,
+};
+<span class="kw">use </span><span class="kw">crate</span>::traits::{<a href="../../../../rustc_infer/traits/struct.ObligationCause.html">ObligationCause</a>, <a href="../../../../rustc_infer/traits/enum.ObligationCauseCode.html">ObligationCauseCode</a>};
+<span class="kw">use </span><a href="https://docs.rs/ena/latest/ena/undo_log/trait.UndoLogs.html">rustc_data_structures::undo_log::UndoLogs</a>;
+<span class="kw">use </span><a href="../../../../rustc_span/def_id/struct.LocalDefId.html">rustc_hir::def_id::LocalDefId</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/enum.GenericArgKind.html">rustc_middle::ty::subst::GenericArgKind</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, Region, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>};
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec::smallvec</a>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>&gt; InferCtxt&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Registers that the given region obligation must be resolved
+    /// from within the scope of `body_id`. These regions are enqueued
+    /// and later processed by regionck, when full type information is
+    /// available (see `region_obligations` field for more
+    /// information).
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">pub fn </span>register_region_obligation(<span class="kw-2">&amp;</span><span class="self">self</span>, obligation: RegionObligation&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span><span class="kw-2">mut </span>inner = <span class="self">self</span>.inner.borrow_mut();
+        inner.undo_log.push(UndoLog::PushRegionObligation);
+        inner.region_obligations.push(obligation);
+    }
+
+    <span class="kw">pub fn </span>register_region_obligation_with_cause(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        sup_type: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        sub_region: Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        cause: <span class="kw-2">&amp;</span>ObligationCause&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>sup_type, <span class="question-mark">?</span>sub_region, <span class="question-mark">?</span>cause);
+        <span class="kw">let </span>origin = SubregionOrigin::from_obligation_cause(<a href="#93">cause</a>, || {
+            <a href="../mod.rs.html#391">infer::RelateParamBound</a>(
+                <a href="#93">cause</a>.span,
+                <a href="#91">sup_type</a>,
+                <span class="kw">match </span><a href="#93">cause</a>.code().peel_derives() {
+                    ObligationCauseCode::BindingObligation(<span class="kw">_</span>, span)
+                    | ObligationCauseCode::ExprBindingObligation(<span class="kw">_</span>, span, ..) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><a href="#101">span</a>),
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                },
+            )
+        });
+
+        <a class="self" href="#90">self</a>.<a href="#82">register_region_obligation</a>(<a href="../mod.rs.html#510">RegionObligation</a> { <a href="#91">sup_type</a>, <a href="#92">sub_region</a>, <a href="#96">origin</a> });
+    }
+
+    <span class="doccomment">/// Trait queries just want to pass back type obligations &quot;as is&quot;
+    </span><span class="kw">pub fn </span>take_registered_region_obligations(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;RegionObligation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        std::mem::take(<span class="kw-2">&amp;mut </span><a class="self" href="#112">self</a>.inner.borrow_mut().region_obligations)
+    }
+
+    <span class="doccomment">/// NOTE: Prefer using [`InferCtxt::check_region_obligations_and_report_errors`]
+    /// instead of calling this directly.
+    ///
+    /// Process the region obligations that must be proven (during
+    /// `regionck`) for the given `body_id`, given information about
+    /// the region bounds in scope and so forth. This function must be
+    /// invoked for all relevant body-ids before region inference is
+    /// done (or else an assert will fire).
+    ///
+    /// See the `region_obligations` field of `InferCtxt` for some
+    /// comments about how this function fits into the overall expected
+    /// flow of the inferencer. The key point is that it is
+    /// invoked after all type-inference variables have been bound --
+    /// towards the end of regionck. This also ensures that the
+    /// region-bound-pairs are available (see comments above regarding
+    /// closures).
+    ///
+    /// # Parameters
+    ///
+    /// - `region_bound_pairs_map`: the set of region bounds implied by
+    ///   the parameters and where-clauses. In particular, each pair
+    ///   `(&#39;a, K)` in this list tells us that the bounds in scope
+    ///   indicate that `K: &#39;a`, where `K` is either a generic
+    ///   parameter like `T` or a projection like `T::Item`.
+    /// - `param_env` is the parameter environment for the enclosing function.
+    /// - `body_id` is the body-id whose region obligations are being
+    ///   processed.
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>, region_bound_pairs))]
+    </span><span class="kw">pub fn </span>process_registered_region_obligations(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        region_bound_pairs: <span class="kw-2">&amp;</span>RegionBoundPairs&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <span class="macro">assert!</span>(
+            !<span class="self">self</span>.in_snapshot.get(),
+            <span class="string">&quot;cannot process registered region obligations in a snapshot&quot;
+        </span>);
+
+        <span class="kw">let </span>my_region_obligations = <span class="self">self</span>.take_registered_region_obligations();
+
+        <span class="kw">for </span>RegionObligation { sup_type, sub_region, origin } <span class="kw">in </span>my_region_obligations {
+            <span class="macro">debug!</span>(
+                <span class="string">&quot;process_registered_region_obligations: sup_type={:?} sub_region={:?} origin={:?}&quot;</span>,
+                sup_type, sub_region, origin
+            );
+
+            <span class="kw">let </span>sup_type = <span class="self">self</span>.resolve_vars_if_possible(sup_type);
+
+            <span class="kw">let </span>outlives =
+                <span class="kw-2">&amp;mut </span>TypeOutlives::new(<span class="self">self</span>, <span class="self">self</span>.tcx, <span class="kw-2">&amp;</span>region_bound_pairs, <span class="prelude-val">None</span>, param_env);
+            outlives.type_must_outlive(origin, sup_type, sub_region);
+        }
+    }
+
+    <span class="doccomment">/// Processes registered region obliations and resolves regions, reporting
+    /// any errors if any were raised. Prefer using this function over manually
+    /// calling `resolve_regions_and_report_errors`.
+    </span><span class="kw">pub fn </span>check_region_obligations_and_report_errors(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        generic_param_scope: <a href="../../../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+        outlives_env: <span class="kw-2">&amp;</span>OutlivesEnvironment&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <a class="self" href="#174">self</a>.<a href="#143">process_registered_region_obligations</a>(
+            <a href="#176">outlives_env</a>.<a href="env.rs.html#105">region_bound_pairs</a>(),
+            <a href="#176">outlives_env</a>.param_env,
+        );
+
+        <a class="self" href="#174">self</a>.<a href="../mod.rs.html#1337-1341">resolve_regions_and_report_errors</a>(<a href="#175">generic_param_scope</a>, <a href="#176">outlives_env</a>)
+    }
+}
+
+<span class="doccomment">/// The `TypeOutlives` struct has the job of &quot;lowering&quot; a `T: &#39;a`
+/// obligation into a series of `&#39;a: &#39;b` constraints and &quot;verify&quot;s, as
+/// described on the module comment. The final constraints are emitted
+/// via a &quot;delegate&quot; of type `D` -- this is usually the `infcx`, which
+/// accrues them into the `region_obligations` code, but for NLL we
+/// use something else.
+</span><span class="kw">pub struct </span>TypeOutlives&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>, D&gt;
+<span class="kw">where
+    </span>D: TypeOutlivesDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="comment">// See the comments on `process_registered_region_obligations` for the meaning
+    // of these fields.
+    </span>delegate: D,
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    verify_bound: VerifyBoundCx&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">pub trait </span>TypeOutlivesDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>push_sub_region_constraint(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    );
+
+    <span class="kw">fn </span>push_verify(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        kind: GenericKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        bound: VerifyBound&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    );
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>, D&gt; TypeOutlives&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>, D&gt;
+<span class="kw">where
+    </span>D: TypeOutlivesDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">pub fn </span>new(
+        delegate: D,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        region_bound_pairs: <span class="kw-2">&amp;</span><span class="lifetime">&#39;cx </span>RegionBoundPairs&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        implicit_region_bound: <span class="prelude-ty">Option</span>&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#226">delegate</a>,
+            <a href="#227">tcx</a>,
+            verify_bound: VerifyBoundCx::new(
+                <a href="#227">tcx</a>,
+                <a href="#228">region_bound_pairs</a>,
+                <a href="#229">implicit_region_bound</a>,
+                <a href="#230">param_env</a>,
+            ),
+        }
+    }
+
+    <span class="doccomment">/// Adds constraints to inference such that `T: &#39;a` holds (or
+    /// reports an error if it cannot).
+    ///
+    /// # Parameters
+    ///
+    /// - `origin`, the reason we need this constraint
+    /// - `ty`, the type `T`
+    /// - `region`, the region `&#39;a`
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">pub fn </span>type_must_outlive(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: infer::SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <span class="macro">assert!</span>(!ty.has_escaping_bound_vars());
+
+        <span class="kw">let </span><span class="kw-2">mut </span>components = <span class="macro">smallvec!</span>[];
+        push_outlives_components(<span class="self">self</span>.tcx, ty, <span class="kw-2">&amp;mut </span>components);
+        <span class="self">self</span>.components_must_outlive(origin, <span class="kw-2">&amp;</span>components, region);
+    }
+
+    <span class="kw">fn </span>components_must_outlive(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: infer::SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        components: <span class="kw-2">&amp;</span>[Component&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+        region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <span class="kw">for </span>component <span class="kw">in </span>components.iter() {
+            <span class="kw">let </span>origin = origin.clone();
+            <span class="kw">match </span>component {
+                Component::Region(region1) =&gt; {
+                    <span class="self">self</span>.delegate.push_sub_region_constraint(origin, region, <span class="kw-2">*</span>region1);
+                }
+                Component::Param(param_ty) =&gt; {
+                    <span class="self">self</span>.param_ty_must_outlive(origin, region, <span class="kw-2">*</span>param_ty);
+                }
+                Component::Projection(projection_ty) =&gt; {
+                    <span class="self">self</span>.projection_must_outlive(origin, region, <span class="kw-2">*</span>projection_ty);
+                }
+                Component::EscapingProjection(subcomponents) =&gt; {
+                    <span class="self">self</span>.components_must_outlive(origin, <span class="kw-2">&amp;</span>subcomponents, region);
+                }
+                Component::UnresolvedInferenceVariable(v) =&gt; {
+                    <span class="comment">// ignore this, we presume it will yield an error
+                    // later, since if a type variable is not resolved by
+                    // this point it never will be
+                    </span><span class="self">self</span>.tcx.sess.delay_span_bug(
+                        origin.span(),
+                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unresolved inference variable in outlives: {:?}&quot;</span>, v),
+                    );
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>param_ty_must_outlive(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: infer::SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param_ty: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.ParamTy.html">ty::ParamTy</a>,
+    ) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;param_ty_must_outlive(region={:?}, param_ty={:?}, origin={:?})&quot;</span>,
+            region, param_ty, origin
+        );
+
+        <span class="kw">let </span>generic = <a href="../region_constraints/mod.rs.html#169">GenericKind::Param</a>(<a href="#304">param_ty</a>);
+        <span class="kw">let </span>verify_bound = <a class="self" href="#301">self</a>.verify_bound.<a href="verify.rs.html#43">generic_bound</a>(<a href="#311">generic</a>);
+        <a class="self" href="#301">self</a>.delegate.<a href="#212-218">push_verify</a>(<a href="#302">origin</a>, <a href="#311">generic</a>, <a href="#303">region</a>, <a href="#312">verify_bound</a>);
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>projection_must_outlive(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: infer::SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        projection_ty: ty::ProjectionTy&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <span class="comment">// This case is thorny for inference. The fundamental problem is
+        // that there are many cases where we have choice, and inference
+        // doesn&#39;t like choice (the current region inference in
+        // particular). :) First off, we have to choose between using the
+        // OutlivesProjectionEnv, OutlivesProjectionTraitDef, and
+        // OutlivesProjectionComponent rules, any one of which is
+        // sufficient.  If there are no inference variables involved, it&#39;s
+        // not hard to pick the right rule, but if there are, we&#39;re in a
+        // bit of a catch 22: if we picked which rule we were going to
+        // use, we could add constraints to the region inference graph
+        // that make it apply, but if we don&#39;t add those constraints, the
+        // rule might not apply (but another rule might). For now, we err
+        // on the side of adding too few edges into the graph.
+
+        // Compute the bounds we can derive from the trait definition.
+        // These are guaranteed to apply, no matter the inference
+        // results.
+        </span><span class="kw">let </span>trait_bounds: Vec&lt;<span class="kw">_</span>&gt; =
+            <span class="self">self</span>.verify_bound.projection_declared_bounds_from_trait(projection_ty).collect();
+
+        <span class="macro">debug!</span>(<span class="question-mark">?</span>trait_bounds);
+
+        <span class="comment">// Compute the bounds we can derive from the environment. This
+        // is an &quot;approximate&quot; match -- in some cases, these bounds
+        // may not apply.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>approx_env_bounds =
+            <span class="self">self</span>.verify_bound.projection_approx_declared_bounds_from_env(projection_ty);
+        <span class="macro">debug!</span>(<span class="string">&quot;projection_must_outlive: approx_env_bounds={:?}&quot;</span>, approx_env_bounds);
+
+        <span class="comment">// Remove outlives bounds that we get from the environment but
+        // which are also deducible from the trait. This arises (cc
+        // #55756) in cases where you have e.g., `&lt;T as Foo&lt;&#39;a&gt;&gt;::Item:
+        // &#39;a` in the environment but `trait Foo&lt;&#39;b&gt; { type Item: &#39;b
+        // }` in the trait definition.
+        </span>approx_env_bounds.retain(|bound_outlives| {
+            <span class="comment">// OK to skip binder because we only manipulate and compare against other
+            // values from the same binder. e.g. if we have (e.g.) `for&lt;&#39;a&gt; &lt;T as Trait&lt;&#39;a&gt;&gt;::Item: &#39;a`
+            // in `bound`, the `&#39;a` will be a `^1` (bound, debruijn index == innermost) region.
+            // If the declaration is `trait Trait&lt;&#39;b&gt; { type Item: &#39;b; }`, then `projection_declared_bounds_from_trait`
+            // will be invoked with `[&#39;b =&gt; ^1]` and so we will get `^1` returned.
+            </span><span class="kw">let </span>bound = bound_outlives.skip_binder();
+            <span class="kw">match </span><span class="kw-2">*</span>bound.<span class="number">0</span>.kind() {
+                ty::Projection(projection_ty) =&gt; <span class="self">self
+                    </span>.verify_bound
+                    .projection_declared_bounds_from_trait(projection_ty)
+                    .all(|r| r != bound.<span class="number">1</span>),
+
+                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;expected only projection types from env, not {:?}&quot;</span>, bound.<span class="number">0</span>),
+            }
+        });
+
+        <span class="comment">// If declared bounds list is empty, the only applicable rule is
+        // OutlivesProjectionComponent. If there are inference variables,
+        // then, we can break down the outlives into more primitive
+        // components without adding unnecessary edges.
+        //
+        // If there are *no* inference variables, however, we COULD do
+        // this, but we choose not to, because the error messages are less
+        // good. For example, a requirement like `T::Item: &#39;r` would be
+        // translated to a requirement that `T: &#39;r`; when this is reported
+        // to the user, it will thus say &quot;T: &#39;r must hold so that T::Item:
+        // &#39;r holds&quot;. But that makes it sound like the only way to fix
+        // the problem is to add `T: &#39;r`, which isn&#39;t true. So, if there are no
+        // inference variables, we use a verify constraint instead of adding
+        // edges, which winds up enforcing the same condition.
+        </span><span class="kw">let </span>needs_infer = projection_ty.needs_infer();
+        <span class="kw">if </span>approx_env_bounds.is_empty() &amp;&amp; trait_bounds.is_empty() &amp;&amp; needs_infer {
+            <span class="macro">debug!</span>(<span class="string">&quot;projection_must_outlive: no declared bounds&quot;</span>);
+
+            <span class="kw">for </span>k <span class="kw">in </span>projection_ty.substs {
+                <span class="kw">match </span>k.unpack() {
+                    GenericArgKind::Lifetime(lt) =&gt; {
+                        <span class="self">self</span>.delegate.push_sub_region_constraint(origin.clone(), region, lt);
+                    }
+                    GenericArgKind::Type(ty) =&gt; {
+                        <span class="self">self</span>.type_must_outlive(origin.clone(), ty, region);
+                    }
+                    GenericArgKind::Const(<span class="kw">_</span>) =&gt; {
+                        <span class="comment">// Const parameters don&#39;t impose constraints.
+                    </span>}
+                }
+            }
+
+            <span class="kw">return</span>;
+        }
+
+        <span class="comment">// If we found a unique bound `&#39;b` from the trait, and we
+        // found nothing else from the environment, then the best
+        // action is to require that `&#39;b: &#39;r`, so do that.
+        //
+        // This is best no matter what rule we use:
+        //
+        // - OutlivesProjectionEnv: these would translate to the requirement that `&#39;b:&#39;r`
+        // - OutlivesProjectionTraitDef: these would translate to the requirement that `&#39;b:&#39;r`
+        // - OutlivesProjectionComponent: this would require `&#39;b:&#39;r`
+        //   in addition to other conditions
+        </span><span class="kw">if </span>!trait_bounds.is_empty()
+            &amp;&amp; trait_bounds[<span class="number">1</span>..]
+                .iter()
+                .map(|r| <span class="prelude-val">Some</span>(<span class="kw-2">*</span>r))
+                .chain(
+                    <span class="comment">// NB: The environment may contain `for&lt;&#39;a&gt; T: &#39;a` style bounds.
+                    // In that case, we don&#39;t know if they are equal to the trait bound
+                    // or not (since we don&#39;t *know* whether the environment bound even applies),
+                    // so just map to `None` here if there are bound vars, ensuring that
+                    // the call to `all` will fail below.
+                    </span>approx_env_bounds.iter().map(|b| b.map_bound(|b| b.<span class="number">1</span>).no_bound_vars()),
+                )
+                .all(|b| b == <span class="prelude-val">Some</span>(trait_bounds[<span class="number">0</span>]))
+        {
+            <span class="kw">let </span>unique_bound = trait_bounds[<span class="number">0</span>];
+            <span class="macro">debug!</span>(<span class="string">&quot;projection_must_outlive: unique trait bound = {:?}&quot;</span>, unique_bound);
+            <span class="macro">debug!</span>(<span class="string">&quot;projection_must_outlive: unique declared bound appears in trait ref&quot;</span>);
+            <span class="self">self</span>.delegate.push_sub_region_constraint(origin, region, unique_bound);
+            <span class="kw">return</span>;
+        }
+
+        <span class="comment">// Fallback to verifying after the fact that there exists a
+        // declared bound, or that all the components appearing in the
+        // projection outlive; in some cases, this may add insufficient
+        // edges into the inference graph, leading to inference failures
+        // even though a satisfactory solution exists.
+        </span><span class="kw">let </span>generic = GenericKind::Projection(projection_ty);
+        <span class="kw">let </span>verify_bound = <span class="self">self</span>.verify_bound.generic_bound(generic);
+        <span class="macro">debug!</span>(<span class="string">&quot;projection_must_outlive: pushing {:?}&quot;</span>, verify_bound);
+        <span class="self">self</span>.delegate.push_verify(origin, generic, region, verify_bound);
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeOutlivesDelegate&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;cx </span>InferCtxt&lt;<span class="lifetime">&#39;cx</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>push_sub_region_constraint(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        b: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <a class="self" href="#454">self</a>.<a href="../mod.rs.html#958">sub_regions</a>(<a href="#455">origin</a>, <a href="#456">a</a>, <a href="#457">b</a>)
+    }
+
+    <span class="kw">fn </span>push_verify(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        origin: SubregionOrigin&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        kind: GenericKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        a: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        bound: VerifyBound&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) {
+        <a class="self" href="#463">self</a>.<a href="../mod.rs.html#1628-1634">verify_generic_bound</a>(<a href="#464">origin</a>, <a href="#465">kind</a>, <a href="#466">a</a>, <a href="#467">bound</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

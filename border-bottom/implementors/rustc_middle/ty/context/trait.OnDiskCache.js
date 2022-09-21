@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"rustc_query_impl":[["impl&lt;'sess&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/trait.OnDiskCache.html\" title=\"trait rustc_middle::ty::context::OnDiskCache\">OnDiskCache</a>&lt;'sess&gt; for <a class=\"struct\" href=\"rustc_query_impl/on_disk_cache/struct.OnDiskCache.html\" title=\"struct rustc_query_impl::on_disk_cache::OnDiskCache\">OnDiskCache</a>&lt;'sess&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

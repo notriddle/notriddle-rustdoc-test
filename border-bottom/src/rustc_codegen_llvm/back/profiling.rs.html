@@ -1,0 +1,118 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_llvm/src/back/profiling.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>profiling.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_llvm/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+</pre><pre class="rust"><code><span class="kw">use </span>measureme::{<a href="https://docs.rs/measureme/10.1.0/measureme/event_id/constant.SEPARATOR_BYTE.html">event_id::SEPARATOR_BYTE</a>, <a href="https://docs.rs/measureme/10.1.0/measureme/event_id/struct.EventId.html">EventId</a>, <a href="https://docs.rs/measureme/10.1.0/measureme/stringtable/enum.StringComponent.html">StringComponent</a>, <a href="https://docs.rs/measureme/10.1.0/measureme/stringtable/struct.StringId.html">StringId</a>};
+<span class="kw">use </span>rustc_data_structures::profiling::{<a href="../../../rustc_data_structures/profiling/struct.SelfProfiler.html">SelfProfiler</a>, <a href="../../../rustc_data_structures/profiling/struct.TimingGuard.html">TimingGuard</a>};
+<span class="kw">use </span>std::ffi::{<a href="https://doc.rust-lang.org/nightly/core/ffi/enum.c_void.html">c_void</a>, <a href="https://doc.rust-lang.org/nightly/core/ffi/c_str/struct.CStr.html">CStr</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/os/raw/type.c_char.html">std::os::raw::c_char</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">std::sync::Arc</a>;
+
+<span class="kw">fn </span>llvm_args_to_string_id(profiler: <span class="kw-2">&amp;</span><a href="../../../rustc_data_structures/profiling/struct.SelfProfiler.html">SelfProfiler</a>, pass_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, ir_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <a href="https://docs.rs/measureme/10.1.0/measureme/event_id/struct.EventId.html">EventId</a> {
+    <span class="kw">let </span>pass_name = <a href="#7">profiler</a>.get_or_alloc_cached_string(<a href="#7">pass_name</a>);
+    <span class="kw">let </span><span class="kw-2">mut </span>components = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[StringComponent::Ref(pass_name)];
+    <span class="comment">// handle that LazyCallGraph::SCC is a comma separated list within parentheses
+    </span><span class="kw">let </span>parentheses: <span class="kw-2">&amp;</span>[<span class="kw">_</span>] = <span class="kw-2">&amp;</span>[<span class="string">&#39;(&#39;</span>, <span class="string">&#39;)&#39;</span>];
+    <span class="kw">let </span>trimmed = <a href="#7">ir_name</a>.trim_matches(<a href="#11">parentheses</a>);
+    <span class="kw">for </span>part <span class="kw">in </span>trimmed.split(<span class="string">&quot;, &quot;</span>) {
+        <span class="kw">let </span>demangled_ir_name = rustc_demangle::demangle(part).to_string();
+        <span class="kw">let </span>ir_name = profiler.get_or_alloc_cached_string(demangled_ir_name);
+        components.push(StringComponent::Value(SEPARATOR_BYTE));
+        components.push(StringComponent::Ref(ir_name));
+    }
+    EventId::from_label(<a href="#7">profiler</a>.alloc_string(<a href="#9">components</a>.as_slice()))
+}
+
+<span class="kw">pub struct </span>LlvmSelfProfiler&lt;<span class="lifetime">&#39;a</span>&gt; {
+    profiler: Arc&lt;<a href="../../../rustc_data_structures/profiling/struct.SelfProfiler.html">SelfProfiler</a>&gt;,
+    stack: Vec&lt;TimingGuard&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+    llvm_pass_event_kind: <a href="https://docs.rs/measureme/10.1.0/measureme/stringtable/struct.StringId.html">StringId</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; LlvmSelfProfiler&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub fn </span>new(profiler: Arc&lt;<a href="../../../rustc_data_structures/profiling/struct.SelfProfiler.html">SelfProfiler</a>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>llvm_pass_event_kind = <a href="#29">profiler</a>.alloc_string(<span class="string">&quot;LLVM Pass&quot;</span>);
+        <span class="self">Self </span>{ <a href="#29">profiler</a>, stack: Vec::default(), <a href="#30">llvm_pass_event_kind</a> }
+    }
+
+    <span class="kw">fn </span>before_pass_callback(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="self">self</span>, pass_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, ir_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <span class="kw">let </span>event_id = <a href="#7">llvm_args_to_string_id</a>(<span class="kw-2">&amp;</span><a class="self" href="#34">self</a>.profiler, <a href="#34">pass_name</a>, <a href="#34">ir_name</a>);
+
+        <a class="self" href="#34">self</a>.stack.push(TimingGuard::start(<span class="kw-2">&amp;</span><a class="self" href="#34">self</a>.profiler, <a class="self" href="#34">self</a>.llvm_pass_event_kind, <a href="#35">event_id</a>));
+    }
+    <span class="kw">fn </span>after_pass_callback(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <a class="self" href="#39">self</a>.stack.pop();
+    }
+}
+
+<span class="kw">pub unsafe extern </span><span class="string">&quot;C&quot; </span><span class="kw">fn </span>selfprofile_before_pass_callback(
+    llvm_self_profiler: <span class="kw-2">*mut </span><a href="https://doc.rust-lang.org/nightly/core/ffi/enum.c_void.html">c_void</a>,
+    pass_name: <span class="kw-2">*const </span><a href="https://doc.rust-lang.org/nightly/std/os/raw/type.c_char.html">c_char</a>,
+    ir_name: <span class="kw-2">*const </span><a href="https://doc.rust-lang.org/nightly/std/os/raw/type.c_char.html">c_char</a>,
+) {
+    <span class="kw">let </span>llvm_self_profiler = <span class="kw-2">&amp;mut *</span>(<a href="#45">llvm_self_profiler</a> <span class="kw">as </span><span class="kw-2">*mut </span>LlvmSelfProfiler&lt;<span class="lifetime">&#39;_</span>&gt;);
+    <span class="kw">let </span>pass_name = CStr::from_ptr(<a href="#46">pass_name</a>).to_str().expect(<span class="string">&quot;valid UTF-8&quot;</span>);
+    <span class="kw">let </span>ir_name = CStr::from_ptr(<a href="#47">ir_name</a>).to_str().expect(<span class="string">&quot;valid UTF-8&quot;</span>);
+    <a href="#49">llvm_self_profiler</a>.<a href="#34">before_pass_callback</a>(<a href="#50">pass_name</a>, <a href="#51">ir_name</a>);
+}
+
+<span class="kw">pub unsafe extern </span><span class="string">&quot;C&quot; </span><span class="kw">fn </span>selfprofile_after_pass_callback(llvm_self_profiler: <span class="kw-2">*mut </span><a href="https://doc.rust-lang.org/nightly/core/ffi/enum.c_void.html">c_void</a>) {
+    <span class="kw">let </span>llvm_self_profiler = <span class="kw-2">&amp;mut *</span>(<a href="#55">llvm_self_profiler</a> <span class="kw">as </span><span class="kw-2">*mut </span>LlvmSelfProfiler&lt;<span class="lifetime">&#39;_</span>&gt;);
+    <a href="#56">llvm_self_profiler</a>.<a href="#39">after_pass_callback</a>();
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_llvm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

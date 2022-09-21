@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["UnDerefer","Used for reverting changes made by `DerefSeparator`"]]};

@@ -1,0 +1,1156 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_infer/src/infer/error_reporting/nice_region_error/static_impl_trait.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>static_impl_trait.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../../normalize.css"><link rel="stylesheet" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../../dark.css" disabled><link rel="stylesheet" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../../rustc_infer/index.html"><img class="rust-logo" src="../../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Error Reporting for static impl Traits.
+
+</span><span class="kw">use </span><a href="mod.rs.html#28"><span class="kw">crate</span>::infer::error_reporting::nice_region_error::NiceRegionError</a>;
+<span class="kw">use </span><a href="../../lexical_region_resolve/mod.rs.html#67"><span class="kw">crate</span>::infer::lexical_region_resolve::RegionResolutionError</a>;
+<span class="kw">use </span><span class="kw">crate</span>::infer::{<a href="../../mod.rs.html#381">SubregionOrigin</a>, <a href="../../mod.rs.html#372">TypeTrace</a>};
+<span class="kw">use </span><span class="kw">crate</span>::traits::{<a href="../../../../../rustc_infer/traits/enum.ObligationCauseCode.html">ObligationCauseCode</a>, <a href="../../../../../rustc_infer/traits/struct.UnifyReceiverContext.html">UnifyReceiverContext</a>};
+<span class="kw">use </span>rustc_data_structures::fx::FxHashSet;
+<span class="kw">use </span>rustc_errors::{<a href="../../../../../rustc_errors/macro.struct_span_err.html">struct_span_err</a>, <a href="../../../../../rustc_lint_defs/enum.Applicability.html">Applicability</a>, <a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, <a href="../../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>, <a href="../../../../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>};
+<span class="kw">use </span><a href="../../../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span>rustc_hir::intravisit::{<a href="../../../../../rustc_hir/intravisit/fn.walk_ty.html">walk_ty</a>, <a href="../../../../../rustc_hir/intravisit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_hir::{<span class="self"><a href="../../../../../rustc_hir/index.html">self</a> </span><span class="kw">as </span>hir, <a href="../../../../../rustc_hir/hir/enum.GenericBound.html">GenericBound</a>, <a href="../../../../../rustc_hir/hir/struct.Item.html">Item</a>, <a href="../../../../../rustc_hir/hir/enum.ItemKind.html">ItemKind</a>, <a href="../../../../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a>, <a href="../../../../../rustc_hir/hir/enum.LifetimeName.html">LifetimeName</a>, <a href="../../../../../rustc_hir/hir/enum.Node.html">Node</a>, <a href="../../../../../rustc_hir/hir/enum.TyKind.html">TyKind</a>};
+<span class="kw">use </span>rustc_middle::ty::{
+    <a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/assoc/enum.AssocItemContainer.html">AssocItemContainer</a>, StaticLifetimeVisitor, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">TypeSuperVisitable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitor.html">TypeVisitor</a>,
+};
+<span class="kw">use </span><a href="../../../../../rustc_span/symbol/struct.Ident.html">rustc_span::symbol::Ident</a>;
+<span class="kw">use </span><a href="../../../../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/control_flow/enum.ControlFlow.html">std::ops::ControlFlow</a>;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; NiceRegionError&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Print the error message for lifetime errors when the return type is a static `impl Trait`,
+    /// `dyn Trait` or if a method call on a trait object introduces a static requirement.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>try_report_static_impl_trait(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;try_report_static_impl_trait(error={:?})&quot;</span>, <span class="self">self</span>.error);
+        <span class="kw">let </span>tcx = <a class="self" href="#23">self</a>.<a href="mod.rs.html#48">tcx</a>();
+        <span class="kw">let </span>(var_origin, sub_origin, sub_r, sup_origin, sup_r, spans) = <span class="kw">match </span><span class="self">self</span>.error.as_ref()<span class="question-mark">? </span>{
+            <a href="../../lexical_region_resolve/mod.rs.html#84">RegionResolutionError::SubSupConflict</a>(
+                <span class="kw">_</span>,
+                var_origin,
+                sub_origin,
+                sub_r,
+                sup_origin,
+                sup_r,
+                spans,
+            ) <span class="kw">if </span><a href="#31">sub_r</a>.is_static() =&gt; (<a href="#29">var_origin</a>, <a href="#30">sub_origin</a>, <a href="#31">sub_r</a>, <a href="#32">sup_origin</a>, <a href="#33">sup_r</a>, <a href="#34">spans</a>),
+            <a href="../../lexical_region_resolve/mod.rs.html#71">RegionResolutionError::ConcreteFailure</a>(
+                <a href="../../mod.rs.html#383">SubregionOrigin::Subtype</a>(<span class="kw">box </span><a href="../../mod.rs.html#372">TypeTrace</a> { cause, .. }),
+                sub_r,
+                sup_r,
+            ) <span class="kw">if </span><a href="#38">sub_r</a>.is_static() =&gt; {
+                <span class="comment">// This is for an implicit `&#39;static` requirement coming from `impl dyn Trait {}`.
+                </span><span class="kw">if let </span>ObligationCauseCode::UnifyReceiver(ctxt) = <a href="#37">cause</a>.code() {
+                    <span class="comment">// This may have a closure and it would cause ICE
+                    // through `find_param_with_region` (#78262).
+                    </span><span class="kw">let </span>anon_reg_sup = tcx.is_suitable_region(<span class="kw-2">*</span>sup_r)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>fn_returns = <a href="#25">tcx</a>.return_type_impl_or_dyn_traits(<a href="#45">anon_reg_sup</a>.def_id);
+                    <span class="kw">if </span>fn_returns.is_empty() {
+                        <span class="kw">return </span><span class="prelude-val">None</span>;
+                    }
+
+                    <span class="kw">let </span>param = <span class="self">self</span>.find_param_with_region(<span class="kw-2">*</span>sup_r, <span class="kw-2">*</span>sub_r)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>lifetime = <span class="kw">if </span>sup_r.has_name() {
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{}`&quot;</span>, sup_r)
+                    } <span class="kw">else </span>{
+                        <span class="string">&quot;an anonymous lifetime `&#39;_`&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+                    };
+                    <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="macro" href="../../../../../rustc_errors/macro.struct_span_err.html">struct_span_err!</a>(
+                        tcx.sess,
+                        cause.span,
+                        E0772,
+                        <span class="string">&quot;{} has {} but calling `{}` introduces an implicit `&#39;static` lifetime \
+                         requirement&quot;</span>,
+                        param
+                            .param
+                            .pat
+                            .simple_ident()
+                            .map(|s| <span class="macro">format!</span>(<span class="string">&quot;`{}`&quot;</span>, s))
+                            .unwrap_or_else(|| <span class="string">&quot;`fn` parameter&quot;</span>.to_string()),
+                        lifetime,
+                        ctxt.assoc_item.name,
+                    );
+                    <a href="#57">err</a>.span_label(<a href="#51">param</a>.param_ty_span, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;this data with {}...&quot;</span>, lifetime));
+                    <a href="#57">err</a>.span_label(
+                        <a href="#37">cause</a>.span,
+                        <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                            <span class="string">&quot;...is used and required to live as long as `&#39;static` here \
+                             because of an implicit lifetime bound on the {}&quot;</span>,
+                            <span class="kw">match </span>ctxt.assoc_item.container {
+                                AssocItemContainer::TraitContainer =&gt; {
+                                    <span class="kw">let </span>id = ctxt.assoc_item.container_id(tcx);
+                                    <span class="macro">format!</span>(<span class="string">&quot;`impl` of `{}`&quot;</span>, tcx.def_path_str(id))
+                                }
+                                AssocItemContainer::ImplContainer =&gt; <span class="string">&quot;inherent `impl`&quot;</span>.to_string(),
+                            },
+                        ),
+                    );
+                    <span class="kw">if </span><span class="self">self</span>.find_impl_on_dyn_trait(<span class="kw-2">&amp;mut </span>err, param.param_ty, <span class="kw-2">&amp;</span>ctxt) {
+                        <span class="kw">let </span>reported = <a href="#57">err</a>.emit();
+                        <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#88">reported</a>);
+                    } <span class="kw">else </span>{
+                        <a href="#57">err</a>.cancel();
+                    }
+                }
+                <span class="kw">return </span><span class="prelude-val">None</span>;
+            }
+            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;try_report_static_impl_trait(var={:?}, sub={:?} {:?} sup={:?} {:?})&quot;</span>,
+            var_origin, sub_origin, sub_r, sup_origin, sup_r
+        );
+        <span class="kw">let </span>anon_reg_sup = tcx.is_suitable_region(<span class="kw-2">*</span>sup_r)<span class="question-mark">?</span>;
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;try_report_static_impl_trait: anon_reg_sup={:?}&quot;</span>, anon_reg_sup);
+        <span class="kw">let </span>sp = <a href="#26">var_origin</a>.<a href="../../mod.rs.html#2029">span</a>();
+        <span class="kw">let </span>return_sp = <a href="#26">sub_origin</a>.<a href="../../mod.rs.html#1980">span</a>();
+        <span class="kw">let </span>param = <span class="self">self</span>.find_param_with_region(<span class="kw-2">*</span>sup_r, <span class="kw-2">*</span>sub_r)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(lifetime_name, lifetime) = <span class="kw">if </span>sup_r.has_name() {
+            (<a href="#26">sup_r</a>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(), <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{}`&quot;</span>, sup_r))
+        } <span class="kw">else </span>{
+            (<span class="string">&quot;&#39;_&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html">to_owned</a>(), <span class="string">&quot;an anonymous lifetime `&#39;_`&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>())
+        };
+        <span class="kw">let </span>param_name = <a href="#106">param</a>
+            .param
+            .pat
+            .simple_ident()
+            .map(|s| <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;`{}`&quot;</span>, s))
+            .unwrap_or_else(|| <span class="string">&quot;`fn` parameter&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>());
+        <span class="kw">let </span><span class="kw-2">mut </span>err = <a class="macro" href="../../../../../rustc_errors/macro.struct_span_err.html">struct_span_err!</a>(
+            tcx.sess,
+            sp,
+            E0759,
+            <span class="string">&quot;{} has {} but it needs to satisfy a `&#39;static` lifetime requirement&quot;</span>,
+            param_name,
+            lifetime,
+        );
+
+        <span class="kw">let </span>(mention_influencer, influencer_point) =
+            <span class="kw">if </span>sup_origin.span().overlaps(param.param_ty_span) {
+                <span class="comment">// Account for `async fn` like in `async-await/issues/issue-62097.rs`.
+                // The desugaring of `async `fn`s causes `sup_origin` and `param` to point at the same
+                // place (but with different `ctxt`, hence `overlaps` instead of `==` above).
+                //
+                // This avoids the following:
+                //
+                // LL |     pub async fn run_dummy_fn(&amp;self) {
+                //    |                               ^^^^^
+                //    |                               |
+                //    |                               this data with an anonymous lifetime `&#39;_`...
+                //    |                               ...is captured here...
+                </span>(<span class="bool-val">false</span>, <a href="#26">sup_origin</a>.<a href="../../mod.rs.html#1980">span</a>())
+            } <span class="kw">else </span>{
+                (!<a href="#26">sup_origin</a>.<a href="../../mod.rs.html#1980">span</a>().overlaps(<a href="#105">return_sp</a>), <a href="#106">param</a>.param_ty_span)
+            };
+        <a href="#118">err</a>.span_label(<a href="#127">influencer_point</a>, <span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;this data with {}...&quot;</span>, lifetime));
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;try_report_static_impl_trait: param_info={:?}&quot;</span>, param);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>spans = <a href="#26">spans</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+
+        <span class="kw">if </span>mention_influencer {
+            <a href="#148">spans</a>.push(<a href="#26">sup_origin</a>.<a href="../../mod.rs.html#1980">span</a>());
+        }
+        <span class="comment">// We dedup the spans *ignoring* expansion context.
+        </span><a href="#148">spans</a>.sort();
+        <a href="#148">spans</a>.dedup_by_key(|span| (<a href="#155">span</a>.lo(), <a href="#155">span</a>.hi()));
+
+        <span class="comment">// We try to make the output have fewer overlapping spans if possible.
+        </span><span class="kw">let </span>require_msg = <span class="kw">if </span>spans.is_empty() {
+            <span class="string">&quot;...is used and required to live as long as `&#39;static` here&quot;
+        </span>} <span class="kw">else </span>{
+            <span class="string">&quot;...and is required to live as long as `&#39;static` here&quot;
+        </span>};
+        <span class="kw">let </span>require_span =
+            <span class="kw">if </span>sup_origin.span().overlaps(return_sp) { <a href="#26">sup_origin</a>.<a href="../../mod.rs.html#1980">span</a>() } <span class="kw">else </span>{ <a href="#105">return_sp</a> };
+
+        <span class="kw">for </span>span <span class="kw">in </span><span class="kw-2">&amp;</span>spans {
+            err.span_label(<span class="kw-2">*</span>span, <span class="string">&quot;...is used here...&quot;</span>);
+        }
+
+        <span class="kw">if </span>spans.iter().any(|sp| sp.overlaps(return_sp) || <span class="kw-2">*</span>sp &gt; return_sp) {
+            <span class="comment">// If any of the &quot;captured here&quot; labels appears on the same line or after
+            // `require_span`, we put it on a note to ensure the text flows by appearing
+            // always at the end.
+            </span><a href="#118">err</a>.span_note(<a href="#163">require_span</a>, <a href="#158">require_msg</a>);
+        } <span class="kw">else </span>{
+            <span class="comment">// We don&#39;t need a note, it&#39;s already at the end, it can be shown as a `span_label`.
+            </span><a href="#118">err</a>.span_label(<a href="#163">require_span</a>, <a href="#158">require_msg</a>);
+        }
+
+        <span class="kw">if let </span><a href="../../mod.rs.html#391">SubregionOrigin::RelateParamBound</a>(<span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-val">Some</span>(bound)) = <a href="#26">sub_origin</a> {
+            <a href="#118">err</a>.span_note(<span class="kw-2">*</span><a href="#180">bound</a>, <span class="string">&quot;`&#39;static` lifetime requirement introduced by this bound&quot;</span>);
+        }
+        <span class="kw">if let </span><a href="../../mod.rs.html#383">SubregionOrigin::Subtype</a>(<span class="kw">box </span><a href="../../mod.rs.html#372">TypeTrace</a> { cause, .. }) = <a href="#26">sub_origin</a> {
+            <span class="kw">if let </span>ObligationCauseCode::ReturnValue(hir_id)
+            | ObligationCauseCode::BlockTailExpression(hir_id) = <a href="#183">cause</a>.code()
+            {
+                <span class="kw">let </span>parent_id = <a href="#25">tcx</a>.hir().get_parent_item(<span class="kw-2">*</span><a href="#184">hir_id</a>);
+                <span class="kw">let </span>parent_id = <a href="#25">tcx</a>.hir().local_def_id_to_hir_id(<a href="#187">parent_id</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(fn_decl) = <a href="#25">tcx</a>.hir().fn_decl_by_hir_id(<a href="#188">parent_id</a>) {
+                    <span class="kw">let </span><span class="kw-2">mut </span>span: <a href="../../../../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a> = <a href="#189">fn_decl</a>.output.span().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>();
+                    <span class="kw">let </span><span class="kw-2">mut </span>add_label = <span class="bool-val">true</span>;
+                    <span class="kw">if let </span>hir::FnRetTy::Return(ty) = <a href="#189">fn_decl</a>.output {
+                        <span class="kw">let </span><span class="kw-2">mut </span>v = StaticLifetimeVisitor(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[], <a href="#25">tcx</a>.hir());
+                        <a href="#193">v</a>.<a href="../../../../../rustc_hir/intravisit/trait.Visitor.html">visit_ty</a>(<a href="#192">ty</a>);
+                        <span class="kw">if </span>!v.<span class="number">0</span>.is_empty() {
+                            <a href="#190">span</a> = <a href="#193">v</a>.<span class="number">0</span>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>();
+                            <span class="kw">for </span>sp <span class="kw">in </span>v.<span class="number">0 </span>{
+                                span.push_span_label(sp, <span class="string">&quot;`&#39;static` requirement introduced here&quot;</span>);
+                            }
+                            <a href="#191">add_label</a> = <span class="bool-val">false</span>;
+                        }
+                    }
+                    <span class="kw">if </span>add_label {
+                        <a href="#190">span</a>.push_span_label(
+                            <a href="#189">fn_decl</a>.output.span(),
+                            <span class="string">&quot;requirement introduced by this return type&quot;</span>,
+                        );
+                    }
+                    <a href="#190">span</a>.push_span_label(<a href="#183">cause</a>.span, <span class="string">&quot;because of this returned expression&quot;</span>);
+                    <a href="#118">err</a>.span_note(
+                        <a href="#190">span</a>,
+                        <span class="string">&quot;`&#39;static` lifetime requirement introduced by the return type&quot;</span>,
+                    );
+                }
+            }
+        }
+
+        <span class="kw">let </span>fn_returns = <a href="#25">tcx</a>.return_type_impl_or_dyn_traits(<a href="#102">anon_reg_sup</a>.def_id);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>override_error_code = <span class="prelude-val">None</span>;
+        <span class="kw">if let </span><a href="../../mod.rs.html#383">SubregionOrigin::Subtype</a>(<span class="kw">box </span><a href="../../mod.rs.html#372">TypeTrace</a> { cause, .. }) = <span class="kw-2">&amp;</span><a href="#26">sup_origin</a>
+            &amp;&amp; <span class="kw">let </span>ObligationCauseCode::UnifyReceiver(ctxt) = <a href="#221">cause</a>.code()
+            <span class="comment">// Handle case of `impl Foo for dyn Bar { fn qux(&amp;self) {} }` introducing a
+            // `&#39;static` lifetime when called as a method on a binding: `bar.qux()`.
+            </span>&amp;&amp; <a class="self" href="#23">self</a>.<a href="#476-481">find_impl_on_dyn_trait</a>(<span class="kw-2">&amp;mut </span><a href="#118">err</a>, <a href="#106">param</a>.param_ty, <span class="kw-2">&amp;</span><a href="#222">ctxt</a>)
+        {
+            <a href="#220">override_error_code</a> = <span class="prelude-val">Some</span>(<a href="#222">ctxt</a>.assoc_item.name);
+        }
+
+        <span class="kw">if let </span><a href="../../mod.rs.html#383">SubregionOrigin::Subtype</a>(<span class="kw">box </span><a href="../../mod.rs.html#372">TypeTrace</a> { cause, .. }) = <span class="kw-2">&amp;</span><a href="#26">sub_origin</a>
+            &amp;&amp; <span class="kw">let </span>code = <span class="kw">match </span><a href="#230">cause</a>.code() {
+                ObligationCauseCode::MatchImpl(parent, ..) =&gt; <a href="#232">parent</a>.code(),
+                <span class="kw">_ </span>=&gt; <a href="#230">cause</a>.code(),
+            }
+            &amp;&amp; <span class="kw">let </span>(<span class="kw-2">&amp;</span>ObligationCauseCode::ItemObligation(item_def_id) | <span class="kw-2">&amp;</span>ObligationCauseCode::ExprItemObligation(item_def_id, ..), <span class="prelude-val">None</span>) = (<a href="#231">code</a>, <a href="#220">override_error_code</a>)
+        {
+            <span class="comment">// Same case of `impl Foo for dyn Bar { fn qux(&amp;self) {} }` introducing a `&#39;static`
+            // lifetime as above, but called using a fully-qualified path to the method:
+            // `Foo::qux(bar)`.
+            </span><span class="kw">let </span><span class="kw-2">mut </span>v = <a href="#542">TraitObjectVisitor</a>(FxHashSet::default());
+            <a href="#240">v</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitor.html">visit_ty</a>(<a href="#106">param</a>.param_ty);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((ident, self_ty)) =
+                <a class="self" href="#23">self</a>.<a href="#410-414">get_impl_ident_and_self_ty_from_trait</a>(<a href="#235">item_def_id</a>, <span class="kw-2">&amp;</span><a href="#240">v</a>.<span class="number">0</span>)
+                &amp;&amp; <a class="self" href="#23">self</a>.<a href="#507-513">suggest_constrain_dyn_trait_in_impl</a>(<span class="kw-2">&amp;mut </span><a href="#118">err</a>, <span class="kw-2">&amp;</span><a href="#240">v</a>.<span class="number">0</span>, <a href="#242">ident</a>, <a href="#242">self_ty</a>)
+            {
+                <a href="#220">override_error_code</a> = <span class="prelude-val">Some</span>(<a href="#242">ident</a>.name);
+            }
+        }
+        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(ident), <span class="bool-val">true</span>) = (<a href="#220">override_error_code</a>, <a href="#218">fn_returns</a>.is_empty()) {
+            <span class="comment">// Provide a more targeted error code and description.
+            </span><a href="#118">err</a>.code(<a class="macro" href="../../../../../rustc_errors/rustc_errors/macro.error_code.html">rustc_errors::error_code!</a>(E0772));
+            <a href="#118">err</a>.set_primary_message(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;{} has {} but calling `{}` introduces an implicit `&#39;static` lifetime \
+                requirement&quot;</span>,
+                param_name, lifetime, ident,
+            ));
+        }
+
+        <span class="kw">let </span>arg = <span class="kw">match </span><a href="#106">param</a>.param.pat.simple_ident() {
+            <span class="prelude-val">Some</span>(simple_ident) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;argument `{}`&quot;</span>, simple_ident),
+            <span class="prelude-val">None </span>=&gt; <span class="string">&quot;the argument&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(),
+        };
+        <span class="kw">let </span>captures = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;captures data from {}&quot;</span>, arg);
+        <a href="#279-287">suggest_new_region_bound</a>(
+            <a href="#25">tcx</a>,
+            <span class="kw-2">&amp;mut </span><a href="#118">err</a>,
+            <a href="#218">fn_returns</a>,
+            <a href="#107">lifetime_name</a>,
+            <span class="prelude-val">Some</span>(<a href="#259">arg</a>),
+            <a href="#263">captures</a>,
+            <span class="prelude-val">Some</span>((<a href="#106">param</a>.param_ty_span, <a href="#106">param</a>.param_ty.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>())),
+        );
+
+        <span class="kw">let </span>reported = <a href="#118">err</a>.emit();
+        <span class="prelude-val">Some</span>(<a href="#274">reported</a>)
+    }
+}
+
+<span class="kw">pub fn </span>suggest_new_region_bound(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+    err: <span class="kw-2">&amp;mut </span><a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+    fn_returns: Vec&lt;<span class="kw-2">&amp;</span>rustc_hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt;&gt;,
+    lifetime_name: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    arg: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+    captures: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    param: <span class="prelude-ty">Option</span>&lt;(<a href="../../../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>)&gt;,
+) {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;try_report_static_impl_trait: fn_return={:?}&quot;</span>, fn_returns);
+    <span class="comment">// FIXME: account for the need of parens in `&amp;(dyn Trait + &#39;_)`
+    </span><span class="kw">let </span>consider = <span class="string">&quot;consider changing the&quot;</span>;
+    <span class="kw">let </span>declare = <span class="string">&quot;to declare that the&quot;</span>;
+    <span class="kw">let </span>explicit = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;you can add an explicit `{}` lifetime bound&quot;</span>, lifetime_name);
+    <span class="kw">let </span>explicit_static =
+        <a href="#284">arg</a>.map(|arg| <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;explicit `&#39;static` bound to the lifetime of {}&quot;</span>, arg));
+    <span class="kw">let </span>add_static_bound = <span class="string">&quot;alternatively, add an explicit `&#39;static` bound to this reference&quot;</span>;
+    <span class="kw">let </span>plus_lt = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot; + {}&quot;</span>, lifetime_name);
+    <span class="kw">for </span>fn_return <span class="kw">in </span>fn_returns {
+        <span class="kw">if </span>fn_return.span.desugaring_kind().is_some() {
+            <span class="comment">// Skip `async` desugaring `impl Future`.
+            </span><span class="kw">continue</span>;
+        }
+        <span class="kw">match </span>fn_return.kind {
+            TyKind::OpaqueDef(item_id, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>item = tcx.hir().item(item_id);
+                <span class="kw">let </span>ItemKind::OpaqueTy(opaque) = <span class="kw-2">&amp;</span>item.kind <span class="kw">else </span>{
+                    <span class="kw">return</span>;
+                };
+
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(span) = opaque
+                    .bounds
+                    .iter()
+                    .filter_map(|arg| <span class="kw">match </span>arg {
+                        GenericBound::Outlives(Lifetime {
+                            name: LifetimeName::Static,
+                            span,
+                            ..
+                        }) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>span),
+                        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                    })
+                    .next()
+                {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(explicit_static) = <span class="kw-2">&amp;</span>explicit_static {
+                        err.span_suggestion_verbose(
+                            span,
+                            <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{} `impl Trait`&#39;s {}&quot;</span>, consider, explicit_static),
+                            <span class="kw-2">&amp;</span>lifetime_name,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>((param_span, param_ty)) = param.clone() {
+                        err.span_suggestion_verbose(
+                            param_span,
+                            add_static_bound,
+                            param_ty,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                } <span class="kw">else if </span>opaque
+                    .bounds
+                    .iter()
+                    .filter_map(|arg| <span class="kw">match </span>arg {
+                        GenericBound::Outlives(Lifetime { name, span, .. })
+                            <span class="kw">if </span>name.ident().to_string() == lifetime_name =&gt;
+                        {
+                            <span class="prelude-val">Some</span>(<span class="kw-2">*</span>span)
+                        }
+                        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                    })
+                    .next()
+                    .is_some()
+                {
+                } <span class="kw">else </span>{
+                    err.span_suggestion_verbose(
+                        fn_return.span.shrink_to_hi(),
+                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                            <span class="string">&quot;{declare} `impl Trait` {captures}, {explicit}&quot;</span>,
+                            declare = declare,
+                            captures = captures,
+                            explicit = explicit,
+                        ),
+                        <span class="kw-2">&amp;</span>plus_lt,
+                        Applicability::MaybeIncorrect,
+                    );
+                }
+            }
+            TyKind::TraitObject(<span class="kw">_</span>, lt, <span class="kw">_</span>) =&gt; <span class="kw">match </span>lt.name {
+                LifetimeName::ImplicitObjectLifetimeDefault =&gt; {
+                    err.span_suggestion_verbose(
+                        fn_return.span.shrink_to_hi(),
+                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                            <span class="string">&quot;{declare} trait object {captures}, {explicit}&quot;</span>,
+                            declare = declare,
+                            captures = captures,
+                            explicit = explicit,
+                        ),
+                        <span class="kw-2">&amp;</span>plus_lt,
+                        Applicability::MaybeIncorrect,
+                    );
+                }
+                name <span class="kw">if </span>name.ident().to_string() != lifetime_name =&gt; {
+                    <span class="comment">// With this check we avoid suggesting redundant bounds. This
+                    // would happen if there are nested impl/dyn traits and only
+                    // one of them has the bound we&#39;d suggest already there, like
+                    // in `impl Foo&lt;X = dyn Bar&gt; + &#39;_`.
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(explicit_static) = <span class="kw-2">&amp;</span>explicit_static {
+                        err.span_suggestion_verbose(
+                            lt.span,
+                            <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{} trait object&#39;s {}&quot;</span>, consider, explicit_static),
+                            <span class="kw-2">&amp;</span>lifetime_name,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>((param_span, param_ty)) = param.clone() {
+                        err.span_suggestion_verbose(
+                            param_span,
+                            add_static_bound,
+                            param_ty,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                }
+                <span class="kw">_ </span>=&gt; {}
+            },
+            <span class="kw">_ </span>=&gt; {}
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; NiceRegionError&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>get_impl_ident_and_self_ty_from_trait(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        def_id: <a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        trait_objects: <span class="kw-2">&amp;</span>FxHashSet&lt;<a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="../../../../../rustc_span/symbol/struct.Ident.html">Ident</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt; {
+        <span class="kw">let </span>tcx = <a class="self" href="#411">self</a>.<a href="mod.rs.html#48">tcx</a>();
+        <span class="kw">match </span><a href="#415">tcx</a>.hir().get_if_local(<a href="#412">def_id</a>) {
+            <span class="prelude-val">Some</span>(Node::ImplItem(impl_item)) =&gt; {
+                <span class="kw">match </span><a href="#415">tcx</a>.hir().find_by_def_id(<a href="#415">tcx</a>.hir().get_parent_item(<a href="#417">impl_item</a>.hir_id())) {
+                    <span class="prelude-val">Some</span>(Node::Item(<a href="../../../../../rustc_hir/hir/struct.Item.html">Item</a> {
+                        kind: ItemKind::Impl(<a href="../../../../../rustc_hir/hir/struct.Impl.html">hir::Impl</a> { self_ty, .. }),
+                        ..
+                    })) =&gt; <span class="prelude-val">Some</span>((<a href="#417">impl_item</a>.ident, <a href="#420">self_ty</a>)),
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                }
+            }
+            <span class="prelude-val">Some</span>(Node::TraitItem(trait_item)) =&gt; {
+                <span class="kw">let </span>trait_did = <a href="#415">tcx</a>.hir().get_parent_item(<a href="#426">trait_item</a>.hir_id());
+                <span class="kw">match </span><a href="#415">tcx</a>.hir().find_by_def_id(<a href="#427">trait_did</a>) {
+                    <span class="prelude-val">Some</span>(Node::Item(<a href="../../../../../rustc_hir/hir/struct.Item.html">Item</a> { kind: ItemKind::Trait(..), .. })) =&gt; {
+                        <span class="comment">// The method being called is defined in the `trait`, but the `&#39;static`
+                        // obligation comes from the `impl`. Find that `impl` so that we can point
+                        // at it in the suggestion.
+                        </span><span class="kw">let </span>trait_did = <a href="#427">trait_did</a>.to_def_id();
+                        <span class="kw">match </span><a href="#415">tcx</a>
+                            .hir()
+                            .trait_impls(<a href="#433">trait_did</a>)
+                            .iter()
+                            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|<span class="kw-2">&amp;</span>impl_did| {
+                                <span class="kw">match </span><a href="#415">tcx</a>.hir().get_if_local(<a href="#438">impl_did</a>.to_def_id()) {
+                                    <span class="prelude-val">Some</span>(Node::Item(<a href="../../../../../rustc_hir/hir/struct.Item.html">Item</a> {
+                                        kind: ItemKind::Impl(<a href="../../../../../rustc_hir/hir/struct.Impl.html">hir::Impl</a> { self_ty, .. }),
+                                        ..
+                                    })) <span class="kw">if </span><a href="#413">trait_objects</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">all</a>(|did| {
+                                        <span class="comment">// FIXME: we should check `self_ty` against the receiver
+                                        // type in the `UnifyReceiver` context, but for now, use
+                                        // this imperfect proxy. This will fail if there are
+                                        // multiple `impl`s for the same trait like
+                                        // `impl Foo for Box&lt;dyn Bar&gt;` and `impl Foo for dyn Bar`.
+                                        // In that case, only the first one will get suggestions.
+                                        </span><span class="kw">let </span><span class="kw-2">mut </span>traits = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+                                        <span class="kw">let </span><span class="kw-2">mut </span>hir_v = <a href="#559">HirTraitObjectVisitor</a>(<span class="kw-2">&amp;mut </span><a href="#450">traits</a>, <span class="kw-2">*</span><a href="#443">did</a>);
+                                        <a href="#451">hir_v</a>.<a href="../../../../../rustc_hir/intravisit/trait.Visitor.html">visit_ty</a>(<a href="#441">self_ty</a>);
+                                        !<a href="#450">traits</a>.is_empty()
+                                    }) =&gt;
+                                    {
+                                        <span class="prelude-val">Some</span>(<a href="#441">self_ty</a>)
+                                    }
+                                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                                }
+                            })
+                            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>()
+                        {
+                            <span class="prelude-val">Some</span>(self_ty) =&gt; <span class="prelude-val">Some</span>((<a href="#426">trait_item</a>.ident, <a href="#463">self_ty</a>)),
+                            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                }
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// When we call a method coming from an `impl Foo for dyn Bar`, `dyn Bar` introduces a default
+    /// `&#39;static` obligation. Suggest relaxing that implicit bound.
+    </span><span class="kw">fn </span>find_impl_on_dyn_trait(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        err: <span class="kw-2">&amp;mut </span><a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+        ty: Ty&lt;<span class="lifetime">&#39;_</span>&gt;,
+        ctxt: <span class="kw-2">&amp;</span>UnifyReceiverContext&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>tcx = <a class="self" href="#477">self</a>.<a href="mod.rs.html#48">tcx</a>();
+
+        <span class="comment">// Find the method being called.
+        </span><span class="kw">let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(instance)) = ty::Instance::resolve(
+            <a href="#482">tcx</a>,
+            <a href="#480">ctxt</a>.param_env,
+            <a href="#480">ctxt</a>.assoc_item.def_id,
+            <a class="self" href="#477">self</a>.infcx.<a href="../../mod.rs.html#1451-1453">resolve_vars_if_possible</a>(<a href="#480">ctxt</a>.substs),
+        ) <span class="kw">else </span>{
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        };
+
+        <span class="kw">let </span><span class="kw-2">mut </span>v = <a href="#542">TraitObjectVisitor</a>(FxHashSet::default());
+        <a href="#494">v</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitor.html">visit_ty</a>(<a href="#479">ty</a>);
+
+        <span class="comment">// Get the `Ident` of the method being called and the corresponding `impl` (to point at
+        // `Bar` in `impl Foo for dyn Bar {}` and the definition of the method being called).
+        </span><span class="kw">let </span><span class="prelude-val">Some</span>((ident, self_ty)) = <a class="self" href="#477">self</a>.<a href="#410-414">get_impl_ident_and_self_ty_from_trait</a>(<a href="#485">instance</a>.def_id(), <span class="kw-2">&amp;</span><a href="#494">v</a>.<span class="number">0</span>) <span class="kw">else </span>{
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        };
+
+        <span class="comment">// Find the trait object types in the argument, so we point at *only* the trait object.
+        </span><a class="self" href="#477">self</a>.<a href="#507-513">suggest_constrain_dyn_trait_in_impl</a>(<a href="#478">err</a>, <span class="kw-2">&amp;</span><a href="#494">v</a>.<span class="number">0</span>, <a href="#499">ident</a>, <a href="#499">self_ty</a>)
+    }
+
+    <span class="kw">fn </span>suggest_constrain_dyn_trait_in_impl(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        err: <span class="kw-2">&amp;mut </span><a href="../../../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+        found_dids: <span class="kw-2">&amp;</span>FxHashSet&lt;<a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;,
+        ident: <a href="../../../../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+        self_ty: <span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>suggested = <span class="bool-val">false</span>;
+        <span class="kw">for </span>found_did <span class="kw">in </span>found_dids {
+            <span class="kw">let </span><span class="kw-2">mut </span>traits = <span class="macro">vec!</span>[];
+            <span class="kw">let </span><span class="kw-2">mut </span>hir_v = HirTraitObjectVisitor(<span class="kw-2">&amp;mut </span>traits, <span class="kw-2">*</span>found_did);
+            hir_v.visit_ty(<span class="kw-2">&amp;</span>self_ty);
+            <span class="kw">for </span>span <span class="kw">in </span><span class="kw-2">&amp;</span>traits {
+                <span class="kw">let </span><span class="kw-2">mut </span>multi_span: MultiSpan = <span class="macro">vec!</span>[<span class="kw-2">*</span>span].into();
+                multi_span
+                    .push_span_label(<span class="kw-2">*</span>span, <span class="string">&quot;this has an implicit `&#39;static` lifetime requirement&quot;</span>);
+                multi_span.push_span_label(
+                    ident.span,
+                    <span class="string">&quot;calling this method introduces the `impl`&#39;s &#39;static` requirement&quot;</span>,
+                );
+                err.span_note(multi_span, <span class="string">&quot;the used `impl` has a `&#39;static` requirement&quot;</span>);
+                err.span_suggestion_verbose(
+                    span.shrink_to_hi(),
+                    <span class="string">&quot;consider relaxing the implicit `&#39;static` requirement&quot;</span>,
+                    <span class="string">&quot; + &#39;_&quot;</span>,
+                    Applicability::MaybeIncorrect,
+                );
+                suggested = <span class="bool-val">true</span>;
+            }
+        }
+        <a href="#514">suggested</a>
+    }
+}
+
+<span class="doccomment">/// Collect all the trait objects in a type that could have received an implicit `&#39;static` lifetime.
+</span><span class="kw">pub struct </span>TraitObjectVisitor(<span class="kw">pub </span>FxHashSet&lt;<a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="#542">TraitObjectVisitor</a> {
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">match </span><a href="#545">t</a>.kind() {
+            ty::Dynamic(preds, re, <span class="kw">_</span>) <span class="kw">if </span><a href="#547">re</a>.is_static() =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(def_id) = <a href="#547">preds</a>.principal_def_id() {
+                    <a class="self" href="#545">self</a>.<span class="number">0</span>.insert(<a href="#548">def_id</a>);
+                }
+                ControlFlow::CONTINUE
+            }
+            <span class="kw">_ </span>=&gt; <a href="#545">t</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">super_visit_with</a>(<a class="self" href="#545">self</a>),
+        }
+    }
+}
+
+<span class="doccomment">/// Collect all `hir::Ty&lt;&#39;_&gt;` `Span`s for trait objects with an implicit lifetime.
+</span><span class="kw">pub struct </span>HirTraitObjectVisitor&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw">pub </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Vec&lt;<a href="../../../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, <span class="kw">pub </span><a href="../../../../../rustc_span/def_id/struct.DefId.html">DefId</a>);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>HirTraitObjectVisitor&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">if let </span>TyKind::TraitObject(
+            poly_trait_refs,
+            <a href="../../../../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a> { name: LifetimeName::ImplicitObjectLifetimeDefault, .. },
+            <span class="kw">_</span>,
+        ) = <a href="#562">t</a>.kind
+        {
+            <span class="kw">for </span>ptr <span class="kw">in </span>poly_trait_refs {
+                <span class="kw">if </span><span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="number">1</span>) == ptr.trait_ref.trait_def_id() {
+                    <span class="self">self</span>.<span class="number">0</span>.push(ptr.span);
+                }
+            }
+        }
+        <a href="../../../../../rustc_hir/intravisit/fn.walk_ty.html">walk_ty</a>(<a class="self" href="#562">self</a>, <a href="#562">t</a>);
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

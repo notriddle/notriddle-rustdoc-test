@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ConstKind","Represents a constant in Rust."],["EvalMode",""],["EvalResult",""],["InferConst","An inference variable for a const, for use in const generics."]],"struct":[["Unevaluated","An unevaluated, potentially generic, constant."]]};

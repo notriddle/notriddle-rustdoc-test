@@ -1,0 +1,978 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_borrowck/src/region_infer/values.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>values.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_borrowck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="../../../rustc_data_structures/fx/type.FxIndexSet.html">rustc_data_structures::fx::FxIndexSet</a>;
+<span class="kw">use </span><a href="../../../rustc_index/bit_set/struct.SparseBitMatrix.html">rustc_index::bit_set::SparseBitMatrix</a>;
+<span class="kw">use </span><a href="../../../rustc_index/interval/struct.IntervalSet.html">rustc_index::interval::IntervalSet</a>;
+<span class="kw">use </span><a href="../../../rustc_index/interval/struct.SparseIntervalMatrix.html">rustc_index::interval::SparseIntervalMatrix</a>;
+<span class="kw">use </span><a href="../../../rustc_index/vec/trait.Idx.html">rustc_index::vec::Idx</a>;
+<span class="kw">use </span><a href="../../../rustc_index/vec/struct.IndexVec.html">rustc_index::vec::IndexVec</a>;
+<span class="kw">use </span>rustc_middle::mir::{<a href="../../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="../../../rustc_middle/mir/struct.Body.html">Body</a>, <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/fmt/macros/derive.Debug.html">std::fmt::Debug</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">std::rc::Rc</a>;
+
+<span class="doccomment">/// Maps between a `Location` and a `PointIndex` (and vice versa).
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RegionValueElements {
+    <span class="doccomment">/// For each basic block, how many points are contained within?
+    </span>statements_before_block: IndexVec&lt;<a href="../../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;,
+
+    <span class="doccomment">/// Map backward from each point to the basic block that it
+    /// belongs to.
+    </span>basic_blocks: IndexVec&lt;<a href="#88-92">PointIndex</a>, <a href="../../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+
+    num_points: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl </span><a href="#13">RegionValueElements</a> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>num_points = <span class="number">0</span>;
+        <span class="kw">let </span>statements_before_block: IndexVec&lt;<a href="../../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt; = <a href="#25">body</a>
+            .basic_blocks
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|block_data| {
+                <span class="kw">let </span>v = <a href="#26">num_points</a>;
+                <a href="#26">num_points</a> += <a href="#30">block_data</a>.statements.len() + <span class="number">1</span>;
+                <a href="#31">v</a>
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;RegionValueElements: statements_before_block={:#?}&quot;</span>, statements_before_block);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;RegionValueElements: num_points={:#?}&quot;</span>, num_points);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>basic_blocks = IndexVec::with_capacity(<a href="#26">num_points</a>);
+        <span class="kw">for </span>(bb, bb_data) <span class="kw">in </span>body.basic_blocks.iter_enumerated() {
+            basic_blocks.extend((<span class="number">0</span>..=bb_data.statements.len()).map(|<span class="kw">_</span>| bb));
+        }
+
+        <span class="self">Self </span>{ <a href="#27">statements_before_block</a>, <a href="#39">basic_blocks</a>, <a href="#26">num_points</a> }
+    }
+
+    <span class="doccomment">/// Total number of point indices
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>num_points(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#48">self</a>.num_points
+    }
+
+    <span class="doccomment">/// Converts a `Location` into a `PointIndex`. O(1).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>point_from_location(<span class="kw-2">&amp;</span><span class="self">self</span>, location: <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>) -&gt; <a href="#88-92">PointIndex</a> {
+        <span class="kw">let </span><a href="../../../rustc_middle/mir/struct.Location.html">Location</a> { block, statement_index } = <a href="#53">location</a>;
+        <span class="kw">let </span>start_index = <a class="self" href="#53">self</a>.statements_before_block[<a href="#54">block</a>];
+        PointIndex::new(<a href="#55">start_index</a> + <a href="#54">statement_index</a>)
+    }
+
+    <span class="doccomment">/// Converts a `Location` into a `PointIndex`. O(1).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>entry_point(<span class="kw-2">&amp;</span><span class="self">self</span>, block: <a href="../../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) -&gt; <a href="#88-92">PointIndex</a> {
+        <span class="kw">let </span>start_index = <a class="self" href="#60">self</a>.statements_before_block[<a href="#60">block</a>];
+        PointIndex::new(<a href="#61">start_index</a>)
+    }
+
+    <span class="doccomment">/// Return the PointIndex for the block start of this index.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_block_start(<span class="kw-2">&amp;</span><span class="self">self</span>, index: <a href="#88-92">PointIndex</a>) -&gt; <a href="#88-92">PointIndex</a> {
+        PointIndex::new(<a class="self" href="#66">self</a>.statements_before_block[<a class="self" href="#66">self</a>.basic_blocks[<a href="#66">index</a>]])
+    }
+
+    <span class="doccomment">/// Converts a `PointIndex` back to a location. O(1).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_location(<span class="kw-2">&amp;</span><span class="self">self</span>, index: <a href="#88-92">PointIndex</a>) -&gt; <a href="../../../rustc_middle/mir/struct.Location.html">Location</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(index.index() &lt; <span class="self">self</span>.num_points);
+        <span class="kw">let </span>block = <a class="self" href="#71">self</a>.basic_blocks[<a href="#71">index</a>];
+        <span class="kw">let </span>start_index = <a class="self" href="#71">self</a>.statements_before_block[<a href="#73">block</a>];
+        <span class="kw">let </span>statement_index = <a href="#71">index</a>.<a href="#88-92">index</a>() - <a href="#74">start_index</a>;
+        <a href="../../../rustc_middle/mir/struct.Location.html">Location</a> { <a href="#73">block</a>, <a href="#75">statement_index</a> }
+    }
+
+    <span class="doccomment">/// Sometimes we get point-indices back from bitsets that may be
+    /// out of range (because they round up to the nearest 2^N number
+    /// of bits). Use this function to filter such points out if you
+    /// like.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>point_in_range(<span class="kw-2">&amp;</span><span class="self">self</span>, index: <a href="#88-92">PointIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#83">index</a>.<a href="#88-92">index</a>() &lt; <a class="self" href="#83">self</a>.num_points
+    }
+}
+
+<a class="macro" href="../../../rustc_macros/rustc_macros/macro.newtype_index.html">rustc_index::newtype_index! </a>{
+    <span class="doccomment">/// A single integer representing a `Location` in the MIR control-flow
+    /// graph. Constructed efficiently from `RegionValueElements`.
+    </span><span class="kw">pub struct </span><a href="#88-92">PointIndex</a> { DEBUG_FORMAT = <span class="string">&quot;PointIndex({})&quot; </span>}
+}
+
+<a class="macro" href="../../../rustc_macros/rustc_macros/macro.newtype_index.html">rustc_index::newtype_index! </a>{
+    <span class="doccomment">/// A single integer representing a `ty::Placeholder`.
+    </span><span class="kw">pub struct </span><a href="#94-97">PlaceholderIndex</a> { DEBUG_FORMAT = <span class="string">&quot;PlaceholderIndex({})&quot; </span>}
+}
+
+<span class="doccomment">/// An individual element in a region value -- the value of a
+/// particular region variable consists of a set of these elements.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>RegionElement {
+    <span class="doccomment">/// A point in the control-flow graph.
+    </span>Location(<a href="../../../rustc_middle/mir/struct.Location.html">Location</a>),
+
+    <span class="doccomment">/// A universally quantified region from the root universe (e.g.,
+    /// a lifetime parameter).
+    </span>RootUniversalRegion(<a href="../../../rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>),
+
+    <span class="doccomment">/// A placeholder (e.g., instantiated from a `for&lt;&#39;a&gt; fn(&amp;&#39;a u32)`
+    /// type).
+    </span>PlaceholderRegion(<a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a>),
+}
+
+<span class="doccomment">/// When we initially compute liveness, we use an interval matrix storing
+/// liveness ranges for each region-vid.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>LivenessValues&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt; {
+    elements: Rc&lt;<a href="#13">RegionValueElements</a>&gt;,
+    points: SparseIntervalMatrix&lt;N, <a href="#88-92">PointIndex</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt; LivenessValues&lt;N&gt; {
+    <span class="doccomment">/// Creates a new set of &quot;region values&quot; that tracks causal information.
+    /// Each of the regions in num_region_variables will be initialized with an
+    /// empty set of points and no causal information.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(elements: Rc&lt;<a href="#13">RegionValueElements</a>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ points: SparseIntervalMatrix::new(<a href="#126">elements</a>.num_points), <a href="#126">elements</a> }
+    }
+
+    <span class="doccomment">/// Iterate through each region that has a value in this set.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>rows(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = N&gt; {
+        <a class="self" href="#131">self</a>.points.rows()
+    }
+
+    <span class="doccomment">/// Adds the given element to the value for the given region. Returns whether
+    /// the element is newly added (i.e., was not already present).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, row: N, location: <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;LivenessValues::add(r={:?}, location={:?})&quot;</span>, row, location);
+        <span class="kw">let </span>index = <a class="self" href="#137">self</a>.elements.<a href="#53">point_from_location</a>(<a href="#137">location</a>);
+        <a class="self" href="#137">self</a>.points.insert(<a href="#137">row</a>, <a href="#139">index</a>)
+    }
+
+    <span class="doccomment">/// Adds all the elements in the given bit array into the given
+    /// region. Returns whether any of them are newly added.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_elements(<span class="kw-2">&amp;mut </span><span class="self">self</span>, row: N, locations: <span class="kw-2">&amp;</span>IntervalSet&lt;<a href="#88-92">PointIndex</a>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;LivenessValues::add_elements(row={:?}, locations={:?})&quot;</span>, row, locations);
+        <a class="self" href="#145">self</a>.points.union_row(<a href="#145">row</a>, <a href="#145">locations</a>)
+    }
+
+    <span class="doccomment">/// Adds all the control-flow points to the values for `r`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_all_points(<span class="kw-2">&amp;mut </span><span class="self">self</span>, row: N) {
+        <a class="self" href="#151">self</a>.points.insert_all_into_row(<a href="#151">row</a>);
+    }
+
+    <span class="doccomment">/// Returns `true` if the region `r` contains the given element.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>contains(<span class="kw-2">&amp;</span><span class="self">self</span>, row: N, location: <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>index = <a class="self" href="#156">self</a>.elements.<a href="#53">point_from_location</a>(<a href="#156">location</a>);
+        <a class="self" href="#156">self</a>.points.row(<a href="#156">row</a>).map_or(<span class="bool-val">false</span>, |r| <a href="#158">r</a>.contains(<a href="#157">index</a>))
+    }
+
+    <span class="doccomment">/// Returns an iterator of all the elements contained by the region `r`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_elements(<span class="kw-2">&amp;</span><span class="self">self</span>, row: N) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#162">self</a>.points
+            .row(<a href="#162">row</a>)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|set| <a href="#166">set</a>.iter())
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take_while</a>(<span class="kw">move </span>|<span class="kw-2">&amp;</span>p| <a class="self" href="#162">self</a>.elements.<a href="#83">point_in_range</a>(<a href="#167">p</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="kw">move </span>|p| <a class="self" href="#162">self</a>.elements.<a href="#71">to_location</a>(<a href="#168">p</a>))
+    }
+
+    <span class="doccomment">/// Returns a &quot;pretty&quot; string value of the region. Meant for debugging.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>region_value_str(<span class="kw-2">&amp;</span><span class="self">self</span>, r: N) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <a href="#410">region_value_str</a>(<a class="self" href="#172">self</a>.<a href="#162">get_elements</a>(<a href="#172">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="#104">RegionElement::Location</a>))
+    }
+}
+
+<span class="doccomment">/// Maps from `ty::PlaceholderRegion` values that are used in the rest of
+/// rustc to the internal `PlaceholderIndex` values that are used in
+/// NLL.
+</span><span class="attribute">#[derive(Default)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PlaceholderIndices {
+    indices: FxIndexSet&lt;<a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#181">PlaceholderIndices</a> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, placeholder: <a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a>) -&gt; <a href="#94-97">PlaceholderIndex</a> {
+        <span class="kw">let </span>(index, <span class="kw">_</span>) = <a class="self" href="#186">self</a>.indices.insert_full(<a href="#186">placeholder</a>);
+        <a href="#187">index</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lookup_index(<span class="kw-2">&amp;</span><span class="self">self</span>, placeholder: <a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a>) -&gt; <a href="#94-97">PlaceholderIndex</a> {
+        <a class="self" href="#191">self</a>.indices.get_index_of(<span class="kw-2">&amp;</span><a href="#191">placeholder</a>).unwrap().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lookup_placeholder(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        placeholder: <a href="#94-97">PlaceholderIndex</a>,
+    ) -&gt; <a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a> {
+        <a class="self" href="#196">self</a>.indices[<a href="#197">placeholder</a>.<a href="#94-97">index</a>()]
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#202">self</a>.indices.len()
+    }
+}
+
+<span class="doccomment">/// Stores the full values for a set of regions (in contrast to
+/// `LivenessValues`, which only stores those points in the where a
+/// region is live). The full value for a region may contain points in
+/// the CFG, but also free regions as well as bound universe
+/// placeholders.
+///
+/// Example:
+///
+/// ```text
+/// fn foo(x: &amp;&#39;a u32) -&gt; &amp;&#39;a u32 {
+///    let y: &amp;&#39;0 u32 = x; // let&#39;s call this `&#39;0`
+///    y
+/// }
+/// ```
+///
+/// Here, the variable `&#39;0` would contain the free region `&#39;a`,
+/// because (since it is returned) it must live for at least `&#39;a`. But
+/// it would also contain various points from within the function.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RegionValues&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt; {
+    elements: Rc&lt;<a href="#13">RegionValueElements</a>&gt;,
+    placeholder_indices: Rc&lt;<a href="#181">PlaceholderIndices</a>&gt;,
+    points: SparseIntervalMatrix&lt;N, <a href="#88-92">PointIndex</a>&gt;,
+    free_regions: SparseBitMatrix&lt;N, <a href="../../../rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>&gt;,
+
+    <span class="doccomment">/// Placeholders represent bound regions -- so something like `&#39;a`
+    /// in for&lt;&#39;a&gt; fn(&amp;&#39;a u32)`.
+    </span>placeholders: SparseBitMatrix&lt;N, <a href="#94-97">PlaceholderIndex</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt; RegionValues&lt;N&gt; {
+    <span class="doccomment">/// Creates a new set of &quot;region values&quot; that tracks causal information.
+    /// Each of the regions in num_region_variables will be initialized with an
+    /// empty set of points and no causal information.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(
+        elements: <span class="kw-2">&amp;</span>Rc&lt;<a href="#13">RegionValueElements</a>&gt;,
+        num_universal_regions: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        placeholder_indices: <span class="kw-2">&amp;</span>Rc&lt;<a href="#181">PlaceholderIndices</a>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>num_placeholders = <a href="#244">placeholder_indices</a>.<a href="#202">len</a>();
+        <span class="self">Self </span>{
+            elements: <a href="#242">elements</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+            points: SparseIntervalMatrix::new(<a href="#242">elements</a>.num_points),
+            placeholder_indices: <a href="#244">placeholder_indices</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(),
+            free_regions: SparseBitMatrix::new(<a href="#243">num_universal_regions</a>),
+            placeholders: SparseBitMatrix::new(<a href="#246">num_placeholders</a>),
+        }
+    }
+
+    <span class="doccomment">/// Adds the given element to the value for the given region. Returns whether
+    /// the element is newly added (i.e., was not already present).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: N, elem: <span class="kw">impl </span><a href="#357">ToElementIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;add(r={:?}, elem={:?})&quot;</span>, r, elem);
+        <a href="#258">elem</a>.<a href="#358">add_to_row</a>(<a class="self" href="#258">self</a>, <a href="#258">r</a>)
+    }
+
+    <span class="doccomment">/// Adds all the control-flow points to the values for `r`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_all_points(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: N) {
+        <a class="self" href="#264">self</a>.points.insert_all_into_row(<a href="#264">r</a>);
+    }
+
+    <span class="doccomment">/// Adds all elements in `r_from` to `r_to` (because e.g., `r_to:
+    /// r_from`).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r_to: N, r_from: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#270">self</a>.points.union_rows(<a href="#270">r_from</a>, <a href="#270">r_to</a>)
+            | <a class="self" href="#270">self</a>.free_regions.union_rows(<a href="#270">r_from</a>, <a href="#270">r_to</a>)
+            | <a class="self" href="#270">self</a>.placeholders.union_rows(<a href="#270">r_from</a>, <a href="#270">r_to</a>)
+    }
+
+    <span class="doccomment">/// Returns `true` if the region `r` contains the given element.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>contains(<span class="kw-2">&amp;</span><span class="self">self</span>, r: N, elem: <span class="kw">impl </span><a href="#357">ToElementIndex</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#277">elem</a>.<a href="#360">contained_in_row</a>(<a class="self" href="#277">self</a>, <a href="#277">r</a>)
+    }
+
+    <span class="doccomment">/// `self[to] |= values[from]`, essentially: that is, take all the
+    /// elements for the region `from` from `values` and add them to
+    /// the region `to` in `self`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>merge_liveness&lt;M: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, to: N, from: M, values: <span class="kw-2">&amp;</span>LivenessValues&lt;M&gt;) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(set) = <a href="#284">values</a>.points.row(<a href="#284">from</a>) {
+            <a class="self" href="#284">self</a>.points.union_row(<a href="#284">to</a>, <a href="#285">set</a>);
+        }
+    }
+
+    <span class="doccomment">/// Returns `true` if `sup_region` contains all the CFG points that
+    /// `sub_region` contains. Ignores universal regions.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>contains_points(<span class="kw-2">&amp;</span><span class="self">self</span>, sup_region: N, sub_region: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(sub_row) = <a class="self" href="#292">self</a>.points.row(<a href="#292">sub_region</a>) {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(sup_row) = <a class="self" href="#292">self</a>.points.row(<a href="#292">sup_region</a>) {
+                <a href="#294">sup_row</a>.superset(<a href="#293">sub_row</a>)
+            } <span class="kw">else </span>{
+                <span class="comment">// sup row is empty, so sub row must be empty
+                </span><a href="#293">sub_row</a>.is_empty()
+            }
+        } <span class="kw">else </span>{
+            <span class="comment">// sub row is empty, always true
+            </span><span class="bool-val">true
+        </span>}
+    }
+
+    <span class="doccomment">/// Returns the locations contained within a given region `r`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>locations_outlived_by&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, r: N) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#307">self</a>.points.row(<a href="#307">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(<span class="kw">move </span>|set| {
+            <a href="#308">set</a>.iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take_while</a>(<span class="kw">move </span>|<span class="kw-2">&amp;</span>p| <a class="self" href="#307">self</a>.elements.<a href="#83">point_in_range</a>(<a href="#310">p</a>))
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="kw">move </span>|p| <a class="self" href="#307">self</a>.elements.<a href="#71">to_location</a>(<a href="#311">p</a>))
+        })
+    }
+
+    <span class="doccomment">/// Returns just the universal regions that are contained in a given region&#39;s value.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>universal_regions_outlived_by&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        r: N,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#317">self</a>.free_regions.row(<a href="#318">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|set| <a href="#320">set</a>.iter())
+    }
+
+    <span class="doccomment">/// Returns all the elements contained in a given region&#39;s value.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>placeholders_contained_in&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        r: N,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#325">self</a>.placeholders
+            .row(<a href="#326">r</a>)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|set| <a href="#331">set</a>.iter())
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<span class="kw">move </span>|p| <a class="self" href="#325">self</a>.placeholder_indices.<a href="#195-198">lookup_placeholder</a>(<a href="#332">p</a>))
+    }
+
+    <span class="doccomment">/// Returns all the elements contained in a given region&#39;s value.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>elements_contained_in&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        r: N,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="#102">RegionElement</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <span class="kw">let </span>points_iter = <a class="self" href="#337">self</a>.<a href="#307">locations_outlived_by</a>(<a href="#338">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="#104">RegionElement::Location</a>);
+
+        <span class="kw">let </span>free_regions_iter =
+            <a class="self" href="#337">self</a>.<a href="#316-319">universal_regions_outlived_by</a>(<a href="#338">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="#108">RegionElement::RootUniversalRegion</a>);
+
+        <span class="kw">let </span>placeholder_universes_iter =
+            <a class="self" href="#337">self</a>.<a href="#324-327">placeholders_contained_in</a>(<a href="#338">r</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="#112">RegionElement::PlaceholderRegion</a>);
+
+        <a href="#340">points_iter</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#342">free_regions_iter</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#345">placeholder_universes_iter</a>)
+    }
+
+    <span class="doccomment">/// Returns a &quot;pretty&quot; string value of the region. Meant for debugging.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>region_value_str(<span class="kw-2">&amp;</span><span class="self">self</span>, r: N) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <a href="#410">region_value_str</a>(<a class="self" href="#352">self</a>.<a href="#336-339">elements_contained_in</a>(<a href="#352">r</a>))
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>ToElementIndex: <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">Debug</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> {
+    <span class="kw">fn </span>add_to_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;mut </span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+
+    <span class="kw">fn </span>contained_in_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;</span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+}
+
+<span class="kw">impl </span><a href="#357">ToElementIndex</a> <span class="kw">for </span><a href="../../../rustc_middle/mir/struct.Location.html">Location</a> {
+    <span class="kw">fn </span>add_to_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;mut </span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>index = <a href="#364">values</a>.elements.<a href="#53">point_from_location</a>(<a class="self" href="#364">self</a>);
+        <a href="#364">values</a>.points.insert(<a href="#364">row</a>, <a href="#365">index</a>)
+    }
+
+    <span class="kw">fn </span>contained_in_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;</span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>index = <a href="#369">values</a>.elements.<a href="#53">point_from_location</a>(<a class="self" href="#369">self</a>);
+        <a href="#369">values</a>.points.contains(<a href="#369">row</a>, <a href="#370">index</a>)
+    }
+}
+
+<span class="kw">impl </span><a href="#357">ToElementIndex</a> <span class="kw">for </span><a href="../../../rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a> {
+    <span class="kw">fn </span>add_to_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;mut </span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#376">values</a>.free_regions.insert(<a href="#376">row</a>, <a class="self" href="#376">self</a>)
+    }
+
+    <span class="kw">fn </span>contained_in_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;</span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#380">values</a>.free_regions.contains(<a href="#380">row</a>, <a class="self" href="#380">self</a>)
+    }
+}
+
+<span class="kw">impl </span><a href="#357">ToElementIndex</a> <span class="kw">for </span><a href="../../../rustc_middle/ty/type.PlaceholderRegion.html">ty::PlaceholderRegion</a> {
+    <span class="kw">fn </span>add_to_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;mut </span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>index = <a href="#386">values</a>.placeholder_indices.<a href="#191">lookup_index</a>(<a class="self" href="#386">self</a>);
+        <a href="#386">values</a>.placeholders.insert(<a href="#386">row</a>, <a href="#387">index</a>)
+    }
+
+    <span class="kw">fn </span>contained_in_row&lt;N: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>&gt;(<span class="self">self</span>, values: <span class="kw-2">&amp;</span>RegionValues&lt;N&gt;, row: N) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>index = <a href="#391">values</a>.placeholder_indices.<a href="#191">lookup_index</a>(<a class="self" href="#391">self</a>);
+        <a href="#391">values</a>.placeholders.contains(<a href="#391">row</a>, <a href="#392">index</a>)
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>location_set_str(
+    elements: <span class="kw-2">&amp;</span><a href="#13">RegionValueElements</a>,
+    points: <span class="kw">impl </span>IntoIterator&lt;Item = <a href="#88-92">PointIndex</a>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+    <a href="#410">region_value_str</a>(
+        <a href="#399">points</a>
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take_while</a>(|<span class="kw-2">&amp;</span>p| <a href="#398">elements</a>.<a href="#83">point_in_range</a>(<a href="#404">p</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|p| <a href="#398">elements</a>.<a href="#71">to_location</a>(<a href="#405">p</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(<a href="#104">RegionElement::Location</a>),
+    )
+}
+
+<span class="kw">fn </span>region_value_str(elements: <span class="kw">impl </span>IntoIterator&lt;Item = <a href="#102">RegionElement</a>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>result = String::new();
+    <a href="#411">result</a>.push(<span class="string">&#39;{&#39;</span>);
+
+    <span class="comment">// Set to Some(l1, l2) when we have observed all the locations
+    // from l1..=l2 (inclusive) but not yet printed them. This
+    // gets extended if we then see l3 where l3 is the successor
+    // to l2.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>open_location: <span class="prelude-ty">Option</span>&lt;(<a href="../../../rustc_middle/mir/struct.Location.html">Location</a>, <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>)&gt; = <span class="prelude-val">None</span>;
+
+    <span class="kw">let </span><span class="kw-2">mut </span>sep = <span class="string">&quot;&quot;</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>push_sep = |s: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>| {
+        <a href="#421">s</a>.push_str(<a href="#420">sep</a>);
+        <a href="#420">sep</a> = <span class="string">&quot;, &quot;</span>;
+    };
+
+    <span class="kw">for </span>element <span class="kw">in </span>elements {
+        <span class="kw">match </span>element {
+            RegionElement::Location(l) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((location1, location2)) = open_location {
+                    <span class="kw">if </span>location2.block == l.block
+                        &amp;&amp; location2.statement_index == l.statement_index - <span class="number">1
+                    </span>{
+                        open_location = <span class="prelude-val">Some</span>((location1, l));
+                        <span class="kw">continue</span>;
+                    }
+
+                    push_sep(<span class="kw-2">&amp;mut </span>result);
+                    push_location_range(<span class="kw-2">&amp;mut </span>result, location1, location2);
+                }
+
+                open_location = <span class="prelude-val">Some</span>((l, l));
+            }
+
+            RegionElement::RootUniversalRegion(fr) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((location1, location2)) = open_location {
+                    push_sep(<span class="kw-2">&amp;mut </span>result);
+                    push_location_range(<span class="kw-2">&amp;mut </span>result, location1, location2);
+                    open_location = <span class="prelude-val">None</span>;
+                }
+
+                push_sep(<span class="kw-2">&amp;mut </span>result);
+                result.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, fr));
+            }
+
+            RegionElement::PlaceholderRegion(placeholder) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((location1, location2)) = open_location {
+                    push_sep(<span class="kw-2">&amp;mut </span>result);
+                    push_location_range(<span class="kw-2">&amp;mut </span>result, location1, location2);
+                    open_location = <span class="prelude-val">None</span>;
+                }
+
+                push_sep(<span class="kw-2">&amp;mut </span>result);
+                result.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, placeholder));
+            }
+        }
+    }
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>((location1, location2)) = <a href="#418">open_location</a> {
+        <a href="#421">push_sep</a>(<span class="kw-2">&amp;mut </span><a href="#411">result</a>);
+        <a href="#477">push_location_range</a>(<span class="kw-2">&amp;mut </span><a href="#411">result</a>, <a href="#468">location1</a>, <a href="#468">location2</a>);
+    }
+
+    <a href="#411">result</a>.push(<span class="string">&#39;}&#39;</span>);
+
+    <span class="kw">return </span><a href="#411">result</a>;
+
+    <span class="kw">fn </span>push_location_range(str: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, location1: <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>, location2: <a href="../../../rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">if </span>location1 == location2 {
+            <a href="#477">str</a>.push_str(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?}&quot;</span>, location1));
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(location1.block, location2.block);
+            <a href="#477">str</a>.push_str(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;{:?}[{}..={}]&quot;</span>,
+                location1.block, location1.statement_index, location2.statement_index
+            ));
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_borrowck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

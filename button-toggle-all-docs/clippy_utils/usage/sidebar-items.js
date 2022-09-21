@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["contains_return_break_continue_macro",""],["is_potentially_mutated",""],["local_used_after_expr",""],["mutated_variables","Returns a set of mutated local variable IDs, or `None` if mutations could not be determined."]],"struct":[["BindingUsageFinder",""],["MutVarsDelegate",""],["ParamBindingIdCollector",""]]};

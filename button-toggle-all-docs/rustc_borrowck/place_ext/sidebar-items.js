@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["PlaceExt","Extension methods for the `Place` type."]]};

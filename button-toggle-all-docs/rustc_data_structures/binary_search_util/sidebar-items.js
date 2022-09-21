@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["binary_search_slice","Uses a sorted slice `data: &[E]` as a kind of “multi-map”. The `key_fn` extracts a key of type `K` from the data, and this function finds the range of elements that match the key. `data` must have been sorted as if by a call to `sort_by_key` for this to work."]]};

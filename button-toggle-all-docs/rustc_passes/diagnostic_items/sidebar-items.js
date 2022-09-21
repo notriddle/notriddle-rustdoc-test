@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["all_diagnostic_items","Traverse and collect all the diagnostic items in all crates."],["collect_item",""],["diagnostic_items","Traverse and collect the diagnostic items in the current"],["extract","Extract the first `rustc_diagnostic_item = \"$name\"` out of a list of attributes."],["observe_item",""],["provide",""]]};

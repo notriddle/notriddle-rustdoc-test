@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["GenericParamDefKind",""]],"struct":[["GenericParamCount",""],["GenericParamDef",""],["GenericPredicates","Bounds on generics."],["Generics","Information about the formal type/lifetime parameters associated with an item or method. Analogous to `hir::Generics`."]]};

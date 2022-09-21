@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["collect_definitions",""]],"struct":[["DefCollector","Creates `DefId`s for nodes in the AST."]]};

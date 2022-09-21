@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["NonConstExpr","An expression that is not always legal in a const context."]],"fn":[["check_mod_const_bodies",""],["provide",""]],"struct":[["CheckConstVisitor",""]]};

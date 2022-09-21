@@ -1,0 +1,302 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_data_structures/src/sharded.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sharded.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_data_structures/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_data_structures/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_data_structures/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::fx::{<a href="../../rustc_data_structures/fx/type.FxHashMap.html">FxHashMap</a>, <a href="../../rustc_data_structures/fx/struct.FxHasher.html">FxHasher</a>};
+<span class="kw">use </span><span class="kw">crate</span>::sync::{<a href="sync.rs.html#381">Lock</a>, <a href="../../rustc_data_structures/sync/struct.MappedLockGuard.html">LockGuard</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html">std::borrow::Borrow</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/collections/hash/map/enum.RawEntryMut.html">std::collections::hash_map::RawEntryMut</a>;
+<span class="kw">use </span>std::hash::{<a href="https://doc.rust-lang.org/nightly/core/hash/macros/derive.Hash.html">Hash</a>, <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hasher.html">Hasher</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/mem/index.html">std::mem</a>;
+
+<span class="attribute">#[derive(Clone, Default)]
+#[cfg_attr(parallel_compiler, repr(align(<span class="number">64</span>)))]
+</span><span class="kw">struct </span>CacheAligned&lt;T&gt;(T);
+
+<span class="attribute">#[cfg(parallel_compiler)]
+</span><span class="comment">// 32 shards is sufficient to reduce contention on an 8-core Ryzen 7 1700,
+// but this should be tested on higher core count CPUs. How the `Sharded` type gets used
+// may also affect the ideal number of shards.
+</span><span class="kw">const </span>SHARD_BITS: usize = <span class="number">5</span>;
+
+<span class="attribute">#[cfg(not(parallel_compiler))]
+</span><span class="kw">const </span>SHARD_BITS: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">0</span>;
+
+<span class="kw">pub const </span>SHARDS: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">1 </span>&lt;&lt; <a href="#19">SHARD_BITS</a>;
+
+<span class="doccomment">/// An array of cache-line aligned inner locked structures with convenience methods.
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>Sharded&lt;T&gt; {
+    shards: [CacheAligned&lt;Lock&lt;T&gt;&gt;; <a href="#21">SHARDS</a>],
+}
+
+<span class="kw">impl</span>&lt;T: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default</a>&gt; <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default</a> <span class="kw">for </span>Sharded&lt;T&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(T::default)
+    }
+}
+
+<span class="kw">impl</span>&lt;T&gt; Sharded&lt;T&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>new(<span class="kw-2">mut </span>value: <span class="kw">impl </span>FnMut() -&gt; T) -&gt; <span class="self">Self </span>{
+        <a href="#25">Sharded</a> { shards: [(); <a href="#21">SHARDS</a>].map(|()| <a href="#10">CacheAligned</a>(Lock::new(<a href="#38">value</a>()))) }
+    }
+
+    <span class="doccomment">/// The shard is selected by hashing `val` with `FxHasher`.
+    </span><span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>get_shard_by_value&lt;K: <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <span class="question-mark">?</span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, val: <span class="kw-2">&amp;</span>K) -&gt; <span class="kw-2">&amp;</span>Lock&lt;T&gt; {
+        <span class="kw">if </span>SHARDS == <span class="number">1 </span>{ <span class="kw-2">&amp;</span><a class="self" href="#44">self</a>.shards[<span class="number">0</span>].<span class="number">0 </span>} <span class="kw">else </span>{ <a class="self" href="#44">self</a>.<a href="#49">get_shard_by_hash</a>(<a href="#132">make_hash</a>(<a href="#44">val</a>)) }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>get_shard_by_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; <span class="kw-2">&amp;</span>Lock&lt;T&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#49">self</a>.shards[<a href="#144">get_shard_index_by_hash</a>(<a href="#49">hash</a>)].<span class="number">0
+    </span>}
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>get_shard_by_index(<span class="kw-2">&amp;</span><span class="self">self</span>, i: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="kw-2">&amp;</span>Lock&lt;T&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#54">self</a>.shards[<a href="#54">i</a>].<span class="number">0
+    </span>}
+
+    <span class="kw">pub fn </span>lock_shards(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;LockGuard&lt;<span class="lifetime">&#39;_</span>, T&gt;&gt; {
+        (<span class="number">0</span>..<a href="#21">SHARDS</a>).<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">map</a>(|i| <a class="self" href="#58">self</a>.shards[<a href="#59">i</a>].<span class="number">0</span>.<a href="sync.rs.html#423">lock</a>()).<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">collect</a>()
+    }
+
+    <span class="kw">pub fn </span>try_lock_shards(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;LockGuard&lt;<span class="lifetime">&#39;_</span>, T&gt;&gt;&gt; {
+        (<span class="number">0</span>..<a href="#21">SHARDS</a>).<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">map</a>(|i| <a class="self" href="#62">self</a>.shards[<a href="#63">i</a>].<span class="number">0</span>.<a href="sync.rs.html#407">try_lock</a>()).<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">collect</a>()
+    }
+}
+
+<span class="kw">pub type </span>ShardedHashMap&lt;K, V&gt; = Sharded&lt;FxHashMap&lt;K, V&gt;&gt;;
+
+<span class="kw">impl</span>&lt;K: <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a>, V&gt; ShardedHashMap&lt;K, V&gt; {
+    <span class="kw">pub fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#70">self</a>.<a href="#58">lock_shards</a>().iter().<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">map</a>(|shard| <a href="#71">shard</a>.len()).<a href="../../rustc_data_structures/sync/trait.ParallelIterator.html">sum</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;K: <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a> + <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a>&gt; ShardedHashMap&lt;K, ()&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>intern_ref&lt;Q: <span class="question-mark">?</span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, value: <span class="kw-2">&amp;</span>Q, make: <span class="kw">impl </span>FnOnce() -&gt; K) -&gt; K
+    <span class="kw">where
+        </span>K: Borrow&lt;Q&gt;,
+        Q: <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a>,
+    {
+        <span class="kw">let </span>hash = <a href="#132">make_hash</a>(<a href="#77">value</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>shard = <a class="self" href="#77">self</a>.<a href="#49">get_shard_by_hash</a>(<a href="#82">hash</a>).<a href="sync.rs.html#423">lock</a>();
+        <span class="kw">let </span>entry = <a href="#83">shard</a>.raw_entry_mut().from_key_hashed_nocheck(<a href="#82">hash</a>, <a href="#77">value</a>);
+
+        <span class="kw">match </span><a href="#84">entry</a> {
+            RawEntryMut::Occupied(e) =&gt; <span class="kw-2">*</span><a href="#87">e</a>.key(),
+            RawEntryMut::Vacant(e) =&gt; {
+                <span class="kw">let </span>v = <a href="#77">make</a>();
+                <a href="#88">e</a>.insert_hashed_nocheck(<a href="#82">hash</a>, <a href="#89">v</a>, ());
+                <a href="#89">v</a>
+            }
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>intern&lt;Q&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, value: Q, make: <span class="kw">impl </span>FnOnce(Q) -&gt; K) -&gt; K
+    <span class="kw">where
+        </span>K: Borrow&lt;Q&gt;,
+        Q: <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a>,
+    {
+        <span class="kw">let </span>hash = <a href="#132">make_hash</a>(<span class="kw-2">&amp;</span><a href="#97">value</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>shard = <a class="self" href="#97">self</a>.<a href="#49">get_shard_by_hash</a>(<a href="#102">hash</a>).<a href="sync.rs.html#423">lock</a>();
+        <span class="kw">let </span>entry = <a href="#103">shard</a>.raw_entry_mut().from_key_hashed_nocheck(<a href="#102">hash</a>, <span class="kw-2">&amp;</span><a href="#97">value</a>);
+
+        <span class="kw">match </span><a href="#104">entry</a> {
+            RawEntryMut::Occupied(e) =&gt; <span class="kw-2">*</span><a href="#107">e</a>.key(),
+            RawEntryMut::Vacant(e) =&gt; {
+                <span class="kw">let </span>v = <a href="#97">make</a>(<a href="#97">value</a>);
+                <a href="#108">e</a>.insert_hashed_nocheck(<a href="#102">hash</a>, <a href="#109">v</a>, ());
+                <a href="#109">v</a>
+            }
+        }
+    }
+}
+
+<span class="kw">pub trait </span>IntoPointer {
+    <span class="doccomment">/// Returns a pointer which outlives `self`.
+    </span><span class="kw">fn </span>into_pointer(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">*const </span>();
+}
+
+<span class="kw">impl</span>&lt;K: <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html">Eq</a> + <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> + <a href="#117">IntoPointer</a>&gt; ShardedHashMap&lt;K, ()&gt; {
+    <span class="kw">pub fn </span>contains_pointer_to&lt;T: <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <a href="#117">IntoPointer</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, value: <span class="kw-2">&amp;</span>T) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>hash = <a href="#132">make_hash</a>(<span class="kw-2">&amp;</span><a href="#123">value</a>);
+        <span class="kw">let </span>shard = <a class="self" href="#123">self</a>.<a href="#49">get_shard_by_hash</a>(<a href="#124">hash</a>).<a href="sync.rs.html#423">lock</a>();
+        <span class="kw">let </span>value = <a href="#123">value</a>.<a href="#119">into_pointer</a>();
+        <a href="#125">shard</a>.raw_entry().from_hash(<a href="#124">hash</a>, |entry| <a href="#127">entry</a>.<a href="#119">into_pointer</a>() == <a href="#126">value</a>).is_some()
+    }
+}
+
+<span class="attribute">#[inline]
+</span><span class="kw">pub fn </span>make_hash&lt;K: <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">Hash</a> + <span class="question-mark">?</span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>&gt;(val: <span class="kw-2">&amp;</span>K) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>state = FxHasher::default();
+    <a href="#132">val</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a href="#133">state</a>);
+    <a href="#133">state</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hasher.html">finish</a>()
+}
+
+<span class="doccomment">/// Get a shard with a pre-computed hash value. If `get_shard_by_value` is
+/// ever used in combination with `get_shard_by_hash` on a single `Sharded`
+/// instance, then `hash` must be computed with `FxHasher`. Otherwise,
+/// `hash` can be computed with any hasher, so long as that hasher is used
+/// consistently for each `Sharded` instance.
+</span><span class="attribute">#[inline]
+</span><span class="kw">pub fn </span>get_shard_index_by_hash(hash: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+    <span class="kw">let </span>hash_len = mem::size_of::&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;();
+    <span class="comment">// Ignore the top 7 bits as hashbrown uses these and get the next SHARD_BITS highest bits.
+    // hashbrown also uses the lowest bits, so we can&#39;t use those
+    </span><span class="kw">let </span>bits = (<a href="#144">hash</a> &gt;&gt; (<a href="#145">hash_len</a> * <span class="number">8 </span>- <span class="number">7 </span>- <a href="#19">SHARD_BITS</a>)) <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+    <a href="#148">bits</a> % <a href="#21">SHARDS</a>
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_data_structures" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Bounds","Collects together a list of type bounds. These lists of bounds occur in many places in Rust’s syntax:"]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["ObligationCtxt","Used if you want to have pleasant experience when dealing with obligations outside of hir or mir typeck."]],"trait":[["TraitEngineExt",""]]};

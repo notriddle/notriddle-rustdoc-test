@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["target","A base target for Nintendo 3DS devices using the devkitARM toolchain."]]};

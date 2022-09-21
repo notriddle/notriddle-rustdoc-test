@@ -1,0 +1,59 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Code that handles “type-outlives” constraints like `T: &#x27;a`. This is based on the `push_outlives_components` function defined in rustc_infer, but it adds a bit of heuristics on top, in particular to deal with associated types and projections."><meta name="keywords" content="rust, rustlang, rust-lang, obligations"><title>rustc_infer::infer::outlives::obligations - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_infer/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module obligations</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_infer/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../../../index.html">rustc_infer</a>::<wbr><a href="../../index.html">infer</a>::<wbr><a href="../index.html">outlives</a>::<wbr><a class="mod" href="#">obligations</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../../../src/rustc_infer/infer/outlives/obligations.rs.html#1-471">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Code that handles “type-outlives” constraints like <code>T: 'a</code>. This
+is based on the <code>push_outlives_components</code> function defined in rustc_infer,
+but it adds a bit of heuristics on top, in particular to deal with
+associated types and projections.</p>
+<p>When we process a given <code>T: 'a</code> obligation, we may produce two
+kinds of constraints for the region inferencer:</p>
+<ul>
+<li>Relationships between inference variables and other regions.
+For example, if we have <code>&amp;'?0 u32: 'a</code>, then we would produce
+a constraint that <code>'a &lt;= '?0</code>.</li>
+<li>“Verifys” that must be checked after inferencing is done.
+For example, if we know that, for some type parameter <code>T</code>,
+<code>T: 'a + 'b</code>, and we have a requirement that <code>T: '?1</code>,
+then we add a “verify” that checks that <code>'?1 &lt;= 'a || '?1 &lt;= 'b</code>.
+<ul>
+<li>Note the difference with the previous case: here, the region
+variable must be less than something else, so this doesn’t
+affect how inference works (it finds the smallest region that
+will do); it’s just a post-condition that we have to check.</li>
+</ul>
+</li>
+</ul>
+<p><strong>The key point is that once this function is done, we have
+reduced all of our “type-region outlives” obligations into relationships
+between individual regions.</strong></p>
+<p>One key input to this function is the set of “region-bound pairs”.
+These are basically the relationships between type parameters and
+regions that are in scope at the point where the outlives
+obligation was incurred. <strong>When type-checking a function,
+particularly in the face of closures, this is not known until
+regionck runs!</strong> This is because some of those bounds come
+from things we have yet to infer.</p>
+<p>Consider:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>bar&lt;T&gt;(a: T, b: <span class="kw">impl for</span>&lt;<span class="lifetime">&#39;a</span>&gt; Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>T)) {}
+<span class="kw">fn </span>foo&lt;T&gt;(x: T) {
+    bar(x, |y| { <span class="comment">/* ... */</span>})
+         <span class="comment">// ^ closure arg
+</span>}</code></pre></div>
+<p>Here, the type of <code>y</code> may involve inference variables and the
+like, and it may also contain implied bounds that are needed to
+type-check the closure body (e.g., here it informs us that <code>T</code>
+outlives the late-bound region <code>'a</code>).</p>
+<p>Note that by delaying the gathering of implied bounds until all
+inference information is known, we may find relationships between
+bound regions and other regions in the environment. For example,
+when we first check a closure like the one expected as argument
+to <code>foo</code>:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>foo&lt;U, F: <span class="kw">for</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnMut(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>U)&gt;(_f: F) {}</code></pre></div>
+<p>the type of the closure’s first argument would be <code>&amp;'a ?U</code>. We
+might later infer <code>?U</code> to something like <code>&amp;'b u32</code>, which would
+imply that <code>'b: 'a</code>.</p>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.TypeOutlives.html" title="rustc_infer::infer::outlives::obligations::TypeOutlives struct">TypeOutlives</a></div><div class="item-right docblock-short">The <code>TypeOutlives</code> struct has the job of “lowering” a <code>T: 'a</code>
+obligation into a series of <code>'a: 'b</code> constraints and “verify“s, as
+described on the module comment. The final constraints are emitted
+via a “delegate” of type <code>D</code> – this is usually the <code>infcx</code>, which
+accrues them into the <code>region_obligations</code> code, but for NLL we
+use something else.</div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="trait" href="trait.TypeOutlivesDelegate.html" title="rustc_infer::infer::outlives::obligations::TypeOutlivesDelegate trait">TypeOutlivesDelegate</a></div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_infer" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["missing_cast_for_variadic_arg",""],["sized_unsized_cast",""],["wrong_number_of_generic_args",""]],"trait":[["StructuredDiagnostic",""]]};

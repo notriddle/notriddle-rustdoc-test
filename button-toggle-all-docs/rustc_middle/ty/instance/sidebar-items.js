@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["InstanceDef",""]],"fn":[["needs_fn_once_adapter_shim",""],["polymorphize",""]],"struct":[["Instance","A monomorphized `InstanceDef`."]]};

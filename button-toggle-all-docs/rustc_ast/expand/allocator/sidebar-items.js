@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["AllocatorKind",""],["AllocatorTy",""]],"static":[["ALLOCATOR_METHODS",""]],"struct":[["AllocatorMethod",""]]};

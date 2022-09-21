@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["get_skip_names",""],["is_skip_attr","Say if you’re playing with `rustfmt`’s skip attribute"]],"static":[["RUSTFMT",""],["SKIP",""]],"struct":[["SkipContext","Take care of skip name stack. You can update it by attributes slice or by other context. Query this context to know if you need skip a block."]]};

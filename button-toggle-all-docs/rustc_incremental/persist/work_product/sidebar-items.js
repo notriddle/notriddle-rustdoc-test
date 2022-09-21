@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["copy_cgu_workproduct_to_incr_comp_cache_dir","Copies a CGU work product to the incremental compilation directory, so next compilation can find and reuse it."],["delete_workproduct_files","Removes files for a given work product."]]};

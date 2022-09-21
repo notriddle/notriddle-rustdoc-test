@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["ty_kind_suggestion",""]]};

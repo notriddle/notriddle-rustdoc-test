@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["add_constraints_from_crate",""]],"struct":[["Constraint","Declares that the variable `decl_id` appears in a location with variance `variance`."],["ConstraintContext",""],["CurrentItem","To build constraints, we visit one item (type, trait) at a time and look at its contents. So e.g., if we have"]]};

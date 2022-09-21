@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["provide",""]],"mod":[["build",""],["check_unsafety",""],["lints",""],["thir","The MIR is built from some typed high-level IR (THIR). This section defines the THIR along with a trait for accessing it. The intention is to allow MIR construction to be unit-tested and separated from the Rust source and compiler data structures."]]};

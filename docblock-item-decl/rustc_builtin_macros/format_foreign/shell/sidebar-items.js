@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Substitution",""]],"fn":[["at_next_cp_while",""],["is_ident_head",""],["is_ident_tail",""],["iter_subs","Returns an iterator over all substitutions in a given string."],["parse_next_substitution","Parse the next substitution from the input string."]],"struct":[["Substitutions","Iterator over substitutions in a string."]]};

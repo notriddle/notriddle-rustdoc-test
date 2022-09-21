@@ -1,0 +1,1836 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_transform/src/dest_prop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>dest_prop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Propagates assignment destinations backwards in the CFG to eliminate redundant assignments.
+//!
+//! # Motivation
+//!
+//! MIR building can insert a lot of redundant copies, and Rust code in general often tends to move
+//! values around a lot. The result is a lot of assignments of the form `dest = {move} src;` in MIR.
+//! MIR building for constants in particular tends to create additional locals that are only used
+//! inside a single block to shuffle a value around unnecessarily.
+//!
+//! LLVM by itself is not good enough at eliminating these redundant copies (eg. see
+//! &lt;https://github.com/rust-lang/rust/issues/32966&gt;), so this leaves some performance on the table
+//! that we can regain by implementing an optimization for removing these assign statements in rustc
+//! itself. When this optimization runs fast enough, it can also speed up the constant evaluation
+//! and code generation phases of rustc due to the reduced number of statements and locals.
+//!
+//! # The Optimization
+//!
+//! Conceptually, this optimization is &quot;destination propagation&quot;. It is similar to the Named Return
+//! Value Optimization, or NRVO, known from the C++ world, except that it isn&#39;t limited to return
+//! values or the return place `_0`. On a very high level, independent of the actual implementation
+//! details, it does the following:
+//!
+//! 1) Identify `dest = src;` statements that can be soundly eliminated.
+//! 2) Replace all mentions of `src` with `dest` (&quot;unifying&quot; them and propagating the destination
+//!    backwards).
+//! 3) Delete the `dest = src;` statement (by making it a `nop`).
+//!
+//! Step 1) is by far the hardest, so it is explained in more detail below.
+//!
+//! ## Soundness
+//!
+//! Given an `Assign` statement `dest = src;`, where `dest` is a `Place` and `src` is an `Rvalue`,
+//! there are a few requirements that must hold for the optimization to be sound:
+//!
+//! * `dest` must not contain any *indirection* through a pointer. It must access part of the base
+//!   local. Otherwise it might point to arbitrary memory that is hard to track.
+//!
+//!   It must also not contain any indexing projections, since those take an arbitrary `Local` as
+//!   the index, and that local might only be initialized shortly before `dest` is used.
+//!
+//! * `src` must be a bare `Local` without any indirections or field projections (FIXME: Is this a
+//!   fundamental restriction or just current impl state?). It can be copied or moved by the
+//!   assignment.
+//!
+//! * The `dest` and `src` locals must never be [*live*][liveness] at the same time. If they are, it
+//!   means that they both hold a (potentially different) value that is needed by a future use of
+//!   the locals. Unifying them would overwrite one of the values.
+//!
+//!   Note that computing liveness of locals that have had their address taken is more difficult:
+//!   Short of doing full escape analysis on the address/pointer/reference, the pass would need to
+//!   assume that any operation that can potentially involve opaque user code (such as function
+//!   calls, destructors, and inline assembly) may access any local that had its address taken
+//!   before that point.
+//!
+//! Here, the first two conditions are simple structural requirements on the `Assign` statements
+//! that can be trivially checked. The liveness requirement however is more difficult and costly to
+//! check.
+//!
+//! ## Previous Work
+//!
+//! A [previous attempt] at implementing an optimization like this turned out to be a significant
+//! regression in compiler performance. Fixing the regressions introduced a lot of undesirable
+//! complexity to the implementation.
+//!
+//! A [subsequent approach] tried to avoid the costly computation by limiting itself to acyclic
+//! CFGs, but still turned out to be far too costly to run due to suboptimal performance within
+//! individual basic blocks, requiring a walk across the entire block for every assignment found
+//! within the block. For the `tuple-stress` benchmark, which has 458745 statements in a single
+//! block, this proved to be far too costly.
+//!
+//! Since the first attempt at this, the compiler has improved dramatically, and new analysis
+//! frameworks have been added that should make this approach viable without requiring a limited
+//! approach that only works for some classes of CFGs:
+//! - rustc now has a powerful dataflow analysis framework that can handle forwards and backwards
+//!   analyses efficiently.
+//! - Layout optimizations for generators have been added to improve code generation for
+//!   async/await, which are very similar in spirit to what this optimization does. Both walk the
+//!   MIR and record conflicting uses of locals in a `BitMatrix`.
+//!
+//! Also, rustc now has a simple NRVO pass (see `nrvo.rs`), which handles a subset of the cases that
+//! this destination propagation pass handles, proving that similar optimizations can be performed
+//! on MIR.
+//!
+//! ## Pre/Post Optimization
+//!
+//! It is recommended to run `SimplifyCfg` and then `SimplifyLocals` some time after this pass, as
+//! it replaces the eliminated assign statements with `nop`s and leaves unused locals behind.
+//!
+//! [liveness]: https://en.wikipedia.org/wiki/Live_variable_analysis
+//! [previous attempt]: https://github.com/rust-lang/rust/pull/47954
+//! [subsequent approach]: https://github.com/rust-lang/rust/pull/71003
+
+</span><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/trait.MirPass.html"><span class="kw">crate</span>::MirPass</a>;
+<span class="kw">use </span><a href="https://docs.rs/itertools/0.8/itertools/trait.Itertools.html">itertools::Itertools</a>;
+<span class="kw">use </span>rustc_data_structures::unify::{<a href="https://docs.rs/ena/latest/ena/unify/type.InPlaceUnificationTable.html">InPlaceUnificationTable</a>, <a href="https://docs.rs/ena/latest/ena/unify/trait.UnifyKey.html">UnifyKey</a>};
+<span class="kw">use </span>rustc_index::{
+    bit_set::{<a href="../../rustc_index/bit_set/struct.BitMatrix.html">BitMatrix</a>, <a href="../../rustc_index/bit_set/struct.BitSet.html">BitSet</a>},
+    <a href="../../rustc_index/vec/struct.IndexVec.html">vec::IndexVec</a>,
+};
+<span class="kw">use </span>rustc_middle::mir::visit::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.MutVisitor.html">MutVisitor</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.PlaceContext.html">PlaceContext</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">Visitor</a>};
+<span class="kw">use </span>rustc_middle::mir::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/fn.dump_mir.html">dump_mir</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/enum.PassWhere.html">PassWhere</a>};
+<span class="kw">use </span>rustc_middle::mir::{
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/traversal/index.html">traversal</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Body.html">Body</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.InlineAsmOperand.html">InlineAsmOperand</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/enum.LocalKind.html">LocalKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.Operand.html">Operand</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/struct.Place.html">Place</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/type.PlaceElem.html">PlaceElem</a>,
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.Rvalue.html">Rvalue</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Statement.html">Statement</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.StatementKind.html">StatementKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/terminator/struct.Terminator.html">Terminator</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind</a>,
+};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">rustc_middle::ty::TyCtxt</a>;
+<span class="kw">use </span>rustc_mir_dataflow::impls::{<a href="../../rustc_mir_dataflow/impls/borrowed_locals/fn.borrowed_locals.html">borrowed_locals</a>, MaybeInitializedLocals, MaybeLiveLocals};
+<span class="kw">use </span><a href="../../rustc_mir_dataflow/framework/trait.Analysis.html">rustc_mir_dataflow::Analysis</a>;
+
+<span class="comment">// Empirical measurements have resulted in some observations:
+// - Running on a body with a single block and 500 locals takes barely any time
+// - Running on a body with ~400 blocks and ~300 relevant locals takes &quot;too long&quot;
+// ...so we just limit both to somewhat reasonable-ish looking values.
+</span><span class="kw">const </span>MAX_LOCALS: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">500</span>;
+<span class="kw">const </span>MAX_BLOCKS: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">250</span>;
+
+<span class="kw">pub struct </span>DestinationPropagation;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; MirPass&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="#117">DestinationPropagation</a> {
+    <span class="kw">fn </span>is_enabled(<span class="kw-2">&amp;</span><span class="self">self</span>, sess: <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">rustc_session::Session</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">//  FIXME(#79191, #82678): This is unsound.
+        //
+        // Only run at mir-opt-level=3 or higher for now (we don&#39;t fix up debuginfo and remove
+        // storage statements at the moment).
+        </span><a href="#120">sess</a>.opts.unstable_opts.unsound_mir_opts &amp;&amp; <a href="#120">sess</a>.mir_opt_level() &gt;= <span class="number">3
+    </span>}
+
+    <span class="kw">fn </span>run_pass(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, body: <span class="kw-2">&amp;mut </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span>def_id = <a href="#128">body</a>.source.def_id();
+
+        <span class="kw">let </span>candidates = <a href="#804">find_candidates</a>(<a href="#128">body</a>);
+        <span class="kw">if </span>candidates.is_empty() {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?}: no dest prop candidates, done&quot;</span>, def_id);
+            <span class="kw">return</span>;
+        }
+
+        <span class="comment">// Collect all locals we care about. We only compute conflicts for these to save time.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>relevant_locals = BitSet::new_empty(<a href="#128">body</a>.local_decls.len());
+        <span class="kw">for </span>CandidateAssignment { dest, src, loc: <span class="kw">_ </span>} <span class="kw">in </span><span class="kw-2">&amp;</span>candidates {
+            relevant_locals.insert(dest.local);
+            relevant_locals.insert(<span class="kw-2">*</span>src);
+        }
+
+        <span class="comment">// This pass unfortunately has `O(l² * s)` performance, where `l` is the number of locals
+        // and `s` is the number of statements and terminators in the function.
+        // To prevent blowing up compile times too much, we bail out when there are too many locals.
+        </span><span class="kw">let </span>relevant = <a href="#138">relevant_locals</a>.count();
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;{:?}: {} locals ({} relevant), {} blocks&quot;</span>,
+            def_id,
+            body.local_decls.len(),
+            relevant,
+            body.basic_blocks.len()
+        );
+        <span class="kw">if </span>relevant &gt; MAX_LOCALS {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.warn.html">warn!</a>(
+                <span class="string">&quot;too many candidate locals in {:?} ({}, max is {}), not optimizing&quot;</span>,
+                def_id, relevant, MAX_LOCALS
+            );
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if </span>body.basic_blocks.len() &gt; MAX_BLOCKS {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.warn.html">warn!</a>(
+                <span class="string">&quot;too many blocks in {:?} ({}, max is {}), not optimizing&quot;</span>,
+                def_id,
+                body.basic_blocks.len(),
+                MAX_BLOCKS
+            );
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>conflicts = Conflicts::build(<a href="#128">tcx</a>, <a href="#128">body</a>, <span class="kw-2">&amp;</span><a href="#138">relevant_locals</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>replacements = Replacements::new(<a href="#128">body</a>.local_decls.len());
+        <span class="kw">for </span>candidate @ CandidateAssignment { dest, src, loc } <span class="kw">in </span>candidates {
+            <span class="comment">// Merge locals that don&#39;t conflict.
+            </span><span class="kw">if </span>!conflicts.can_unify(dest.local, src) {
+                <span class="macro">debug!</span>(<span class="string">&quot;at assignment {:?}, conflict {:?} vs. {:?}&quot;</span>, loc, dest.local, src);
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">if </span>replacements.for_src(candidate.src).is_some() {
+                <span class="macro">debug!</span>(<span class="string">&quot;src {:?} already has replacement&quot;</span>, candidate.src);
+                <span class="kw">continue</span>;
+            }
+
+            <span class="kw">if </span>!tcx.consider_optimizing(|| {
+                <span class="macro">format!</span>(<span class="string">&quot;DestinationPropagation {:?} {:?}&quot;</span>, def_id, candidate)
+            }) {
+                <span class="kw">break</span>;
+            }
+
+            replacements.push(candidate);
+            conflicts.unify(candidate.src, candidate.dest.local);
+        }
+
+        <a href="#174">replacements</a>.<a href="#256">flatten</a>(<a href="#128">tcx</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;replacements {:?}&quot;</span>, replacements.map);
+
+        <a href="#289">Replacer</a> { <a href="#128">tcx</a>, <a href="#174">replacements</a>, place_elem_cache: Vec::new() }.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.MutVisitor.html">visit_body</a>(<a href="#128">body</a>);
+
+        <span class="comment">// FIXME fix debug info
+    </span>}
+}
+
+<span class="attribute">#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+</span><span class="kw">struct </span>UnifyLocal(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>);
+
+<span class="kw">impl </span>From&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt; <span class="kw">for </span><a href="#208">UnifyLocal</a> {
+    <span class="kw">fn </span>from(l: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(<a href="#211">l</a>)
+    }
+}
+
+<span class="kw">impl </span><a href="https://docs.rs/ena/latest/ena/unify/trait.UnifyKey.html">UnifyKey</a> <span class="kw">for </span><a href="#208">UnifyLocal</a> {
+    <span class="kw">type </span>Value = ();
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> {
+        <a class="self" href="#219">self</a>.<span class="number">0</span>.as_u32()
+    }
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>from_index(u: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(Local::from_u32(<a href="#223">u</a>))
+    }
+    <span class="kw">fn </span>tag() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="string">&quot;UnifyLocal&quot;
+    </span>}
+}
+
+<span class="kw">struct </span>Replacements&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Maps locals to their replacement.
+    </span>map: IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <span class="prelude-ty">Option</span>&lt;Place&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;,
+
+    <span class="doccomment">/// Whose locals&#39; live ranges to kill.
+    </span>kill: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Replacements&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>new(locals: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ map: IndexVec::from_elem_n(<span class="prelude-val">None</span>, <a href="#240">locals</a>), kill: BitSet::new_empty(<a href="#240">locals</a>) }
+    }
+
+    <span class="kw">fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, candidate: CandidateAssignment&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;Replacements::push({:?})&quot;</span>, candidate);
+        <span class="kw">let </span>entry = <span class="kw-2">&amp;mut </span><a class="self" href="#244">self</a>.map[<a href="#244">candidate</a>.src];
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(entry.is_none());
+
+        <span class="kw-2">*</span><a href="#246">entry</a> = <span class="prelude-val">Some</span>(<a href="#244">candidate</a>.dest);
+        <a class="self" href="#244">self</a>.kill.insert(<a href="#244">candidate</a>.src);
+        <a class="self" href="#244">self</a>.kill.insert(<a href="#244">candidate</a>.dest.local);
+    }
+
+    <span class="doccomment">/// Applies the stored replacements to all replacements, until no replacements would result in
+    /// locals that need further replacements when applied.
+    </span><span class="kw">fn </span>flatten(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="comment">// Note: This assumes that there are no cycles in the replacements, which is enforced via
+        // `self.unified_locals`. Otherwise this can cause an infinite loop.
+
+        </span><span class="kw">for </span>local <span class="kw">in </span><span class="self">self</span>.map.indices() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(replacement) = <span class="self">self</span>.map[local] {
+                <span class="comment">// Substitute the base local of `replacement` until fixpoint.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>base = replacement.local;
+                <span class="kw">let </span><span class="kw-2">mut </span>reversed_projection_slices = Vec::with_capacity(<span class="number">1</span>);
+                <span class="kw">while let </span><span class="prelude-val">Some</span>(replacement_for_replacement) = <span class="self">self</span>.map[base] {
+                    base = replacement_for_replacement.local;
+                    reversed_projection_slices.push(replacement_for_replacement.projection);
+                }
+
+                <span class="kw">let </span>projection: Vec&lt;<span class="kw">_</span>&gt; = reversed_projection_slices
+                    .iter()
+                    .rev()
+                    .flat_map(|projs| projs.iter())
+                    .chain(replacement.projection.iter())
+                    .collect();
+                <span class="kw">let </span>projection = tcx.intern_place_elems(<span class="kw-2">&amp;</span>projection);
+
+                <span class="comment">// Replace with the final `Place`.
+                </span><span class="self">self</span>.map[local] = <span class="prelude-val">Some</span>(Place { local: base, projection });
+            }
+        }
+    }
+
+    <span class="kw">fn </span>for_src(<span class="kw-2">&amp;</span><span class="self">self</span>, src: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Place&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="self" href="#284">self</a>.map[<a href="#284">src</a>]
+    }
+}
+
+<span class="kw">struct </span>Replacer&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    replacements: Replacements&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    place_elem_cache: Vec&lt;PlaceElem&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; MutVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>Replacer&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#296">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>visit_local(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, context: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.PlaceContext.html">PlaceContext</a>, location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">if </span>context.is_use() &amp;&amp; <span class="self">self</span>.replacements.for_src(<span class="kw-2">*</span>local).is_some() {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(
+                <span class="string">&quot;use of local {:?} should have been replaced by visit_place; context={:?}, loc={:?}&quot;</span>,
+                local,
+                context,
+                location,
+            );
+        }
+    }
+
+    <span class="kw">fn </span>visit_place(<span class="kw-2">&amp;mut </span><span class="self">self</span>, place: <span class="kw-2">&amp;mut </span>Place&lt;<span class="lifetime">&#39;tcx</span>&gt;, context: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.PlaceContext.html">PlaceContext</a>, location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(replacement) = <a class="self" href="#311">self</a>.replacements.<a href="#284">for_src</a>(<a href="#311">place</a>.local) {
+            <span class="comment">// Rebase `place`s projections onto `replacement`&#39;s.
+            </span><a class="self" href="#311">self</a>.place_elem_cache.clear();
+            <a class="self" href="#311">self</a>.place_elem_cache.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#312">replacement</a>.projection.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a href="#311">place</a>.projection));
+            <span class="kw">let </span>projection = <a class="self" href="#311">self</a>.tcx.intern_place_elems(<span class="kw-2">&amp;</span><a class="self" href="#311">self</a>.place_elem_cache);
+            <span class="kw">let </span>new_place = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/struct.Place.html">Place</a> { local: <a href="#312">replacement</a>.local, <a href="#316">projection</a> };
+
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;Replacer: {:?} -&gt; {:?}&quot;</span>, place, new_place);
+            <span class="kw-2">*</span><a href="#311">place</a> = <a href="#317">new_place</a>;
+        }
+
+        <a class="self" href="#311">self</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.MutVisitor.html">super_place</a>(<a href="#311">place</a>, <a href="#311">context</a>, <a href="#311">location</a>);
+    }
+
+    <span class="kw">fn </span>visit_statement(<span class="kw-2">&amp;mut </span><span class="self">self</span>, statement: <span class="kw-2">&amp;mut </span>Statement&lt;<span class="lifetime">&#39;tcx</span>&gt;, location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <a class="self" href="#326">self</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.MutVisitor.html">super_statement</a>(<a href="#326">statement</a>, <a href="#326">location</a>);
+
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#326">statement</a>.kind {
+            <span class="comment">// FIXME: Don&#39;t delete storage statements, merge the live ranges instead
+            </span>StatementKind::StorageDead(local) | StatementKind::StorageLive(local)
+                <span class="kw">if </span><a class="self" href="#326">self</a>.replacements.kill.contains(<span class="kw-2">*</span><a href="#331">local</a>) =&gt;
+            {
+                <a href="#326">statement</a>.make_nop()
+            }
+
+            StatementKind::Assign(<span class="kw">box </span>(dest, rvalue)) =&gt; {
+                <span class="kw">match </span><a href="#337">rvalue</a> {
+                    Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) =&gt; {
+                        <span class="comment">// These might&#39;ve been turned into self-assignments by the replacement
+                        // (this includes the original statement we wanted to eliminate).
+                        </span><span class="kw">if </span>dest == place {
+                            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;{:?} turned into self-assignment, deleting&quot;</span>, location);
+                            <a href="#326">statement</a>.make_nop();
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; {}
+                }
+            }
+
+            <span class="kw">_ </span>=&gt; {}
+        }
+    }
+}
+
+<span class="kw">struct </span>Conflicts&lt;<span class="lifetime">&#39;a</span>&gt; {
+    relevant_locals: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+
+    <span class="doccomment">/// The conflict matrix. It is always symmetric and the adjacency matrix of the corresponding
+    /// conflict graph.
+    </span>matrix: BitMatrix&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+
+    <span class="doccomment">/// Preallocated `BitSet` used by `unify`.
+    </span>unify_cache: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+
+    <span class="doccomment">/// Tracks locals that have been merged together to prevent cycles and propagate conflicts.
+    </span>unified_locals: InPlaceUnificationTable&lt;<a href="#208">UnifyLocal</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Conflicts&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>build&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        relevant_locals: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="comment">// We don&#39;t have to look out for locals that have their address taken, since
+        // `find_candidates` already takes care of that.
+
+        </span><span class="kw">let </span>conflicts = BitMatrix::from_row_n(
+            <span class="kw-2">&amp;</span>BitSet::new_empty(<a href="#373">body</a>.local_decls.len()),
+            <a href="#373">body</a>.local_decls.len(),
+        );
+
+        <span class="kw">let </span><span class="kw-2">mut </span>init = MaybeInitializedLocals
+            .<a href="../../rustc_mir_dataflow/framework/trait.Analysis.html">into_engine</a>(<a href="#372">tcx</a>, <a href="#373">body</a>)
+            .iterate_to_fixpoint()
+            .into_results_cursor(<a href="#373">body</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>live =
+            MaybeLiveLocals.<a href="../../rustc_mir_dataflow/framework/trait.Analysis.html">into_engine</a>(<a href="#372">tcx</a>, <a href="#373">body</a>).iterate_to_fixpoint().into_results_cursor(<a href="#373">body</a>);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>reachable = <span class="prelude-val">None</span>;
+        <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/fn.dump_mir.html">dump_mir</a>(<a href="#372">tcx</a>, <span class="prelude-val">None</span>, <span class="string">&quot;DestinationPropagation-dataflow&quot;</span>, <span class="kw-2">&amp;</span><span class="string">&quot;&quot;</span>, <a href="#373">body</a>, |pass_where, w| {
+            <span class="kw">let </span>reachable = <a href="#391">reachable</a>.get_or_insert_with(|| traversal::reachable_as_bitset(<a href="#373">body</a>));
+
+            <span class="kw">match </span><a href="#392">pass_where</a> {
+                PassWhere::BeforeLocation(loc) <span class="kw">if </span><a href="#393">reachable</a>.contains(<a href="#396">loc</a>.block) =&gt; {
+                    <a href="#384">init</a>.seek_before_primary_effect(<a href="#396">loc</a>);
+                    <a href="#388">live</a>.seek_after_primary_effect(<a href="#396">loc</a>);
+
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // init: {:?}&quot;</span>, init.get())<span class="question-mark">?</span>;
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // live: {:?}&quot;</span>, live.get())<span class="question-mark">?</span>;
+                }
+                PassWhere::AfterTerminator(bb) <span class="kw">if </span><a href="#393">reachable</a>.contains(<a href="#403">bb</a>) =&gt; {
+                    <span class="kw">let </span>loc = <a href="#373">body</a>.terminator_loc(<a href="#403">bb</a>);
+                    <a href="#384">init</a>.seek_after_primary_effect(<a href="#404">loc</a>);
+                    <a href="#388">live</a>.seek_before_primary_effect(<a href="#404">loc</a>);
+
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // init: {:?}&quot;</span>, init.get())<span class="question-mark">?</span>;
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // live: {:?}&quot;</span>, live.get())<span class="question-mark">?</span>;
+                }
+
+                PassWhere::BeforeBlock(bb) <span class="kw">if </span><a href="#393">reachable</a>.contains(<a href="#412">bb</a>) =&gt; {
+                    <a href="#384">init</a>.seek_to_block_start(<a href="#412">bb</a>);
+                    <a href="#388">live</a>.seek_to_block_start(<a href="#412">bb</a>);
+
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;    // init: {:?}&quot;</span>, init.get())<span class="question-mark">?</span>;
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;    // live: {:?}&quot;</span>, live.get())<span class="question-mark">?</span>;
+                }
+
+                PassWhere::BeforeCFG | PassWhere::AfterCFG | PassWhere::AfterLocation(<span class="kw">_</span>) =&gt; {}
+
+                PassWhere::BeforeLocation(<span class="kw">_</span>) | PassWhere::AfterTerminator(<span class="kw">_</span>) =&gt; {
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // init: &lt;unreachable&gt;&quot;</span>)<span class="question-mark">?</span>;
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;        // live: &lt;unreachable&gt;&quot;</span>)<span class="question-mark">?</span>;
+                }
+
+                PassWhere::BeforeBlock(<span class="kw">_</span>) =&gt; {
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;    // init: &lt;unreachable&gt;&quot;</span>)<span class="question-mark">?</span>;
+                    <span class="macro">writeln!</span>(w, <span class="string">&quot;    // live: &lt;unreachable&gt;&quot;</span>)<span class="question-mark">?</span>;
+                }
+            }
+
+            <span class="prelude-val">Ok</span>(())
+        });
+
+        <span class="kw">let </span><span class="kw-2">mut </span>this = <span class="self">Self </span>{
+            <a href="#374">relevant_locals</a>,
+            matrix: <a href="#379">conflicts</a>,
+            unify_cache: BitSet::new_empty(<a href="#373">body</a>.local_decls.len()),
+            unified_locals: {
+                <span class="kw">let </span><span class="kw-2">mut </span>table = InPlaceUnificationTable::new();
+                <span class="comment">// Pre-fill table with all locals (this creates N nodes / &quot;connected&quot; components,
+                // &quot;graph&quot;-ically speaking).
+                </span><span class="kw">for </span>local <span class="kw">in </span><span class="number">0</span>..body.local_decls.len() {
+                    <span class="macro">assert_eq!</span>(table.new_key(()), UnifyLocal(Local::from_usize(local)));
+                }
+                <a href="#441">table</a>
+            },
+        };
+
+        <span class="kw">let </span><span class="kw-2">mut </span>live_and_init_locals = Vec::new();
+
+        <span class="comment">// Visit only reachable basic blocks. The exact order is not important.
+        </span><span class="kw">for </span>(block, data) <span class="kw">in </span>traversal::preorder(body) {
+            <span class="comment">// We need to observe the dataflow state *before* all possible locations (statement or
+            // terminator) in each basic block, and then observe the state *after* the terminator
+            // effect is applied. As long as neither `init` nor `borrowed` has a &quot;before&quot; effect,
+            // we will observe all possible dataflow states.
+
+            // Since liveness is a backwards analysis, we need to walk the results backwards. To do
+            // that, we first collect in the `MaybeInitializedLocals` results in a forwards
+            // traversal.
+
+            </span>live_and_init_locals.resize_with(data.statements.len() + <span class="number">1</span>, || {
+                BitSet::new_empty(body.local_decls.len())
+            });
+
+            <span class="comment">// First, go forwards for `MaybeInitializedLocals` and apply intra-statement/terminator
+            // conflicts.
+            </span><span class="kw">for </span>(i, statement) <span class="kw">in </span>data.statements.iter().enumerate() {
+                this.record_statement_conflicts(statement);
+
+                <span class="kw">let </span>loc = Location { block, statement_index: i };
+                init.seek_before_primary_effect(loc);
+
+                live_and_init_locals[i].clone_from(init.get());
+            }
+
+            this.record_terminator_conflicts(data.terminator());
+            <span class="kw">let </span>term_loc = Location { block, statement_index: data.statements.len() };
+            init.seek_before_primary_effect(term_loc);
+            live_and_init_locals[term_loc.statement_index].clone_from(init.get());
+
+            <span class="comment">// Now, go backwards and union with the liveness results.
+            </span><span class="kw">for </span>statement_index <span class="kw">in </span>(<span class="number">0</span>..=data.statements.len()).rev() {
+                <span class="kw">let </span>loc = Location { block, statement_index };
+                live.seek_after_primary_effect(loc);
+
+                live_and_init_locals[statement_index].intersect(live.get());
+
+                <span class="macro">trace!</span>(<span class="string">&quot;record conflicts at {:?}&quot;</span>, loc);
+
+                this.record_dataflow_conflicts(<span class="kw-2">&amp;mut </span>live_and_init_locals[statement_index]);
+            }
+
+            init.seek_to_block_end(block);
+            live.seek_to_block_end(block);
+            <span class="kw">let </span><span class="kw-2">mut </span>conflicts = init.get().clone();
+            conflicts.intersect(live.get());
+            <span class="macro">trace!</span>(<span class="string">&quot;record conflicts at end of {:?}&quot;</span>, block);
+
+            this.record_dataflow_conflicts(<span class="kw-2">&amp;mut </span>conflicts);
+        }
+
+        <a href="#436">this</a>
+    }
+
+    <span class="kw">fn </span>record_dataflow_conflicts(<span class="kw-2">&amp;mut </span><span class="self">self</span>, new_conflicts: <span class="kw-2">&amp;mut </span>BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;) {
+        <span class="comment">// Remove all locals that are not candidates.
+        </span><a href="#508">new_conflicts</a>.intersect(<a class="self" href="#508">self</a>.relevant_locals);
+
+        <span class="kw">for </span>local <span class="kw">in </span>new_conflicts.iter() {
+            <span class="self">self</span>.matrix.union_row_with(<span class="kw-2">&amp;</span>new_conflicts, local);
+        }
+    }
+
+    <span class="kw">fn </span>record_local_conflict(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, b: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, why: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;conflict {:?} &lt;-&gt; {:?} due to {}&quot;</span>, a, b, why);
+        <a class="self" href="#517">self</a>.matrix.insert(<a href="#517">a</a>, <a href="#517">b</a>);
+        <a class="self" href="#517">self</a>.matrix.insert(<a href="#517">b</a>, <a href="#517">a</a>);
+    }
+
+    <span class="doccomment">/// Records locals that must not overlap during the evaluation of `stmt`. These locals conflict
+    /// and must not be merged.
+    </span><span class="kw">fn </span>record_statement_conflicts(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stmt: <span class="kw-2">&amp;</span>Statement&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#525">stmt</a>.kind {
+            <span class="comment">// While the left and right sides of an assignment must not overlap, we do not mark
+            // conflicts here as that would make this optimization useless. When we optimize, we
+            // eliminate the resulting self-assignments automatically.
+            </span>StatementKind::Assign(<span class="kw">_</span>) =&gt; {}
+
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.StatementKind.html">StatementKind::SetDiscriminant</a> { .. }
+            | StatementKind::Deinit(..)
+            | StatementKind::StorageLive(..)
+            | StatementKind::StorageDead(..)
+            | StatementKind::Retag(..)
+            | StatementKind::FakeRead(..)
+            | StatementKind::AscribeUserType(..)
+            | StatementKind::Coverage(..)
+            | StatementKind::Intrinsic(..)
+            | StatementKind::Nop =&gt; {}
+        }
+    }
+
+    <span class="kw">fn </span>record_terminator_conflicts(<span class="kw-2">&amp;mut </span><span class="self">self</span>, term: <span class="kw-2">&amp;</span>Terminator&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#545">term</a>.kind {
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::DropAndReplace</a> {
+                place: dropped_place,
+                value,
+                target: <span class="kw">_</span>,
+                unwind: <span class="kw">_</span>,
+            } =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(place) = <a href="#549">value</a>.place()
+                    &amp;&amp; !<a href="#553">place</a>.is_indirect()
+                    &amp;&amp; !<a href="#548">dropped_place</a>.is_indirect()
+                {
+                    <a class="self" href="#545">self</a>.<a href="#517">record_local_conflict</a>(
+                        <a href="#553">place</a>.local,
+                        <a href="#548">dropped_place</a>.local,
+                        <span class="string">&quot;DropAndReplace operand overlap&quot;</span>,
+                    );
+                }
+            }
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::Yield</a> { value, resume: <span class="kw">_</span>, resume_arg, drop: <span class="kw">_ </span>} =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(place) = <a href="#564">value</a>.place() {
+                    <span class="kw">if </span>!place.is_indirect() &amp;&amp; !resume_arg.is_indirect() {
+                        <a class="self" href="#545">self</a>.<a href="#517">record_local_conflict</a>(
+                            <a href="#565">place</a>.local,
+                            <a href="#564">resume_arg</a>.local,
+                            <span class="string">&quot;Yield operand overlap&quot;</span>,
+                        );
+                    }
+                }
+            }
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::Call</a> {
+                func,
+                args,
+                destination,
+                target: <span class="kw">_</span>,
+                cleanup: <span class="kw">_</span>,
+                from_hir_call: <span class="kw">_</span>,
+                fn_span: <span class="kw">_</span>,
+            } =&gt; {
+                <span class="comment">// No arguments may overlap with the destination.
+                </span><span class="kw">for </span>arg <span class="kw">in </span>args.iter().chain(<span class="prelude-val">Some</span>(func)) {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(place) = arg.place() {
+                        <span class="kw">if </span>!place.is_indirect() &amp;&amp; !destination.is_indirect() {
+                            <span class="self">self</span>.record_local_conflict(
+                                destination.local,
+                                place.local,
+                                <span class="string">&quot;call dest/arg overlap&quot;</span>,
+                            );
+                        }
+                    }
+                }
+            }
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::InlineAsm</a> {
+                template: <span class="kw">_</span>,
+                operands,
+                options: <span class="kw">_</span>,
+                line_spans: <span class="kw">_</span>,
+                destination: <span class="kw">_</span>,
+                cleanup: <span class="kw">_</span>,
+            } =&gt; {
+                <span class="comment">// The intended semantics here aren&#39;t documented, we just assume that nothing that
+                // could be written to by the assembly may overlap with any other operands.
+                </span><span class="kw">for </span>op <span class="kw">in </span>operands {
+                    <span class="kw">match </span>op {
+                        InlineAsmOperand::Out { reg: <span class="kw">_</span>, late: <span class="kw">_</span>, place: <span class="prelude-val">Some</span>(dest_place) }
+                        | InlineAsmOperand::InOut {
+                            reg: <span class="kw">_</span>,
+                            late: <span class="kw">_</span>,
+                            in_value: <span class="kw">_</span>,
+                            out_place: <span class="prelude-val">Some</span>(dest_place),
+                        } =&gt; {
+                            <span class="comment">// For output place `place`, add all places accessed by the inline asm.
+                            </span><span class="kw">for </span>op <span class="kw">in </span>operands {
+                                <span class="kw">match </span>op {
+                                    InlineAsmOperand::In { reg: <span class="kw">_</span>, value } =&gt; {
+                                        <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = value.place()
+                                            &amp;&amp; !p.is_indirect()
+                                            &amp;&amp; !dest_place.is_indirect()
+                                        {
+                                            <span class="self">self</span>.record_local_conflict(
+                                                p.local,
+                                                dest_place.local,
+                                                <span class="string">&quot;asm! operand overlap&quot;</span>,
+                                            );
+                                        }
+                                    }
+                                    InlineAsmOperand::Out {
+                                        reg: <span class="kw">_</span>,
+                                        late: <span class="kw">_</span>,
+                                        place: <span class="prelude-val">Some</span>(place),
+                                    } =&gt; {
+                                        <span class="kw">if </span>!place.is_indirect() &amp;&amp; !dest_place.is_indirect() {
+                                            <span class="self">self</span>.record_local_conflict(
+                                                place.local,
+                                                dest_place.local,
+                                                <span class="string">&quot;asm! operand overlap&quot;</span>,
+                                            );
+                                        }
+                                    }
+                                    InlineAsmOperand::InOut {
+                                        reg: <span class="kw">_</span>,
+                                        late: <span class="kw">_</span>,
+                                        in_value,
+                                        out_place,
+                                    } =&gt; {
+                                        <span class="kw">if let </span><span class="prelude-val">Some</span>(place) = in_value.place()
+                                            &amp;&amp; !place.is_indirect()
+                                            &amp;&amp; !dest_place.is_indirect()
+                                        {
+                                            <span class="self">self</span>.record_local_conflict(
+                                                place.local,
+                                                dest_place.local,
+                                                <span class="string">&quot;asm! operand overlap&quot;</span>,
+                                            );
+                                        }
+
+                                        <span class="kw">if let </span><span class="prelude-val">Some</span>(place) = out_place
+                                            &amp;&amp; !place.is_indirect()
+                                            &amp;&amp; !dest_place.is_indirect()
+                                        {
+                                            <span class="self">self</span>.record_local_conflict(
+                                                place.local,
+                                                dest_place.local,
+                                                <span class="string">&quot;asm! operand overlap&quot;</span>,
+                                            );
+                                        }
+                                    }
+                                    InlineAsmOperand::Out { reg: <span class="kw">_</span>, late: <span class="kw">_</span>, place: <span class="prelude-val">None </span>}
+                                    | InlineAsmOperand::Const { value: <span class="kw">_ </span>}
+                                    | InlineAsmOperand::SymFn { value: <span class="kw">_ </span>}
+                                    | InlineAsmOperand::SymStatic { def_id: <span class="kw">_ </span>} =&gt; {}
+                                }
+                            }
+                        }
+                        InlineAsmOperand::InOut {
+                            reg: <span class="kw">_</span>,
+                            late: <span class="kw">_</span>,
+                            in_value: <span class="kw">_</span>,
+                            out_place: <span class="prelude-val">None</span>,
+                        }
+                        | InlineAsmOperand::In { reg: <span class="kw">_</span>, value: <span class="kw">_ </span>}
+                        | InlineAsmOperand::Out { reg: <span class="kw">_</span>, late: <span class="kw">_</span>, place: <span class="prelude-val">None </span>}
+                        | InlineAsmOperand::Const { value: <span class="kw">_ </span>}
+                        | InlineAsmOperand::SymFn { value: <span class="kw">_ </span>}
+                        | InlineAsmOperand::SymStatic { def_id: <span class="kw">_ </span>} =&gt; {}
+                    }
+                }
+            }
+
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::Goto</a> { .. }
+            | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::SwitchInt</a> { .. }
+            | TerminatorKind::Resume
+            | TerminatorKind::Abort
+            | TerminatorKind::Return
+            | TerminatorKind::Unreachable
+            | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::Drop</a> { .. }
+            | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::Assert</a> { .. }
+            | TerminatorKind::GeneratorDrop
+            | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::FalseEdge</a> { .. }
+            | <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/syntax/enum.TerminatorKind.html">TerminatorKind::FalseUnwind</a> { .. } =&gt; {}
+        }
+    }
+
+    <span class="doccomment">/// Checks whether `a` and `b` may be merged. Returns `false` if there&#39;s a conflict.
+    </span><span class="kw">fn </span>can_unify(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, b: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// After some locals have been unified, their conflicts are only tracked in the root key,
+        // so look that up.
+        </span><span class="kw">let </span>a = <a class="self" href="#709">self</a>.unified_locals.find(<a href="#709">a</a>).<span class="number">0</span>;
+        <span class="kw">let </span>b = <a class="self" href="#709">self</a>.unified_locals.find(<a href="#709">b</a>).<span class="number">0</span>;
+
+        <span class="kw">if </span>a == b {
+            <span class="comment">// Already merged (part of the same connected component).
+            </span><span class="kw">return </span><span class="bool-val">false</span>;
+        }
+
+        <span class="kw">if </span><span class="self">self</span>.matrix.contains(a, b) {
+            <span class="comment">// Conflict (derived via dataflow, intra-statement conflicts, or inherited from another
+            // local during unification).
+            </span><span class="kw">return </span><span class="bool-val">false</span>;
+        }
+
+        <span class="bool-val">true
+    </span>}
+
+    <span class="doccomment">/// Merges the conflicts of `a` and `b`, so that each one inherits all conflicts of the other.
+    ///
+    /// `can_unify` must have returned `true` for the same locals, or this may panic or lead to
+    /// miscompiles.
+    ///
+    /// This is called when the pass makes the decision to unify `a` and `b` (or parts of `a` and
+    /// `b`) and is needed to ensure that future unification decisions take potentially newly
+    /// introduced conflicts into account.
+    ///
+    /// For an example, assume we have locals `_0`, `_1`, `_2`, and `_3`. There are these conflicts:
+    ///
+    /// * `_0` &lt;-&gt; `_1`
+    /// * `_1` &lt;-&gt; `_2`
+    /// * `_3` &lt;-&gt; `_0`
+    ///
+    /// We then decide to merge `_2` with `_3` since they don&#39;t conflict. Then we decide to merge
+    /// `_2` with `_0`, which also doesn&#39;t have a conflict in the above list. However `_2` is now
+    /// `_3`, which does conflict with `_0`.
+    </span><span class="kw">fn </span>unify(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, b: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;unify({:?}, {:?})&quot;</span>, a, b);
+
+        <span class="comment">// Get the root local of the connected components. The root local stores the conflicts of
+        // all locals in the connected component (and *is stored* as the conflicting local of other
+        // locals).
+        </span><span class="kw">let </span>a = <a class="self" href="#747">self</a>.unified_locals.find(<a href="#747">a</a>).<span class="number">0</span>;
+        <span class="kw">let </span>b = <a class="self" href="#747">self</a>.unified_locals.find(<a href="#747">b</a>).<span class="number">0</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_ne.html">assert_ne!</a>(a, b);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;roots: a={:?}, b={:?}&quot;</span>, a, b);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;{:?} conflicts: {:?}&quot;</span>, a, <span class="self">self</span>.matrix.iter(a).format(<span class="string">&quot;, &quot;</span>));
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;{:?} conflicts: {:?}&quot;</span>, b, <span class="self">self</span>.matrix.iter(b).format(<span class="string">&quot;, &quot;</span>));
+
+        <a class="self" href="#747">self</a>.unified_locals.union(<a href="#753">a</a>, <a href="#754">b</a>);
+
+        <span class="kw">let </span>root = <a class="self" href="#747">self</a>.unified_locals.find(<a href="#753">a</a>).<span class="number">0</span>;
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(root == a || root == b);
+
+        <span class="comment">// Make all locals that conflict with `a` also conflict with `b`, and vice versa.
+        </span><a class="self" href="#747">self</a>.unify_cache.clear();
+        <span class="kw">for </span>conflicts_with_a <span class="kw">in </span><span class="self">self</span>.matrix.iter(a) {
+            <span class="self">self</span>.unify_cache.insert(conflicts_with_a);
+        }
+        <span class="kw">for </span>conflicts_with_b <span class="kw">in </span><span class="self">self</span>.matrix.iter(b) {
+            <span class="self">self</span>.unify_cache.insert(conflicts_with_b);
+        }
+        <span class="kw">for </span>conflicts_with_a_or_b <span class="kw">in </span><span class="self">self</span>.unify_cache.iter() {
+            <span class="comment">// Set both `a` and `b` for this local&#39;s row.
+            </span><span class="self">self</span>.matrix.insert(conflicts_with_a_or_b, a);
+            <span class="self">self</span>.matrix.insert(conflicts_with_a_or_b, b);
+        }
+
+        <span class="comment">// Write the locals `a` conflicts with to `b`&#39;s row.
+        </span><a class="self" href="#747">self</a>.matrix.union_rows(<a href="#753">a</a>, <a href="#754">b</a>);
+        <span class="comment">// Write the locals `b` conflicts with to `a`&#39;s row.
+        </span><a class="self" href="#747">self</a>.matrix.union_rows(<a href="#754">b</a>, <a href="#753">a</a>);
+    }
+}
+
+<span class="doccomment">/// A `dest = {move} src;` statement at `loc`.
+///
+/// We want to consider merging `dest` and `src` due to this assignment.
+</span><span class="attribute">#[derive(Debug, Copy, Clone)]
+</span><span class="kw">struct </span>CandidateAssignment&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Does not contain indirection or indexing (so the only local it contains is the place base).
+    </span>dest: Place&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    src: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>,
+    loc: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>,
+}
+
+<span class="doccomment">/// Scans the MIR for assignments between locals that we might want to consider merging.
+///
+/// This will filter out assignments that do not match the right form (as described in the top-level
+/// comment) and also throw out assignments that involve a local that has its address taken or is
+/// otherwise ineligible (eg. locals used as array indices are ignored because we cannot propagate
+/// arbitrary places into array indices).
+</span><span class="kw">fn </span>find_candidates&lt;<span class="lifetime">&#39;tcx</span>&gt;(body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Vec&lt;CandidateAssignment&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#815">FindAssignments</a> {
+        <a href="#804">body</a>,
+        candidates: Vec::new(),
+        ever_borrowed_locals: <a href="../../rustc_mir_dataflow/impls/borrowed_locals/fn.borrowed_locals.html">borrowed_locals</a>(<a href="#804">body</a>),
+        locals_used_as_array_index: <a href="#893">locals_used_as_array_index</a>(<a href="#804">body</a>),
+    };
+    <a href="#805">visitor</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">visit_body</a>(<a href="#804">body</a>);
+    <a href="#805">visitor</a>.candidates
+}
+
+<span class="kw">struct </span>FindAssignments&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    candidates: Vec&lt;CandidateAssignment&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ever_borrowed_locals: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+    locals_used_as_array_index: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>FindAssignments&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_statement(<span class="kw-2">&amp;mut </span><span class="self">self</span>, statement: <span class="kw-2">&amp;</span>Statement&lt;<span class="lifetime">&#39;tcx</span>&gt;, location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">if let </span>StatementKind::Assign(<span class="kw">box </span>(
+            dest,
+            Rvalue::Use(Operand::Copy(src) | Operand::Move(src)),
+        )) = <span class="kw-2">&amp;</span><a href="#823">statement</a>.kind
+        {
+            <span class="comment">// `dest` must not have pointer indirection.
+            </span><span class="kw">if </span>dest.is_indirect() {
+                <span class="kw">return</span>;
+            }
+
+            <span class="comment">// `src` must be a plain local.
+            </span><span class="kw">if </span>!src.projection.is_empty() {
+                <span class="kw">return</span>;
+            }
+
+            <span class="comment">// Since we want to replace `src` with `dest`, `src` must not be required.
+            </span><span class="kw">if </span>is_local_required(src.local, <span class="self">self</span>.body) {
+                <span class="kw">return</span>;
+            }
+
+            <span class="comment">// Can&#39;t optimize if either local ever has their address taken. This optimization does
+            // liveness analysis only based on assignments, and a local can be live even if its
+            // never assigned to again, because a reference to it might be live.
+            // FIXME: This can be smarter and take `StorageDead` into  account (which invalidates
+            // borrows).
+            </span><span class="kw">if </span><span class="self">self</span>.ever_borrowed_locals.contains(dest.local)
+                || <span class="self">self</span>.ever_borrowed_locals.contains(src.local)
+            {
+                <span class="kw">return</span>;
+            }
+
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_ne.html">assert_ne!</a>(dest.local, src.local, <span class="string">&quot;self-assignments are UB&quot;</span>);
+
+            <span class="comment">// We can&#39;t replace locals occurring in `PlaceElem::Index` for now.
+            </span><span class="kw">if </span><span class="self">self</span>.locals_used_as_array_index.contains(src.local) {
+                <span class="kw">return</span>;
+            }
+
+            <span class="kw">for </span>elem <span class="kw">in </span>dest.projection {
+                <span class="kw">if let </span>PlaceElem::Index(<span class="kw">_</span>) = elem {
+                    <span class="comment">// `dest` contains an indexing projection.
+                    </span><span class="kw">return</span>;
+                }
+            }
+
+            <a class="self" href="#823">self</a>.candidates.push(<a href="#791">CandidateAssignment</a> {
+                dest: <span class="kw-2">*</span><a href="#825">dest</a>,
+                src: <a href="#826">src</a>.local,
+                loc: <a href="#823">location</a>,
+            });
+        }
+    }
+}
+
+<span class="doccomment">/// Some locals are part of the function&#39;s interface and can not be removed.
+///
+/// Note that these locals *can* still be merged with non-required locals by removing that other
+/// local.
+</span><span class="kw">fn </span>is_local_required(local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">match </span><a href="#882">body</a>.local_kind(<a href="#882">local</a>) {
+        LocalKind::Arg | LocalKind::ReturnPointer =&gt; <span class="bool-val">true</span>,
+        LocalKind::Var | LocalKind::Temp =&gt; <span class="bool-val">false</span>,
+    }
+}
+
+<span class="doccomment">/// `PlaceElem::Index` only stores a `Local`, so we can&#39;t replace that with a full `Place`.
+///
+/// Collect locals used as indices so we don&#39;t generate candidates that are impossible to apply
+/// later.
+</span><span class="kw">fn </span>locals_used_as_array_index(body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>visitor = <a href="#899">IndexCollector</a> { locals: BitSet::new_empty(<a href="#893">body</a>.local_decls.len()) };
+    <a href="#894">visitor</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">visit_body</a>(<a href="#893">body</a>);
+    <a href="#894">visitor</a>.locals
+}
+
+<span class="kw">struct </span>IndexCollector {
+    locals: BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="#899">IndexCollector</a> {
+    <span class="kw">fn </span>visit_projection_elem(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>,
+        proj_base: <span class="kw-2">&amp;</span>[PlaceElem&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+        elem: PlaceElem&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        context: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.PlaceContext.html">PlaceContext</a>,
+        location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>,
+    ) {
+        <span class="kw">if let </span>PlaceElem::Index(i) = <a href="#908">elem</a> {
+            <a class="self" href="#905">self</a>.locals.insert(<a href="#912">i</a>);
+        }
+        <a class="self" href="#905">self</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">super_projection_elem</a>(<a href="#906">local</a>, <a href="#907">proj_base</a>, <a href="#908">elem</a>, <a href="#909">context</a>, <a href="#910">location</a>);
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

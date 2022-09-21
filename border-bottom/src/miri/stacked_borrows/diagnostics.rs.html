@@ -1,0 +1,1016 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/stacked_borrows/diagnostics.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>diagnostics.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../miri/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+</pre><pre class="rust"><code><span class="kw">use </span>smallvec::SmallVec;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">std::fmt</a>;
+
+<span class="kw">use </span>rustc_middle::mir::interpret::{<a href="../../../miri/fn.alloc_range.html">alloc_range</a>, AllocId, <a href="../../../miri/struct.AllocRange.html">AllocRange</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>};
+<span class="kw">use </span><a href="../../../rustc_target/abi/struct.Size.html">rustc_target::abi::Size</a>;
+
+<span class="kw">use </span><a href="../helpers.rs.html#897"><span class="kw">crate</span>::helpers::CurrentSpan</a>;
+<span class="kw">use </span><span class="kw">crate</span>::stacked_borrows::{<a href="mod.rs.html#214-218">err_sb_ub</a>, <a href="mod.rs.html#115">AccessKind</a>, <a href="mod.rs.html#87">GlobalStateInner</a>, <a href="item.rs.html#68">Permission</a>};
+<span class="kw">use crate</span>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="../../../miri/enum.InterpError.html">rustc_middle::mir::interpret::InterpError</a>;
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>AllocHistory {
+    id: <a href="../../../miri/struct.AllocId.html">AllocId</a>,
+    base: (<a href="item.rs.html#7">Item</a>, <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    creations: smallvec::SmallVec&lt;[<a href="#24">Creation</a>; <span class="number">1</span>]&gt;,
+    invalidations: smallvec::SmallVec&lt;[<a href="#54">Invalidation</a>; <span class="number">1</span>]&gt;,
+    protectors: smallvec::SmallVec&lt;[<a href="#94">Protection</a>; <span class="number">1</span>]&gt;,
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>Creation {
+    retag: <a href="#201">RetagOp</a>,
+    span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+}
+
+<span class="kw">impl </span><a href="#24">Creation</a> {
+    <span class="kw">fn </span>generate_diagnostic(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>) {
+        <span class="kw">let </span>tag = <a class="self" href="#30">self</a>.retag.new_tag;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(perm) = <a class="self" href="#30">self</a>.retag.permission {
+            (
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;{tag:?} was created by a {:?} retag at offsets {:?}&quot;</span>,
+                    perm, <span class="self">self</span>.retag.range,
+                ),
+                <a class="self" href="#30">self</a>.span.data(),
+            )
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.retag.range.size == Size::ZERO);
+            (
+                <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                    <span class="string">&quot;{tag:?} would have been created here, but this is a zero-size retag ({:?}) so the tag in question does not exist anywhere&quot;</span>,
+                    <span class="self">self</span>.retag.range,
+                ),
+                <a class="self" href="#30">self</a>.span.data(),
+            )
+        }
+    }
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>Invalidation {
+    tag: <a href="mod.rs.html#39">SbTag</a>,
+    range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+    span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    cause: <a href="#62">InvalidationCause</a>,
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">enum </span>InvalidationCause {
+    Access(<a href="mod.rs.html#115">AccessKind</a>),
+    Retag(<a href="item.rs.html#68">Permission</a>, <a href="#210">RetagCause</a>),
+}
+
+<span class="kw">impl </span><a href="#54">Invalidation</a> {
+    <span class="kw">fn </span>generate_diagnostic(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>) {
+        (
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;{:?} was later invalidated at offsets {:?} by a {}&quot;</span>,
+                <span class="self">self</span>.tag, <span class="self">self</span>.range, <span class="self">self</span>.cause
+            ),
+            <a class="self" href="#68">self</a>.span.data(),
+        )
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span><a href="#62">InvalidationCause</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">match </span><span class="self"><a href="#80">self</a> </span>{
+            <a href="#63">InvalidationCause::Access</a>(kind) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#80">f</a>, <span class="string">&quot;{}&quot;</span>, kind),
+            <a href="#64">InvalidationCause::Retag</a>(perm, kind) =&gt;
+                <span class="kw">if </span><span class="kw-2">*</span>kind == RetagCause::FnEntry {
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#80">f</a>, <span class="string">&quot;{:?} FnEntry retag&quot;</span>, perm)
+                } <span class="kw">else </span>{
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#80">f</a>, <span class="string">&quot;{:?} retag&quot;</span>, perm)
+                },
+        }
+    }
+}
+
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>Protection {
+    tag: <a href="mod.rs.html#39">SbTag</a>,
+    span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+}
+
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub struct </span>TagHistory {
+    <span class="kw">pub </span>created: (<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>),
+    <span class="kw">pub </span>invalidated: <span class="prelude-ty">Option</span>&lt;(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>)&gt;,
+    <span class="kw">pub </span>protected: <span class="prelude-ty">Option</span>&lt;(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="../../../rustc_span/struct.SpanData.html">SpanData</a>)&gt;,
+}
+
+<span class="kw">pub struct </span>DiagnosticCxBuilder&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    operation: <a href="#194">Operation</a>,
+    <span class="comment">// &#39;span cannot be merged with any other lifetime since they appear invariantly, under the
+    // mutable ref.
+    </span>current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">pub struct </span>DiagnosticCx&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    operation: <a href="#194">Operation</a>,
+    <span class="comment">// &#39;span and &#39;history cannot be merged, since when we call `unbuild` we need
+    // to return the exact &#39;span that was used when calling `build`.
+    </span>current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    history: <span class="kw-2">&amp;</span><span class="lifetime">&#39;history </span><span class="kw-2">mut </span><a href="#15">AllocHistory</a>,
+    offset: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; DiagnosticCxBuilder&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>build&lt;<span class="lifetime">&#39;history</span>&gt;(
+        <span class="self">self</span>,
+        history: <span class="kw-2">&amp;</span><span class="lifetime">&#39;history </span><span class="kw-2">mut </span><a href="#15">AllocHistory</a>,
+        offset: <a href="../../../rustc_target/abi/struct.Size.html">Size</a>,
+    ) -&gt; DiagnosticCx&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#114">DiagnosticCx</a> {
+            operation: <a class="self" href="#126">self</a>.operation,
+            current_span: <a class="self" href="#126">self</a>.current_span,
+            threads: <a class="self" href="#126">self</a>.threads,
+            <a href="#127">history</a>,
+            <a href="#128">offset</a>,
+        }
+    }
+
+    <span class="kw">pub fn </span>retag(
+        current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        cause: <a href="#210">RetagCause</a>,
+        new_tag: <a href="mod.rs.html#39">SbTag</a>,
+        orig_tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+        range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>operation =
+            <a href="#195">Operation::Retag</a>(<a href="#201">RetagOp</a> { <a href="#142">cause</a>, <a href="#143">new_tag</a>, <a href="#144">orig_tag</a>, <a href="#145">range</a>, permission: <span class="prelude-val">None </span>});
+
+        <a href="#106">DiagnosticCxBuilder</a> { <a href="#140">current_span</a>, <a href="#141">threads</a>, <a href="#147">operation</a> }
+    }
+
+    <span class="kw">pub fn </span>read(
+        current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+        range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>operation = <a href="#196">Operation::Access</a>(<a href="#218">AccessOp</a> { kind: <a href="mod.rs.html#116">AccessKind::Read</a>, <a href="#156">tag</a>, <a href="#157">range</a> });
+        <a href="#106">DiagnosticCxBuilder</a> { <a href="#154">current_span</a>, <a href="#155">threads</a>, <a href="#159">operation</a> }
+    }
+
+    <span class="kw">pub fn </span>write(
+        current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+        range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>operation = <a href="#196">Operation::Access</a>(<a href="#218">AccessOp</a> { kind: <a href="mod.rs.html#117">AccessKind::Write</a>, <a href="#166">tag</a>, <a href="#167">range</a> });
+        <a href="#106">DiagnosticCxBuilder</a> { <a href="#164">current_span</a>, <a href="#165">threads</a>, <a href="#169">operation</a> }
+    }
+
+    <span class="kw">pub fn </span>dealloc(
+        current_span: <span class="kw-2">&amp;</span><span class="lifetime">&#39;span </span><span class="kw-2">mut </span>CurrentSpan&lt;<span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        threads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;ecx </span>ThreadManager&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>operation = <a href="#197">Operation::Dealloc</a>(<a href="#225">DeallocOp</a> { <a href="#176">tag</a> });
+        <a href="#106">DiagnosticCxBuilder</a> { <a href="#174">current_span</a>, <a href="#175">threads</a>, <a href="#178">operation</a> }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; DiagnosticCx&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>unbuild(<span class="self">self</span>) -&gt; DiagnosticCxBuilder&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#106">DiagnosticCxBuilder</a> {
+            operation: <a class="self" href="#184">self</a>.operation,
+            current_span: <a class="self" href="#184">self</a>.current_span,
+            threads: <a class="self" href="#184">self</a>.threads,
+        }
+    }
+}
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">enum </span>Operation {
+    Retag(<a href="#201">RetagOp</a>),
+    Access(<a href="#218">AccessOp</a>),
+    Dealloc(<a href="#225">DeallocOp</a>),
+}
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">struct </span>RetagOp {
+    cause: <a href="#210">RetagCause</a>,
+    new_tag: <a href="mod.rs.html#39">SbTag</a>,
+    orig_tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+    range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+    permission: <span class="prelude-ty">Option</span>&lt;<a href="item.rs.html#68">Permission</a>&gt;,
+}
+
+<span class="attribute">#[derive(Debug, Clone, Copy, PartialEq)]
+</span><span class="kw">pub enum </span>RetagCause {
+    Normal,
+    FnReturn,
+    FnEntry,
+    TwoPhase,
+}
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">struct </span>AccessOp {
+    kind: <a href="mod.rs.html#115">AccessKind</a>,
+    tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+    range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+}
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">struct </span>DeallocOp {
+    tag: <a href="../machine.rs.html#159">ProvenanceExtra</a>,
+}
+
+<span class="kw">impl </span><a href="#15">AllocHistory</a> {
+    <span class="kw">pub fn </span>new(id: <a href="../../../miri/struct.AllocId.html">AllocId</a>, item: <a href="item.rs.html#7">Item</a>, current_span: <span class="kw-2">&amp;mut </span>CurrentSpan&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#230">id</a>,
+            base: (<a href="#230">item</a>, <a href="#230">current_span</a>.<a href="../helpers.rs.html#906">get</a>()),
+            creations: SmallVec::new(),
+            invalidations: SmallVec::new(),
+            protectors: SmallVec::new(),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; DiagnosticCx&lt;<span class="lifetime">&#39;span</span>, <span class="lifetime">&#39;history</span>, <span class="lifetime">&#39;ecx</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>start_grant(<span class="kw-2">&amp;mut </span><span class="self">self</span>, perm: <a href="item.rs.html#68">Permission</a>) {
+        <span class="kw">let </span><a href="#195">Operation::Retag</a>(op) = <span class="kw-2">&amp;mut </span><a class="self" href="#242">self</a>.operation <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;start_grant must only be called during a retag, this is: {:?}&quot;</span>, <span class="self">self</span>.operation)
+        };
+        <a href="#243">op</a>.permission = <span class="prelude-val">Some</span>(<a href="#242">perm</a>);
+
+        <span class="kw">let </span>last_creation = <span class="kw-2">&amp;mut </span><a class="self" href="#242">self</a>.history.creations.last_mut().unwrap();
+        <span class="kw">match </span><a href="#248">last_creation</a>.retag.permission {
+            <span class="prelude-val">None </span>=&gt; {
+                <a href="#248">last_creation</a>.retag.permission = <span class="prelude-val">Some</span>(<a href="#242">perm</a>);
+            }
+            <span class="prelude-val">Some</span>(previous) =&gt;
+                <span class="kw">if </span>previous != perm {
+                    <span class="comment">// &#39;Split up&#39; the creation event.
+                    </span><span class="kw">let </span>previous_range = <a href="#248">last_creation</a>.retag.range;
+                    <a href="#248">last_creation</a>.retag.range = <a href="../../../miri/fn.alloc_range.html">alloc_range</a>(<a href="#256">previous_range</a>.start, <a class="self" href="#242">self</a>.offset);
+                    <span class="kw">let </span><span class="kw-2">mut </span>new_event = <a href="#248">last_creation</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                    <a href="#258">new_event</a>.retag.range = <a href="../../../miri/fn.alloc_range.html">alloc_range</a>(<a class="self" href="#242">self</a>.offset, <a href="#256">previous_range</a>.end());
+                    <a href="#258">new_event</a>.retag.permission = <span class="prelude-val">Some</span>(<a href="#242">perm</a>);
+                    <a class="self" href="#242">self</a>.history.creations.push(<a href="#258">new_event</a>);
+                },
+        }
+    }
+
+    <span class="kw">pub fn </span>log_creation(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">let </span><a href="#195">Operation::Retag</a>(op) = <span class="kw-2">&amp;</span><a class="self" href="#266">self</a>.operation <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;log_creation must only be called during a retag&quot;</span>)
+        };
+        <a class="self" href="#266">self</a>.history.creations.push(<a href="#24">Creation</a> { retag: <a href="#267">op</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), span: <a class="self" href="#266">self</a>.current_span.<a href="../helpers.rs.html#906">get</a>() });
+    }
+
+    <span class="kw">pub fn </span>log_invalidation(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tag: <a href="mod.rs.html#39">SbTag</a>) {
+        <span class="kw">let </span><span class="kw-2">mut </span>span = <a class="self" href="#273">self</a>.current_span.<a href="../helpers.rs.html#906">get</a>();
+        <span class="kw">let </span>(range, cause) = <span class="kw">match </span><span class="kw-2">&amp;</span><a class="self" href="#273">self</a>.operation {
+            <a href="#195">Operation::Retag</a>(<a href="#201">RetagOp</a> { cause, range, permission, .. }) =&gt; {
+                <span class="kw">if </span><span class="kw-2">*</span>cause == RetagCause::FnEntry {
+                    <a href="#274">span</a> = <a class="self" href="#273">self</a>.current_span.<a href="../helpers.rs.html#914">get_parent</a>();
+                }
+                (<span class="kw-2">*</span><a href="#276">range</a>, <a href="#64">InvalidationCause::Retag</a>(<a href="#276">permission</a>.unwrap(), <span class="kw-2">*</span><a href="#276">cause</a>))
+            }
+            <a href="#196">Operation::Access</a>(<a href="#218">AccessOp</a> { kind, range, .. }) =&gt;
+                (<span class="kw-2">*</span><a href="#282">range</a>, <a href="#63">InvalidationCause::Access</a>(<span class="kw-2">*</span><a href="#282">kind</a>)),
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;Tags can only be invalidated during a retag or access&quot;</span>),
+        };
+        <a class="self" href="#273">self</a>.history.invalidations.push(<a href="#54">Invalidation</a> { <a href="#273">tag</a>, <a href="#275">range</a>, <a href="#274">span</a>, <a href="#275">cause</a> });
+    }
+
+    <span class="kw">pub fn </span>log_protector(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">let </span><a href="#195">Operation::Retag</a>(op) = <span class="kw-2">&amp;</span><a class="self" href="#289">self</a>.operation <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;Protectors can only be created during a retag&quot;</span>)
+        };
+        <a class="self" href="#289">self</a>.history.protectors.push(<a href="#94">Protection</a> { tag: <a href="#290">op</a>.new_tag, span: <a class="self" href="#289">self</a>.current_span.<a href="../helpers.rs.html#906">get</a>() });
+    }
+
+    <span class="kw">pub fn </span>get_logs_relevant_to(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tag: <a href="mod.rs.html#39">SbTag</a>,
+        protector_tag: <span class="prelude-ty">Option</span>&lt;<a href="mod.rs.html#39">SbTag</a>&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#100">TagHistory</a>&gt; {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(created) = <a class="self" href="#297">self</a>.history
+            .creations
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find_map</a>(|event| {
+                <span class="comment">// First, look for a Creation event where the tag and the offset matches. This
+                // ensrues that we pick the right Creation event when a retag isn&#39;t uniform due to
+                // Freeze.
+                </span><span class="kw">let </span>range = <a href="#305">event</a>.retag.range;
+                <span class="kw">if </span>event.retag.new_tag == tag
+                    &amp;&amp; <span class="self">self</span>.offset &gt;= range.start
+                    &amp;&amp; <span class="self">self</span>.offset &lt; (range.start + range.size)
+                {
+                    <span class="prelude-val">Some</span>(<a href="#305">event</a>.<a href="#30">generate_diagnostic</a>())
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            })
+            .or_else(|| {
+                <span class="comment">// If we didn&#39;t find anything with a matching offset, just return the event where
+                // the tag was created. This branch is hit when we use a tag at an offset that
+                // doesn&#39;t have the tag.
+                </span><a class="self" href="#297">self</a>.history.creations.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find_map</a>(|event| {
+                    <span class="kw">if </span>event.retag.new_tag == tag {
+                        <span class="prelude-val">Some</span>(<a href="#323">event</a>.<a href="#30">generate_diagnostic</a>())
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">None
+                    </span>}
+                })
+            }).or_else(|| {
+                <span class="comment">// If we didn&#39;t find a retag that created this tag, it might be the base tag of
+                // this allocation.
+                </span><span class="kw">if </span><span class="self">self</span>.history.base.<span class="number">0</span>.tag() == tag {
+                    <span class="prelude-val">Some</span>((
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{:?} was created here, as the base tag for {:?}&quot;</span>, tag, <span class="self">self</span>.history.id),
+                        <a class="self" href="#297">self</a>.history.base.<span class="number">1</span>.data()
+                    ))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            }) <span class="kw">else </span>{
+                <span class="comment">// But if we don&#39;t have a creation event, this is related to a wildcard, and there
+                // is really nothing we can do to help.
+                </span><span class="kw">return </span><span class="prelude-val">None</span>;
+            };
+
+        <span class="kw">let </span>invalidated = <a class="self" href="#297">self</a>.history.invalidations.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find_map</a>(|event| {
+            <span class="kw">if </span>event.tag == tag { <span class="prelude-val">Some</span>(<a href="#347">event</a>.<a href="#68">generate_diagnostic</a>()) } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+        });
+
+        <span class="kw">let </span>protected = <a href="#299">protector_tag</a>
+            .and_then(|protector| {
+                <a class="self" href="#297">self</a>.history.protectors.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|protection| <a href="#353">protection</a>.tag == <a href="#352">protector</a>)
+            })
+            .map(|protection| {
+                <span class="kw">let </span>protected_tag = <a href="#355">protection</a>.tag;
+                (<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{protected_tag:?} is this argument&quot;</span>), <a href="#355">protection</a>.span.data())
+            });
+
+        <span class="prelude-val">Some</span>(<a href="#100">TagHistory</a> { <a href="#301">created</a>, <a href="#347">invalidated</a>, <a href="#351">protected</a> })
+    }
+
+    <span class="doccomment">/// Report a descriptive error when `new` could not be granted from `derived_from`.
+    </span><span class="attribute">#[inline(never)] </span><span class="comment">// This is only called on fatal code paths
+    </span><span class="kw">pub fn </span>grant_error(<span class="kw-2">&amp;</span><span class="self">self</span>, perm: <a href="item.rs.html#68">Permission</a>, stack: <span class="kw-2">&amp;</span><a href="stack.rs.html#19">Stack</a>) -&gt; InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span><a href="#195">Operation::Retag</a>(op) = <span class="kw-2">&amp;</span><a class="self" href="#365">self</a>.operation <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;grant_error should only be called during a retag&quot;</span>)
+        };
+        <span class="kw">let </span>action = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+            <span class="string">&quot;trying to retag from {:?} for {:?} permission at {:?}[{:#x}]&quot;</span>,
+            op.orig_tag,
+            perm,
+            <span class="self">self</span>.history.id,
+            <span class="self">self</span>.offset.bytes(),
+        );
+        <a href="mod.rs.html#214-218">err_sb_ub</a>(
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}{}&quot;</span>, action, error_cause(stack, op.orig_tag)),
+            <span class="prelude-val">Some</span>(<a href="#478">operation_summary</a>(<span class="kw-2">&amp;</span><a href="#366">op</a>.cause.<a href="#498">summary</a>(), <a class="self" href="#365">self</a>.history.id, <a href="#366">op</a>.range)),
+            <a href="#366">op</a>.orig_tag.<a href="../machine.rs.html#235">and_then</a>(|orig_tag| <a class="self" href="#365">self</a>.<a href="#296-300">get_logs_relevant_to</a>(<a href="#379">orig_tag</a>, <span class="prelude-val">None</span>)),
+        )
+    }
+
+    <span class="doccomment">/// Report a descriptive error when `access` is not permitted based on `tag`.
+    </span><span class="attribute">#[inline(never)] </span><span class="comment">// This is only called on fatal code paths
+    </span><span class="kw">pub fn </span>access_error(<span class="kw-2">&amp;</span><span class="self">self</span>, stack: <span class="kw-2">&amp;</span><a href="stack.rs.html#19">Stack</a>) -&gt; InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span><a href="#196">Operation::Access</a>(op) = <span class="kw-2">&amp;</span><a class="self" href="#385">self</a>.operation  <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;access_error should only be called during an access&quot;</span>)
+        };
+        <span class="kw">let </span>action = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+            <span class="string">&quot;attempting a {access} using {tag:?} at {alloc_id:?}[{offset:#x}]&quot;</span>,
+            access = op.kind,
+            tag = op.tag,
+            alloc_id = <span class="self">self</span>.history.id,
+            offset = <span class="self">self</span>.offset.bytes(),
+        );
+        <a href="mod.rs.html#214-218">err_sb_ub</a>(
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;{}{}&quot;</span>, action, error_cause(stack, op.tag)),
+            <span class="prelude-val">Some</span>(<a href="#478">operation_summary</a>(<span class="string">&quot;an access&quot;</span>, <a class="self" href="#385">self</a>.history.id, <a href="#386">op</a>.range)),
+            <a href="#386">op</a>.tag.<a href="../machine.rs.html#235">and_then</a>(|tag| <a class="self" href="#385">self</a>.<a href="#296-300">get_logs_relevant_to</a>(<a href="#399">tag</a>, <span class="prelude-val">None</span>)),
+        )
+    }
+
+    <span class="attribute">#[inline(never)] </span><span class="comment">// This is only called on fatal code paths
+    </span><span class="kw">pub fn </span>protector_error(<span class="kw-2">&amp;</span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="item.rs.html#7">Item</a>) -&gt; InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>call_id = <span class="self"><a href="#404">self</a>
+            </span>.threads
+            .<a href="../concurrency/thread.rs.html#292-294">all_stacks</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flatten</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|frame| {
+                <a href="#409">frame</a>.extra.stacked_borrows.as_ref().expect(<span class="string">&quot;we should have Stacked Borrows data&quot;</span>)
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|frame| <a href="#412">frame</a>.protected_tags.contains(<span class="kw-2">&amp;</span><a href="#404">item</a>.<a href="item.rs.html#37">tag</a>()))
+            .map(|frame| <a href="#413">frame</a>.call_id)
+            .unwrap(); <span class="comment">// FIXME: Surely we should find something, but a panic seems wrong here?
+        </span><span class="kw">match </span><a class="self" href="#404">self</a>.operation {
+            <a href="#197">Operation::Dealloc</a>(<span class="kw">_</span>) =&gt;
+                <a href="mod.rs.html#214-218">err_sb_ub</a>(
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                        <span class="string">&quot;deallocating while item {:?} is protected by call {:?}&quot;</span>,
+                        item, call_id
+                    ),
+                    <span class="prelude-val">None</span>,
+                    <span class="prelude-val">None</span>,
+                ),
+            <a href="#195">Operation::Retag</a>(<a href="#201">RetagOp</a> { orig_tag: tag, .. })
+            | <a href="#196">Operation::Access</a>(<a href="#218">AccessOp</a> { tag, .. }) =&gt;
+                <a href="mod.rs.html#214-218">err_sb_ub</a>(
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                        <span class="string">&quot;not granting access to tag {:?} because that would remove {:?} which is protected because it is an argument of call {:?}&quot;</span>,
+                        tag, item, call_id
+                    ),
+                    <span class="prelude-val">None</span>,
+                    <a href="#425">tag</a>.<a href="../machine.rs.html#235">and_then</a>(|tag| <a class="self" href="#404">self</a>.<a href="#296-300">get_logs_relevant_to</a>(<a href="#433">tag</a>, <span class="prelude-val">Some</span>(<a href="#404">item</a>.<a href="item.rs.html#37">tag</a>()))),
+                ),
+        }
+    }
+
+    <span class="attribute">#[inline(never)] </span><span class="comment">// This is only called on fatal code paths
+    </span><span class="kw">pub fn </span>dealloc_error(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span><a href="#197">Operation::Dealloc</a>(op) = <span class="kw-2">&amp;</span><a class="self" href="#439">self</a>.operation <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(<span class="string">&quot;dealloc_error should only be called during a deallocation&quot;</span>)
+        };
+        <a href="mod.rs.html#214-218">err_sb_ub</a>(
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                <span class="string">&quot;no item granting write access for deallocation to tag {:?} at {:?} found in borrow stack&quot;</span>,
+                op.tag, <span class="self">self</span>.history.id,
+            ),
+            <span class="prelude-val">None</span>,
+            <a href="#440">op</a>.tag.<a href="../machine.rs.html#235">and_then</a>(|tag| <a class="self" href="#439">self</a>.<a href="#296-300">get_logs_relevant_to</a>(<a href="#449">tag</a>, <span class="prelude-val">None</span>)),
+        )
+    }
+
+    <span class="attribute">#[inline(never)]
+    </span><span class="kw">pub fn </span>check_tracked_tag_popped(<span class="kw-2">&amp;</span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="item.rs.html#7">Item</a>, global: <span class="kw-2">&amp;</span><a href="mod.rs.html#87">GlobalStateInner</a>) {
+        <span class="kw">if </span>!global.tracked_pointer_tags.contains(<span class="kw-2">&amp;</span>item.tag()) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">let </span>summary = <span class="kw">match </span><a class="self" href="#454">self</a>.operation {
+            <a href="#197">Operation::Dealloc</a>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            <a href="#196">Operation::Access</a>(<a href="#218">AccessOp</a> { kind, tag, .. }) =&gt; <span class="prelude-val">Some</span>((<a href="#460">tag</a>, <a href="#460">kind</a>)),
+            <a href="#195">Operation::Retag</a>(<a href="#201">RetagOp</a> { orig_tag, permission, .. }) =&gt; {
+                <span class="kw">let </span>kind = <span class="kw">match </span><a href="#461">permission</a>
+                    .expect(<span class="string">&quot;start_grant should set the current permission before popping a tag&quot;</span>)
+                {
+                    <a href="item.rs.html#74">Permission::SharedReadOnly</a> =&gt; <a href="mod.rs.html#116">AccessKind::Read</a>,
+                    <a href="item.rs.html#70">Permission::Unique</a> =&gt; <a href="mod.rs.html#117">AccessKind::Write</a>,
+                    <a href="item.rs.html#72">Permission::SharedReadWrite</a> | <a href="item.rs.html#77">Permission::Disabled</a> =&gt; {
+                        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;Only SharedReadOnly and Unique retags can pop tags&quot;</span>);
+                    }
+                };
+                <span class="prelude-val">Some</span>((<a href="#461">orig_tag</a>, <a href="#462">kind</a>))
+            }
+        };
+        <a href="../diagnostics.rs.html#378">register_diagnostic</a>(<a href="../diagnostics.rs.html#68">NonHaltingDiagnostic::PoppedPointerTag</a>(<span class="kw-2">*</span><a href="#454">item</a>, <a href="#458">summary</a>));
+    }
+}
+
+<span class="kw">fn </span>operation_summary(operation: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, alloc_id: <a href="../../../miri/struct.AllocId.html">AllocId</a>, alloc_range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;this error occurs as part of {operation} at {alloc_id:?}{alloc_range:?}&quot;</span>)
+}
+
+<span class="kw">fn </span>error_cause(stack: <span class="kw-2">&amp;</span><a href="stack.rs.html#19">Stack</a>, prov_extra: <a href="../machine.rs.html#159">ProvenanceExtra</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+    <span class="kw">if let </span><a href="../machine.rs.html#160">ProvenanceExtra::Concrete</a>(tag) = <a href="#482">prov_extra</a> {
+        <span class="kw">if </span>(<span class="number">0</span>..stack.len())
+            .map(|i| stack.get(i).unwrap())
+            .any(|item| item.tag() == tag &amp;&amp; item.perm() != Permission::Disabled)
+        {
+            <span class="string">&quot;, but that tag only grants SharedReadOnly permission for this location&quot;
+        </span>} <span class="kw">else </span>{
+            <span class="string">&quot;, but that tag does not exist in the borrow stack for this location&quot;
+        </span>}
+    } <span class="kw">else </span>{
+        <span class="string">&quot;, but no exposed tags have suitable permission in the borrow stack for this location&quot;
+    </span>}
+}
+
+<span class="kw">impl </span><a href="#210">RetagCause</a> {
+    <span class="kw">fn </span>summary(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a> {
+        <span class="kw">match </span><span class="self"><a href="#498">self</a> </span>{
+            <a href="#211">RetagCause::Normal</a> =&gt; <span class="string">&quot;retag&quot;</span>,
+            <a href="#213">RetagCause::FnEntry</a> =&gt; <span class="string">&quot;FnEntry retag&quot;</span>,
+            <a href="#212">RetagCause::FnReturn</a> =&gt; <span class="string">&quot;FnReturn retag&quot;</span>,
+            <a href="#214">RetagCause::TwoPhase</a> =&gt; <span class="string">&quot;two-phase retag&quot;</span>,
+        }
+        .<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>()
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

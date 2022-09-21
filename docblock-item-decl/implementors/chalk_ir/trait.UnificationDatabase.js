@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"rustc_traits":[["impl&lt;'tcx&gt; <a class=\"trait\" href=\"https://docs.rs/chalk-ir/0.80.0/chalk_ir/trait.UnificationDatabase.html\" title=\"trait chalk_ir::UnificationDatabase\">UnificationDatabase</a>&lt;<a class=\"struct\" href=\"rustc_middle/traits/chalk/struct.RustInterner.html\" title=\"struct rustc_middle::traits::chalk::RustInterner\">RustInterner</a>&lt;'tcx&gt;&gt; for <a class=\"struct\" href=\"rustc_traits/chalk/db/struct.RustIrDatabase.html\" title=\"struct rustc_traits::chalk::db::RustIrDatabase\">RustIrDatabase</a>&lt;'tcx&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

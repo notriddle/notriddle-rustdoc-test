@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["AYU","The “ayu” theme."],["DARK","The “dark” theme."],["LIGHT","The “light” theme, selected by default when no setting is available. Used as the basis for the `--check-theme` functionality."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["decodable_substructure",""],["decode_static_fields","Creates a decoder for a single enum variant/struct:"],["expand_deriving_rustc_decodable",""]]};

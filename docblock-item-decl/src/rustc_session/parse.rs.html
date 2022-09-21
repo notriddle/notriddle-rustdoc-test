@@ -1,0 +1,826 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_session/src/parse.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>parse.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_session/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_session/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_session/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Contains `ParseSess` which holds state living beyond what one `Parser` might.
+//! It also serves as an input to the parser itself.
+
+</span><span class="kw">use </span><a href="config.rs.html#977"><span class="kw">crate</span>::config::CheckCfg</a>;
+<span class="kw">use </span><span class="kw">crate</span>::errors::{<a href="errors.rs.html#39">FeatureDiagnosticForIssue</a>, <a href="errors.rs.html#45">FeatureDiagnosticHelp</a>, <a href="errors.rs.html#31">FeatureGateError</a>};
+<span class="kw">use </span><span class="kw">crate</span>::lint::{
+    <a href="../../rustc_lint_defs/builtin/static.UNSTABLE_SYNTAX_PRE_EXPANSION.html">builtin::UNSTABLE_SYNTAX_PRE_EXPANSION</a>, <a href="../../rustc_lint_defs/struct.BufferedEarlyLint.html">BufferedEarlyLint</a>, <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics</a>, <a href="../../rustc_lint_defs/struct.Lint.html">Lint</a>, <a href="../../rustc_lint_defs/struct.LintId.html">LintId</a>,
+};
+<span class="kw">use </span><a href="session.rs.html#229"><span class="kw">crate</span>::SessionDiagnostic</a>;
+<span class="kw">use </span><a href="../../rustc_ast/node_id/struct.NodeId.html">rustc_ast::node_id::NodeId</a>;
+<span class="kw">use </span>rustc_data_structures::fx::{FxHashMap, FxHashSet, <a href="../../rustc_data_structures/fx/type.FxIndexSet.html">FxIndexSet</a>};
+<span class="kw">use </span>rustc_data_structures::sync::{<a href="../../rustc_data_structures/sync/struct.Lock.html">Lock</a>, <a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">Lrc</a>};
+<span class="kw">use </span>rustc_errors::{<a href="../../rustc_errors/emitter/struct.SilentEmitter.html">emitter::SilentEmitter</a>, <a href="../../rustc_errors/emitter/enum.ColorConfig.html">ColorConfig</a>, <a href="../../rustc_errors/struct.Handler.html">Handler</a>};
+<span class="kw">use </span>rustc_errors::{
+    <a href="../../rustc_error_messages/fn.fallback_fluent_bundle.html">fallback_fluent_bundle</a>, <a href="../../rustc_lint_defs/enum.Applicability.html">Applicability</a>, <a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, <a href="../../rustc_errors/diagnostic_builder/struct.DiagnosticBuilder.html">DiagnosticBuilder</a>, <a href="../../rustc_errors/diagnostic/enum.DiagnosticId.html">DiagnosticId</a>,
+    <a href="../../rustc_error_messages/enum.DiagnosticMessage.html">DiagnosticMessage</a>, <a href="../../rustc_errors/diagnostic_builder/trait.EmissionGuarantee.html">EmissionGuarantee</a>, <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>, <a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>, <a href="../../rustc_errors/enum.StashKey.html">StashKey</a>,
+};
+<span class="kw">use </span>rustc_feature::{<a href="../../rustc_feature/fn.find_feature_issue.html">find_feature_issue</a>, <a href="../../rustc_feature/enum.GateIssue.html">GateIssue</a>, <a href="../../rustc_feature/enum.UnstableFeatures.html">UnstableFeatures</a>};
+<span class="kw">use </span><a href="../../rustc_span/edition/enum.Edition.html">rustc_span::edition::Edition</a>;
+<span class="kw">use </span><a href="../../rustc_span/hygiene/struct.ExpnId.html">rustc_span::hygiene::ExpnId</a>;
+<span class="kw">use </span>rustc_span::source_map::{<a href="../../rustc_span/source_map/struct.FilePathMapping.html">FilePathMapping</a>, <a href="../../rustc_span/source_map/struct.SourceMap.html">SourceMap</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+
+<span class="kw">use </span><a href="../../rustc_ast/attr/struct.AttrIdGenerator.html">rustc_ast::attr::AttrIdGenerator</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/str/index.html">std::str</a>;
+
+<span class="doccomment">/// The set of keys (and, optionally, values) that define the compilation
+/// environment of the crate, used to drive conditional compilation.
+</span><span class="kw">pub type </span>CrateConfig = FxIndexSet&lt;(<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;)&gt;;
+<span class="kw">pub type </span>CrateCheckConfig = CheckCfg&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;;
+
+<span class="doccomment">/// Collected spans during parsing for places where a certain feature was
+/// used and should be feature gated accordingly in `check_crate`.
+</span><span class="attribute">#[derive(Default)]
+</span><span class="kw">pub struct </span>GatedSpans {
+    <span class="kw">pub </span>spans: Lock&lt;FxHashMap&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;&gt;,
+}
+
+<span class="kw">impl </span><a href="#35">GatedSpans</a> {
+    <span class="doccomment">/// Feature gate the given `span` under the given `feature`
+    /// which is same `Symbol` used in `active.rs`.
+    </span><span class="kw">pub fn </span>gate(<span class="kw-2">&amp;</span><span class="self">self</span>, feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <a class="self" href="#42">self</a>.spans.borrow_mut().entry(<a href="#42">feature</a>).or_default().push(<a href="#42">span</a>);
+    }
+
+    <span class="doccomment">/// Ungate the last span under the given `feature`.
+    /// Panics if the given `span` wasn&#39;t the last one.
+    ///
+    /// Using this is discouraged unless you have a really good reason to.
+    </span><span class="kw">pub fn </span>ungate_last(<span class="kw-2">&amp;</span><span class="self">self</span>, feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <span class="kw">let </span>removed_span = <a class="self" href="#50">self</a>.spans.borrow_mut().entry(<a href="#50">feature</a>).or_default().pop().unwrap();
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(span, removed_span);
+    }
+
+    <span class="doccomment">/// Is the provided `feature` gate ungated currently?
+    ///
+    /// Using this is discouraged unless you have a really good reason to.
+    </span><span class="kw">pub fn </span>is_ungated(<span class="kw-2">&amp;</span><span class="self">self</span>, feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#58">self</a>.spans.borrow().get(<span class="kw-2">&amp;</span><a href="#58">feature</a>).map_or(<span class="bool-val">true</span>, |spans| <a href="#59">spans</a>.is_empty())
+    }
+
+    <span class="doccomment">/// Prepend the given set of `spans` onto the set in `self`.
+    </span><span class="kw">pub fn </span>merge(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>spans: FxHashMap&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;) {
+        <span class="kw">let </span><span class="kw-2">mut </span>inner = <a class="self" href="#63">self</a>.spans.borrow_mut();
+        <span class="kw">for </span>(gate, <span class="kw-2">mut </span>gate_spans) <span class="kw">in </span>inner.drain() {
+            spans.entry(gate).or_default().append(<span class="kw-2">&amp;mut </span>gate_spans);
+        }
+        <span class="kw-2">*</span><a href="#64">inner</a> = <a href="#63">spans</a>;
+    }
+}
+
+<span class="attribute">#[derive(Default)]
+</span><span class="kw">pub struct </span>SymbolGallery {
+    <span class="doccomment">/// All symbols occurred and their first occurrence span.
+    </span><span class="kw">pub </span>symbols: Lock&lt;FxHashMap&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+}
+
+<span class="kw">impl </span><a href="#73">SymbolGallery</a> {
+    <span class="doccomment">/// Insert a symbol and its span into symbol gallery.
+    /// If the symbol has occurred before, ignore the new occurrence.
+    </span><span class="kw">pub fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>, symbol: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <a class="self" href="#81">self</a>.symbols.lock().entry(<a href="#81">symbol</a>).or_insert(<a href="#81">span</a>);
+    }
+}
+
+<span class="doccomment">/// Construct a diagnostic for a language feature error due to the given `span`.
+/// The `feature`&#39;s `Symbol` is the one you used in `active.rs` and `rustc_span::symbols`.
+</span><span class="kw">pub fn </span>feature_err&lt;<span class="lifetime">&#39;a</span>&gt;(
+    sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>,
+    feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    span: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;,
+    explain: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+    <a href="#101-107">feature_err_issue</a>(<a href="#89">sess</a>, <a href="#90">feature</a>, <a href="#91">span</a>, GateIssue::Language, <a href="#92">explain</a>)
+}
+
+<span class="doccomment">/// Construct a diagnostic for a feature gate error.
+///
+/// This variant allows you to control whether it is a library or language feature.
+/// Almost always, you want to use this for a language feature. If so, prefer `feature_err`.
+</span><span class="kw">pub fn </span>feature_err_issue&lt;<span class="lifetime">&#39;a</span>&gt;(
+    sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>,
+    feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    span: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;,
+    issue: <a href="../../rustc_feature/enum.GateIssue.html">GateIssue</a>,
+    explain: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+    <span class="kw">let </span>span = <a href="#104">span</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>();
+
+    <span class="comment">// Cancel an earlier warning for this same error, if it exists.
+    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(span) = <a href="#108">span</a>.primary_span() {
+        <a href="#102">sess</a>.span_diagnostic
+            .steal_diagnostic(<a href="#111">span</a>, StashKey::EarlySyntaxWarning)
+            .map(|err| <a href="#114">err</a>.cancel());
+    }
+
+    <span class="kw">let </span><span class="kw-2">mut </span>err = <a href="#102">sess</a>.<a href="#346-349">create_err</a>(<a href="errors.rs.html#31">FeatureGateError</a> { <a href="#108">span</a>, <a href="#106">explain</a> });
+    <a href="#172-177">add_feature_diagnostics_for_issue</a>(<span class="kw-2">&amp;mut </span><a href="#117">err</a>, <a href="#102">sess</a>, <a href="#103">feature</a>, <a href="#105">issue</a>);
+    <a href="#117">err</a>
+}
+
+<span class="doccomment">/// Construct a future incompatibility diagnostic for a feature gate.
+///
+/// This diagnostic is only a warning and *does not cause compilation to fail*.
+</span><span class="kw">pub fn </span>feature_warn&lt;<span class="lifetime">&#39;a</span>&gt;(sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>, feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, explain: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) {
+    <a href="#137-143">feature_warn_issue</a>(<a href="#125">sess</a>, <a href="#125">feature</a>, <a href="#125">span</a>, GateIssue::Language, <a href="#125">explain</a>);
+}
+
+<span class="doccomment">/// Construct a future incompatibility diagnostic for a feature gate.
+///
+/// This diagnostic is only a warning and *does not cause compilation to fail*.
+///
+/// This variant allows you to control whether it is a library or language feature.
+/// Almost always, you want to use this for a language feature. If so, prefer `feature_warn`.
+</span><span class="attribute">#[allow(rustc::diagnostic_outside_of_impl)]
+#[allow(rustc::untranslatable_diagnostic)]
+</span><span class="kw">pub fn </span>feature_warn_issue&lt;<span class="lifetime">&#39;a</span>&gt;(
+    sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>,
+    feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    issue: <a href="../../rustc_feature/enum.GateIssue.html">GateIssue</a>,
+    explain: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) {
+    <span class="kw">let </span><span class="kw-2">mut </span>err = <a href="#138">sess</a>.span_diagnostic.struct_span_warn(<a href="#140">span</a>, <a href="#142">explain</a>);
+    <a href="#172-177">add_feature_diagnostics_for_issue</a>(<span class="kw-2">&amp;mut </span><a href="#144">err</a>, <a href="#138">sess</a>, <a href="#139">feature</a>, <a href="#141">issue</a>);
+
+    <span class="comment">// Decorate this as a future-incompatibility lint as in rustc_middle::lint::struct_lint_level
+    </span><span class="kw">let </span>lint = <a href="../../rustc_lint_defs/builtin/static.UNSTABLE_SYNTAX_PRE_EXPANSION.html">UNSTABLE_SYNTAX_PRE_EXPANSION</a>;
+    <span class="kw">let </span>future_incompatible = <a href="#148">lint</a>.future_incompatible.as_ref().unwrap();
+    <a href="#144">err</a>.code(<a href="../../rustc_errors/diagnostic/enum.DiagnosticId.html">DiagnosticId::Lint</a> {
+        name: <a href="#148">lint</a>.name_lower(),
+        has_future_breakage: <span class="bool-val">false</span>,
+        is_force_warn: <span class="bool-val">false</span>,
+    });
+    <a href="#144">err</a>.warn(<a href="#148">lint</a>.desc);
+    <a href="#144">err</a>.note(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;for more information, see {}&quot;</span>, future_incompatible.reference));
+
+    <span class="comment">// A later feature_err call can steal and cancel this warning.
+    </span><a href="#144">err</a>.stash(<a href="#140">span</a>, StashKey::EarlySyntaxWarning);
+}
+
+<span class="doccomment">/// Adds the diagnostics for a feature to an existing error.
+</span><span class="kw">pub fn </span>add_feature_diagnostics&lt;<span class="lifetime">&#39;a</span>&gt;(err: <span class="kw-2">&amp;mut </span><a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>, feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) {
+    <a href="#172-177">add_feature_diagnostics_for_issue</a>(<a href="#163">err</a>, <a href="#163">sess</a>, <a href="#163">feature</a>, GateIssue::Language);
+}
+
+<span class="doccomment">/// Adds the diagnostics for a feature to an existing error.
+///
+/// This variant allows you to control whether it is a library or language feature.
+/// Almost always, you want to use this for a language feature. If so, prefer
+/// `add_feature_diagnostics`.
+</span><span class="kw">pub fn </span>add_feature_diagnostics_for_issue&lt;<span class="lifetime">&#39;a</span>&gt;(
+    err: <span class="kw-2">&amp;mut </span><a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>,
+    sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="#189">ParseSess</a>,
+    feature: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    issue: <a href="../../rustc_feature/enum.GateIssue.html">GateIssue</a>,
+) {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = <a href="../../rustc_feature/fn.find_feature_issue.html">find_feature_issue</a>(<a href="#175">feature</a>, <a href="#176">issue</a>) {
+        <a href="#173">err</a>.subdiagnostic(<a href="errors.rs.html#39">FeatureDiagnosticForIssue</a> { <a href="#178">n</a> });
+    }
+
+    <span class="comment">// #23973: do not suggest `#![feature(...)]` if we are in beta/stable
+    </span><span class="kw">if </span>sess.unstable_features.is_nightly_build() {
+        <a href="#173">err</a>.subdiagnostic(<a href="errors.rs.html#45">FeatureDiagnosticHelp</a> { <a href="#175">feature</a> });
+    }
+}
+
+<span class="doccomment">/// Info about a parsing session.
+</span><span class="kw">pub struct </span>ParseSess {
+    <span class="kw">pub </span>span_diagnostic: <a href="../../rustc_errors/struct.Handler.html">Handler</a>,
+    <span class="kw">pub </span>unstable_features: <a href="../../rustc_feature/enum.UnstableFeatures.html">UnstableFeatures</a>,
+    <span class="kw">pub </span>config: <a href="#29">CrateConfig</a>,
+    <span class="kw">pub </span>check_config: <a href="#30">CrateCheckConfig</a>,
+    <span class="kw">pub </span>edition: <a href="../../rustc_span/edition/enum.Edition.html">Edition</a>,
+    <span class="doccomment">/// Places where raw identifiers were used. This is used to avoid complaining about idents
+    /// clashing with keywords in new editions.
+    </span><span class="kw">pub </span>raw_identifier_spans: Lock&lt;Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+    <span class="doccomment">/// Places where identifiers that contain invalid Unicode codepoints but that look like they
+    /// should be. Useful to avoid bad tokenization when encountering emoji. We group them to
+    /// provide a single error per unique incorrect identifier.
+    </span><span class="kw">pub </span>bad_unicode_identifiers: Lock&lt;FxHashMap&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;&gt;,
+    source_map: Lrc&lt;<a href="../../rustc_span/source_map/struct.SourceMap.html">SourceMap</a>&gt;,
+    <span class="kw">pub </span>buffered_lints: Lock&lt;Vec&lt;<a href="../../rustc_lint_defs/struct.BufferedEarlyLint.html">BufferedEarlyLint</a>&gt;&gt;,
+    <span class="doccomment">/// Contains the spans of block expressions that could have been incomplete based on the
+    /// operation token that followed it, but that the parser cannot identify without further
+    /// analysis.
+    </span><span class="kw">pub </span>ambiguous_block_expr_parse: Lock&lt;FxHashMap&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+    <span class="kw">pub </span>gated_spans: <a href="#35">GatedSpans</a>,
+    <span class="kw">pub </span>symbol_gallery: <a href="#73">SymbolGallery</a>,
+    <span class="doccomment">/// The parser has reached `Eof` due to an unclosed brace. Used to silence unnecessary errors.
+    </span><span class="kw">pub </span>reached_eof: Lock&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
+    <span class="doccomment">/// Environment variables accessed during the build and their values when they exist.
+    </span><span class="kw">pub </span>env_depinfo: Lock&lt;FxHashSet&lt;(<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;)&gt;&gt;,
+    <span class="doccomment">/// File paths accessed during the build.
+    </span><span class="kw">pub </span>file_depinfo: Lock&lt;FxHashSet&lt;<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt;,
+    <span class="doccomment">/// All the type ascriptions expressions that have had a suggestion for likely path typo.
+    </span><span class="kw">pub </span>type_ascription_path_suggestions: Lock&lt;FxHashSet&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+    <span class="doccomment">/// Whether cfg(version) should treat the current release as incomplete
+    </span><span class="kw">pub </span>assume_incomplete_release: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    <span class="doccomment">/// Spans passed to `proc_macro::quote_span`. Each span has a numerical
+    /// identifier represented by its position in the vector.
+    </span><span class="kw">pub </span>proc_macro_quoted_spans: Lock&lt;Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+    <span class="doccomment">/// Used to generate new `AttrId`s. Every `AttrId` is unique.
+    </span><span class="kw">pub </span>attr_id_generator: <a href="../../rustc_ast/attr/struct.AttrIdGenerator.html">AttrIdGenerator</a>,
+}
+
+<span class="kw">impl </span><a href="#189">ParseSess</a> {
+    <span class="doccomment">/// Used for testing.
+    </span><span class="kw">pub fn </span>new(file_path_mapping: <a href="../../rustc_span/source_map/struct.FilePathMapping.html">FilePathMapping</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>fallback_bundle = <a href="../../rustc_error_messages/fn.fallback_fluent_bundle.html">fallback_fluent_bundle</a>(rustc_errors::DEFAULT_LOCALE_RESOURCES, <span class="bool-val">false</span>);
+        <span class="kw">let </span>sm = Lrc::new(SourceMap::new(<a href="#229">file_path_mapping</a>));
+        <span class="kw">let </span>handler = Handler::with_tty_emitter(
+            ColorConfig::Auto,
+            <span class="bool-val">true</span>,
+            <span class="prelude-val">None</span>,
+            <span class="prelude-val">Some</span>(<a href="#231">sm</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()),
+            <span class="prelude-val">None</span>,
+            <a href="#230">fallback_bundle</a>,
+        );
+        ParseSess::with_span_handler(<a href="#232">handler</a>, <a href="#231">sm</a>)
+    }
+
+    <span class="kw">pub fn </span>with_span_handler(handler: <a href="../../rustc_errors/struct.Handler.html">Handler</a>, source_map: Lrc&lt;<a href="../../rustc_span/source_map/struct.SourceMap.html">SourceMap</a>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            span_diagnostic: <a href="#243">handler</a>,
+            unstable_features: UnstableFeatures::from_environment(<span class="prelude-val">None</span>),
+            config: FxIndexSet::default(),
+            check_config: CrateCheckConfig::default(),
+            edition: ExpnId::root().expn_data().edition,
+            raw_identifier_spans: Lock::new(Vec::new()),
+            bad_unicode_identifiers: Lock::new(<a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>()),
+            <a href="#243">source_map</a>,
+            buffered_lints: Lock::new(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[]),
+            ambiguous_block_expr_parse: Lock::new(FxHashMap::default()),
+            gated_spans: GatedSpans::default(),
+            symbol_gallery: SymbolGallery::default(),
+            reached_eof: Lock::new(<span class="bool-val">false</span>),
+            env_depinfo: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            file_depinfo: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            type_ascription_path_suggestions: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            assume_incomplete_release: <span class="bool-val">false</span>,
+            proc_macro_quoted_spans: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            attr_id_generator: AttrIdGenerator::new(),
+        }
+    }
+
+    <span class="kw">pub fn </span>with_silent_emitter(fatal_note: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>fallback_bundle = <a href="../../rustc_error_messages/fn.fallback_fluent_bundle.html">fallback_fluent_bundle</a>(rustc_errors::DEFAULT_LOCALE_RESOURCES, <span class="bool-val">false</span>);
+        <span class="kw">let </span>sm = Lrc::new(SourceMap::new(FilePathMapping::empty()));
+        <span class="kw">let </span>fatal_handler =
+            Handler::with_tty_emitter(ColorConfig::Auto, <span class="bool-val">false</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <a href="#268">fallback_bundle</a>);
+        <span class="kw">let </span>handler = Handler::with_emitter(
+            <span class="bool-val">false</span>,
+            <span class="prelude-val">None</span>,
+            Box::new(<a href="../../rustc_errors/emitter/struct.SilentEmitter.html">SilentEmitter</a> { <a href="#270">fatal_handler</a>, <a href="#267">fatal_note</a> }),
+        );
+        ParseSess::with_span_handler(<a href="#272">handler</a>, <a href="#269">sm</a>)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>source_map(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../rustc_span/source_map/struct.SourceMap.html">SourceMap</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#281">self</a>.source_map
+    }
+
+    <span class="kw">pub fn </span>clone_source_map(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Lrc&lt;<a href="../../rustc_span/source_map/struct.SourceMap.html">SourceMap</a>&gt; {
+        <a class="self" href="#285">self</a>.source_map.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+    }
+
+    <span class="kw">pub fn </span>buffer_lint(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint_defs/struct.Lint.html">Lint</a>,
+        span: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;,
+        node_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        msg: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    ) {
+        <a class="self" href="#290">self</a>.buffered_lints.with_lock(|buffered_lints| {
+            <a href="#296">buffered_lints</a>.push(<a href="../../rustc_lint_defs/struct.BufferedEarlyLint.html">BufferedEarlyLint</a> {
+                span: <a href="#292">span</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+                <a href="#293">node_id</a>,
+                msg: <a href="#294">msg</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+                lint_id: LintId::of(<a href="#291">lint</a>),
+                diagnostic: BuiltinLintDiagnostics::Normal,
+            });
+        });
+    }
+
+    <span class="kw">pub fn </span>buffer_lint_with_diagnostic(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        lint: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="../../rustc_lint_defs/struct.Lint.html">Lint</a>,
+        span: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/struct.MultiSpan.html">MultiSpan</a>&gt;,
+        node_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        msg: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        diagnostic: <a href="../../rustc_lint_defs/enum.BuiltinLintDiagnostics.html">BuiltinLintDiagnostics</a>,
+    ) {
+        <a class="self" href="#308">self</a>.buffered_lints.with_lock(|buffered_lints| {
+            <a href="#315">buffered_lints</a>.push(<a href="../../rustc_lint_defs/struct.BufferedEarlyLint.html">BufferedEarlyLint</a> {
+                span: <a href="#310">span</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+                <a href="#311">node_id</a>,
+                msg: <a href="#312">msg</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+                lint_id: LintId::of(<a href="#309">lint</a>),
+                <a href="#313">diagnostic</a>,
+            });
+        });
+    }
+
+    <span class="doccomment">/// Extend an error with a suggestion to wrap an expression with parentheses to allow the
+    /// parser to continue parsing the following operation as part of the same expression.
+    </span><span class="kw">pub fn </span>expr_parentheses_needed(<span class="kw-2">&amp;</span><span class="self">self</span>, err: <span class="kw-2">&amp;mut </span><a href="../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <a href="#328">err</a>.multipart_suggestion(
+            <span class="string">&quot;parentheses are required to parse this as an expression&quot;</span>,
+            <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[(span.shrink_to_lo(), <span class="string">&quot;(&quot;</span>.to_string()), (span.shrink_to_hi(), <span class="string">&quot;)&quot;</span>.to_string())],
+            Applicability::MachineApplicable,
+        );
+    }
+
+    <span class="kw">pub fn </span>save_proc_macro_span(<span class="kw-2">&amp;</span><span class="self">self</span>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>spans = <a class="self" href="#336">self</a>.proc_macro_quoted_spans.lock();
+        <a href="#337">spans</a>.push(<a href="#336">span</a>);
+        <span class="kw">return </span><a href="#337">spans</a>.len() - <span class="number">1</span>;
+    }
+
+    <span class="kw">pub fn </span>proc_macro_quoted_spans(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt; {
+        <a class="self" href="#342">self</a>.proc_macro_quoted_spans.lock().<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+    }
+
+    <span class="kw">pub fn </span>create_err&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        err: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <a href="#348">err</a>.<a href="session.rs.html#232">into_diagnostic</a>(<span class="kw-2">&amp;</span><a class="self" href="#347">self</a>.span_diagnostic)
+    }
+
+    <span class="kw">pub fn </span>emit_err&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, err: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a> {
+        <a class="self" href="#353">self</a>.<a href="#346-349">create_err</a>(<a href="#353">err</a>).emit()
+    }
+
+    <span class="kw">pub fn </span>create_warning&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        warning: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>, ()&gt;,
+    ) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, ()&gt; {
+        <a href="#359">warning</a>.<a href="session.rs.html#232">into_diagnostic</a>(<span class="kw-2">&amp;</span><a class="self" href="#358">self</a>.span_diagnostic)
+    }
+
+    <span class="kw">pub fn </span>emit_warning&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, warning: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>, ()&gt;) {
+        <a class="self" href="#364">self</a>.<a href="#357-360">create_warning</a>(<a href="#364">warning</a>).emit()
+    }
+
+    <span class="kw">pub fn </span>create_fatal&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        fatal: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>, !&gt;,
+    ) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;a</span>, !&gt; {
+        <a href="#370">fatal</a>.<a href="session.rs.html#232">into_diagnostic</a>(<span class="kw-2">&amp;</span><a class="self" href="#369">self</a>.span_diagnostic)
+    }
+
+    <span class="kw">pub fn </span>emit_fatal&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, fatal: <span class="kw">impl </span>SessionDiagnostic&lt;<span class="lifetime">&#39;a</span>, !&gt;) -&gt; ! {
+        <a class="self" href="#375">self</a>.<a href="#368-371">create_fatal</a>(<a href="#375">fatal</a>).emit()
+    }
+
+    <span class="attribute">#[rustc_lint_diagnostics]
+    #[allow(rustc::diagnostic_outside_of_impl)]
+    #[allow(rustc::untranslatable_diagnostic)]
+    </span><span class="kw">pub fn </span>struct_err(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        msg: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/enum.DiagnosticMessage.html">DiagnosticMessage</a>&gt;,
+    ) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;_</span>, <a href="../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+        <a class="self" href="#383">self</a>.span_diagnostic.struct_err(<a href="#384">msg</a>)
+    }
+
+    <span class="attribute">#[rustc_lint_diagnostics]
+    #[allow(rustc::diagnostic_outside_of_impl)]
+    #[allow(rustc::untranslatable_diagnostic)]
+    </span><span class="kw">pub fn </span>struct_warn(<span class="kw-2">&amp;</span><span class="self">self</span>, msg: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/enum.DiagnosticMessage.html">DiagnosticMessage</a>&gt;) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;_</span>, ()&gt; {
+        <a class="self" href="#392">self</a>.span_diagnostic.struct_warn(<a href="#392">msg</a>)
+    }
+
+    <span class="attribute">#[rustc_lint_diagnostics]
+    #[allow(rustc::diagnostic_outside_of_impl)]
+    #[allow(rustc::untranslatable_diagnostic)]
+    </span><span class="kw">pub fn </span>struct_fatal(<span class="kw-2">&amp;</span><span class="self">self</span>, msg: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/enum.DiagnosticMessage.html">DiagnosticMessage</a>&gt;) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;_</span>, !&gt; {
+        <a class="self" href="#399">self</a>.span_diagnostic.struct_fatal(<a href="#399">msg</a>)
+    }
+
+    <span class="attribute">#[rustc_lint_diagnostics]
+    #[allow(rustc::diagnostic_outside_of_impl)]
+    #[allow(rustc::untranslatable_diagnostic)]
+    </span><span class="kw">pub fn </span>struct_diagnostic&lt;G: <a href="../../rustc_errors/diagnostic_builder/trait.EmissionGuarantee.html">EmissionGuarantee</a>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        msg: <span class="kw">impl </span>Into&lt;<a href="../../rustc_error_messages/enum.DiagnosticMessage.html">DiagnosticMessage</a>&gt;,
+    ) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;_</span>, G&gt; {
+        <a class="self" href="#407">self</a>.span_diagnostic.struct_diagnostic(<a href="#408">msg</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_session" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

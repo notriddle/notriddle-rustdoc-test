@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["RegionErrorKind",""]],"struct":[["ErrorConstraintInfo","Information about the various region constraints involved in a borrow checker error."]],"type":[["RegionErrors","A collection of errors encountered during region inference. This is needed to efficiently report errors after borrow checking."]]};

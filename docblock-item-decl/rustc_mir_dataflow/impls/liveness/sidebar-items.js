@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["DefUse",""]],"struct":[["MaybeLiveLocals","A live-variable dataflow analysis."],["MaybeTransitiveLiveLocals","Like `MaybeLiveLocals`, but does not mark locals as live if they are used in a dead assignment."],["TransferFunction",""],["YieldResumeEffect",""]]};

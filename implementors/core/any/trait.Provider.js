@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["std"] = [{"text":"impl <a class=\"trait\" href=\"std/any/trait.Provider.html\" title=\"trait std::any::Provider\">Provider</a> for dyn <a class=\"trait\" href=\"std/error/trait.Error.html\" title=\"trait std::error::Error\">Error</a> + 'static","synthetic":false,"types":[]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["DEFAULT_INNER_ATTR_FORBIDDEN",""],["DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG",""]],"enum":[["InnerAttrPolicy",""],["OuterAttributeType",""]],"fn":[["maybe_needs_tokens",""]]};

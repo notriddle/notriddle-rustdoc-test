@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["for_all",""],["there_exists",""]],"mod":[["query_context",""],["rustc",""]],"struct":[["MaybeTransmutableQuery",""]]};

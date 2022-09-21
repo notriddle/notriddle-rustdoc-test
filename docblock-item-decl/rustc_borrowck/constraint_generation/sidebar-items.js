@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["generate_constraints",""],["record_killed_borrows_for_local","When recording facts for Polonius, records the borrows on the specified local as `killed`."]],"struct":[["ConstraintGeneration","’cg = the duration of the constraint generation process itself."]]};

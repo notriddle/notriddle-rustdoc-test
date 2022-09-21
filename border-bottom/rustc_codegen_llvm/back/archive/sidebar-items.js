@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Addition",""]],"fn":[["find_binutils_dlltool",""],["is_relevant_child",""],["llvm_machine_type","Map machine type strings to values of LLVM’s MachineTypes enum."],["string_to_io_error",""]],"struct":[["LlvmArchiveBuilder","Helper for adding many files to an archive."],["LlvmArchiveBuilderBuilder",""]]};

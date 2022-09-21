@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["SHORTHAND_OFFSET","The shorthand encoding uses an enum’s variant index `usize` and is offset by this value so it never matches a real variant. This offset is also chosen so that the first byte is never < 0x80."]],"trait":[["RefDecodable","Trait for decoding to a reference."],["TyDecoder",""],["TyEncoder",""]]};

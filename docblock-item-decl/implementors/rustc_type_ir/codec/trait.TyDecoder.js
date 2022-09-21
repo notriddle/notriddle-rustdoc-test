@@ -1,0 +1,4 @@
+(function() {var implementors = {
+"rustc_metadata":[["impl&lt;'a, 'tcx&gt; <a class=\"trait\" href=\"rustc_type_ir/codec/trait.TyDecoder.html\" title=\"trait rustc_type_ir::codec::TyDecoder\">TyDecoder</a> for <a class=\"struct\" href=\"rustc_metadata/rmeta/decoder/struct.DecodeContext.html\" title=\"struct rustc_metadata::rmeta::decoder::DecodeContext\">DecodeContext</a>&lt;'a, 'tcx&gt;"]],
+"rustc_query_impl":[["impl&lt;'a, 'tcx&gt; <a class=\"trait\" href=\"rustc_type_ir/codec/trait.TyDecoder.html\" title=\"trait rustc_type_ir::codec::TyDecoder\">TyDecoder</a> for <a class=\"struct\" href=\"rustc_query_impl/on_disk_cache/struct.CacheDecoder.html\" title=\"struct rustc_query_impl::on_disk_cache::CacheDecoder\">CacheDecoder</a>&lt;'a, 'tcx&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["ARRAY_INTO_ITER","The `array_into_iter` lint detects calling `into_iter` on arrays."]],"struct":[["ArrayIntoIter",""]]};

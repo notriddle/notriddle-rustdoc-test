@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ItemType","Item type. Corresponds to `clean::ItemEnum` variants."]]};

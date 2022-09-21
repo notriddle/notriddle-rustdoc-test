@@ -1,0 +1,1594 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_traits/src/chalk/db.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>db.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_traits/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_traits/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_traits/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Provides the `RustIrDatabase` implementation for `chalk-solve`
+//!
+//! The purpose of the `chalk_solve::RustIrDatabase` is to get data about
+//! specific types, such as bounds, where clauses, or fields. This file contains
+//! the minimal logic to assemble the types for `chalk-solve` by calling out to
+//! either the `TyCtxt` (for information about types) or
+//! `crate::chalk::lowering` (to lower rustc types into Chalk types).
+
+</span><span class="kw">use </span><a href="../../../rustc_middle/traits/chalk/struct.RustInterner.html">rustc_middle::traits::ChalkRustInterner</a> <span class="kw">as </span>RustInterner;
+<span class="kw">use </span>rustc_middle::ty::subst::{<a href="../../../rustc_middle/ty/subst/type.InternalSubsts.html">InternalSubsts</a>, <a href="../../../rustc_middle/ty/subst/trait.Subst.html">Subst</a>, <a href="../../../rustc_middle/ty/subst/type.SubstsRef.html">SubstsRef</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/assoc/enum.AssocKind.html">AssocKind</a>, EarlyBinder, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="../../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="../../../rustc_middle/ty/fold/trait.TypeFoldable.html">TypeFoldable</a>, <a href="../../../rustc_middle/ty/fold/trait.TypeSuperFoldable.html">TypeSuperFoldable</a>};
+
+<span class="kw">use </span><a href="../../../rustc_ast/ast/index.html">rustc_ast::ast</a>;
+<span class="kw">use </span><a href="../../../rustc_attr/index.html">rustc_attr</a> <span class="kw">as </span>attr;
+
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+
+<span class="kw">use </span><a href="../../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">std::fmt</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">std::sync::Arc</a>;
+
+<span class="kw">use </span><a href="lowering.rs.html#49"><span class="kw">crate</span>::chalk::lowering::LowerInto</a>;
+
+<span class="kw">pub struct </span>RustIrDatabase&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) interner: RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>RustIrDatabase&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#30">f</a>, <span class="string">&quot;RustIrDatabase&quot;</span>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; RustIrDatabase&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>where_clauses_for(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        bound_vars: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; Vec&lt;chalk_ir::QuantifiedWhereClause&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>predicates = <a class="self" href="#37">self</a>.interner.tcx.predicates_defined_on(<a href="#38">def_id</a>).predicates;
+        <a href="#41">predicates</a>
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(wc, <span class="kw">_</span>)| EarlyBinder(<span class="kw-2">*</span><a href="#44">wc</a>).<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#37">self</a>.interner.tcx, <a href="#39">bound_vars</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|wc| LowerInto::&lt;
+                    <span class="prelude-ty">Option</span>&lt;chalk_ir::QuantifiedWhereClause&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;
+                    &gt;::lower_into(<a href="#45">wc</a>, <a class="self" href="#37">self</a>.interner)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+
+    <span class="kw">fn </span>bounds_for&lt;T&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>, bound_vars: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Vec&lt;T&gt;
+    <span class="kw">where
+        </span>ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;: LowerInto&lt;<span class="lifetime">&#39;tcx</span>, std::option::Option&lt;T&gt;&gt;,
+    {
+        <span class="kw">let </span>bounds = <a class="self" href="#50">self</a>.interner.tcx.bound_explicit_item_bounds(<a href="#50">def_id</a>);
+        <a href="#54">bounds</a>
+            .<span class="number">0
+            </span>.iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(bound, <span class="kw">_</span>)| <a href="#54">bounds</a>.rebind(<span class="kw-2">*</span><a href="#58">bound</a>).<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#50">self</a>.interner.tcx, <span class="kw-2">&amp;</span><a href="#50">bound_vars</a>))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|bound| LowerInto::&lt;<span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt;&gt;::lower_into(<a href="#59">bound</a>, <a class="self" href="#50">self</a>.interner))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; chalk_solve::RustIrDatabase&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>RustIrDatabase&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>interner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#65">self</a>.interner
+    }
+
+    <span class="kw">fn </span>associated_ty_data(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        assoc_type_id: chalk_ir::AssocTypeId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::AssociatedTyDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>def_id = <a href="#71">assoc_type_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>assoc_item = <a class="self" href="#70">self</a>.interner.tcx.associated_item(<a href="#73">def_id</a>);
+        <span class="kw">let </span><span class="prelude-val">Some</span>(trait_def_id) = <a href="#74">assoc_item</a>.trait_container(<a class="self" href="#70">self</a>.interner.tcx) <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>(<span class="string">&quot;Not possible??&quot;</span>);
+        };
+        <span class="kw">match </span><a href="#74">assoc_item</a>.kind {
+            AssocKind::Type =&gt; {}
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>(<span class="string">&quot;Not possible??&quot;</span>),
+        }
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#70">self</a>.interner.tcx, <a href="#73">def_id</a>);
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#70">self</a>.interner, <a href="#82">bound_vars</a>);
+
+        <span class="kw">let </span>where_clauses = <a class="self" href="#70">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#73">def_id</a>, <a href="#82">bound_vars</a>);
+        <span class="kw">let </span>bounds = <a class="self" href="#70">self</a>.<a href="#50-52">bounds_for</a>(<a href="#73">def_id</a>, <a href="#82">bound_vars</a>);
+
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AssociatedTyDatum.html">chalk_solve::rust_ir::AssociatedTyDatum</a> {
+            trait_id: chalk_ir::TraitId(<a href="#75">trait_def_id</a>),
+            id: <a href="#71">assoc_type_id</a>,
+            name: (),
+            binders: chalk_ir::Binders::new(
+                <a href="#83">binders</a>,
+                <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AssociatedTyDatumBound.html">chalk_solve::rust_ir::AssociatedTyDatumBound</a> { <a href="#86">bounds</a>, <a href="#85">where_clauses</a> },
+            ),
+        })
+    }
+
+    <span class="kw">fn </span>trait_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        trait_id: chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::TraitDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">use </span><a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/enum.WellKnownTrait.html">chalk_solve::rust_ir::WellKnownTrait</a>::<span class="kw-2">*</span>;
+
+        <span class="kw">let </span>def_id = <a href="#101">trait_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>trait_def = <a class="self" href="#100">self</a>.interner.tcx.trait_def(<a href="#105">def_id</a>);
+
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#100">self</a>.interner.tcx, <a href="#105">def_id</a>);
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#100">self</a>.interner, <a href="#108">bound_vars</a>);
+
+        <span class="kw">let </span>where_clauses = <a class="self" href="#100">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#105">def_id</a>, <a href="#108">bound_vars</a>);
+
+        <span class="kw">let </span>associated_ty_ids: Vec&lt;<span class="kw">_</span>&gt; = <span class="self"><a href="#100">self</a>
+            </span>.interner
+            .tcx
+            .associated_items(<a href="#105">def_id</a>)
+            .in_definition_order()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|i| <a href="#118">i</a>.kind == AssocKind::Type)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|i| chalk_ir::AssocTypeId(<a href="#119">i</a>.def_id))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span>lang_items = <a class="self" href="#100">self</a>.interner.tcx.lang_items();
+        <span class="kw">let </span>well_known = <span class="kw">if </span>lang_items.sized_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Sized)
+        } <span class="kw">else if </span>lang_items.copy_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Copy)
+        } <span class="kw">else if </span>lang_items.clone_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Clone)
+        } <span class="kw">else if </span>lang_items.drop_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Drop)
+        } <span class="kw">else if </span>lang_items.fn_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Fn)
+        } <span class="kw">else if </span>lang_items.fn_once_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(FnOnce)
+        } <span class="kw">else if </span>lang_items.fn_mut_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(FnMut)
+        } <span class="kw">else if </span>lang_items.unsize_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Unsize)
+        } <span class="kw">else if </span>lang_items.unpin_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(Unpin)
+        } <span class="kw">else if </span>lang_items.coerce_unsized_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(CoerceUnsized)
+        } <span class="kw">else if </span>lang_items.dispatch_from_dyn_trait() == <span class="prelude-val">Some</span>(def_id) {
+            <span class="prelude-val">Some</span>(DispatchFromDyn)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>};
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.TraitDatum.html">chalk_solve::rust_ir::TraitDatum</a> {
+            id: <a href="#101">trait_id</a>,
+            binders: chalk_ir::Binders::new(
+                <a href="#109">binders</a>,
+                <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.TraitDatumBound.html">chalk_solve::rust_ir::TraitDatumBound</a> { <a href="#111">where_clauses</a> },
+            ),
+            flags: <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.TraitFlags.html">chalk_solve::rust_ir::TraitFlags</a> {
+                auto: <a href="#106">trait_def</a>.has_auto_impl,
+                marker: <a href="#106">trait_def</a>.is_marker,
+                upstream: !<a href="#105">def_id</a>.is_local(),
+                fundamental: <a class="self" href="#100">self</a>.interner.tcx.has_attr(<a href="#105">def_id</a>, sym::fundamental),
+                non_enumerable: <span class="bool-val">true</span>,
+                coinductive: <span class="bool-val">false</span>,
+            },
+            <a href="#113">associated_ty_ids</a>,
+            <a href="#123">well_known</a>,
+        })
+    }
+
+    <span class="kw">fn </span>adt_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        adt_id: chalk_ir::AdtId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::AdtDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>adt_def = <a href="#169">adt_id</a>.<span class="number">0</span>;
+
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#168">self</a>.interner.tcx, <a href="#171">adt_def</a>.did());
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#168">self</a>.interner, <a href="#173">bound_vars</a>);
+
+        <span class="kw">let </span>where_clauses = <a class="self" href="#168">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#171">adt_def</a>.did(), <a href="#173">bound_vars</a>);
+
+        <span class="kw">let </span>variants: Vec&lt;<span class="kw">_</span>&gt; = <a href="#171">adt_def</a>
+            .variants()
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|variant| <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtVariantDatum.html">chalk_solve::rust_ir::AdtVariantDatum</a> {
+                fields: <a href="#181">variant</a>
+                    .fields
+                    .iter()
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|field| <a href="#185">field</a>.ty(<a class="self" href="#168">self</a>.interner.tcx, <a href="#173">bound_vars</a>).<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#168">self</a>.interner))
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtDatum.html">chalk_solve::rust_ir::AdtDatum</a> {
+            id: <a href="#169">adt_id</a>,
+            binders: chalk_ir::Binders::new(
+                <a href="#174">binders</a>,
+                <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtDatumBound.html">chalk_solve::rust_ir::AdtDatumBound</a> { <a href="#178">variants</a>, <a href="#176">where_clauses</a> },
+            ),
+            flags: <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtFlags.html">chalk_solve::rust_ir::AdtFlags</a> {
+                upstream: !<a href="#171">adt_def</a>.did().is_local(),
+                fundamental: <a href="#171">adt_def</a>.is_fundamental(),
+                phantom_data: <a href="#171">adt_def</a>.is_phantom_data(),
+            },
+            kind: <span class="kw">match </span><a href="#171">adt_def</a>.adt_kind() {
+                ty::AdtKind::Struct =&gt; chalk_solve::rust_ir::AdtKind::Struct,
+                ty::AdtKind::Union =&gt; chalk_solve::rust_ir::AdtKind::Union,
+                ty::AdtKind::Enum =&gt; chalk_solve::rust_ir::AdtKind::Enum,
+            },
+        })
+    }
+
+    <span class="kw">fn </span>adt_repr(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        adt_id: chalk_ir::AdtId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::AdtRepr&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>adt_def = <a href="#210">adt_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>int = |i| chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Int(<a href="#213">i</a>)).intern(<a class="self" href="#209">self</a>.interner);
+        <span class="kw">let </span>uint = |i| chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Uint(<a href="#214">i</a>)).intern(<a class="self" href="#209">self</a>.interner);
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtRepr.html">chalk_solve::rust_ir::AdtRepr</a> {
+            c: <a href="#212">adt_def</a>.repr().c(),
+            packed: <a href="#212">adt_def</a>.repr().packed(),
+            int: <a href="#212">adt_def</a>.repr().int.map(|i| <span class="kw">match </span><a href="#218">i</a> {
+                attr::IntType::SignedInt(ty) =&gt; <span class="kw">match </span><a href="#219">ty</a> {
+                    ast::IntTy::Isize =&gt; <a href="#213">int</a>(chalk_ir::IntTy::Isize),
+                    ast::IntTy::I8 =&gt; <a href="#213">int</a>(chalk_ir::IntTy::I8),
+                    ast::IntTy::I16 =&gt; <a href="#213">int</a>(chalk_ir::IntTy::I16),
+                    ast::IntTy::I32 =&gt; <a href="#213">int</a>(chalk_ir::IntTy::I32),
+                    ast::IntTy::I64 =&gt; <a href="#213">int</a>(chalk_ir::IntTy::I64),
+                    ast::IntTy::I128 =&gt; <a href="#213">int</a>(chalk_ir::IntTy::I128),
+                },
+                attr::IntType::UnsignedInt(ty) =&gt; <span class="kw">match </span><a href="#227">ty</a> {
+                    ast::UintTy::Usize =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::Usize),
+                    ast::UintTy::U8 =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::U8),
+                    ast::UintTy::U16 =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::U16),
+                    ast::UintTy::U32 =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::U32),
+                    ast::UintTy::U64 =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::U64),
+                    ast::UintTy::U128 =&gt; <a href="#214">uint</a>(chalk_ir::UintTy::U128),
+                },
+            }),
+        })
+    }
+
+    <span class="kw">fn </span>adt_size_align(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        adt_id: chalk_ir::AdtId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AdtSizeAlign.html">chalk_solve::rust_ir::AdtSizeAlign</a>&gt; {
+        <span class="kw">let </span>tcx = <a class="self" href="#240">self</a>.interner.tcx;
+        <span class="kw">let </span>did = <a href="#241">adt_id</a>.<span class="number">0</span>.did();
+
+        <span class="comment">// Grab the ADT and the param we might need to calculate its layout
+        </span><span class="kw">let </span>param_env = <a href="#243">tcx</a>.param_env(<a href="#244">did</a>);
+        <span class="kw">let </span>adt_ty = <a href="#243">tcx</a>.type_of(<a href="#244">did</a>);
+
+        <span class="comment">// The ADT is a 1-zst if it&#39;s a ZST and its alignment is 1.
+        // Mark the ADT as _not_ a 1-zst if there was a layout error.
+        </span><span class="kw">let </span>one_zst = <span class="kw">if let </span><span class="prelude-val">Ok</span>(layout) = <a href="#243">tcx</a>.layout_of(<a href="#247">param_env</a>.and(<a href="#248">adt_ty</a>)) {
+            <a href="#252">layout</a>.is_zst() &amp;&amp; <a href="#252">layout</a>.align.abi.bytes() == <span class="number">1
+        </span>} <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>};
+
+        Arc::new(chalk_solve::rust_ir::AdtSizeAlign::from_one_zst(<a href="#252">one_zst</a>))
+    }
+
+    <span class="kw">fn </span>fn_def_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        fn_def_id: chalk_ir::FnDefId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::FnDefDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>def_id = <a href="#263">fn_def_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#262">self</a>.interner.tcx, <a href="#265">def_id</a>);
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#262">self</a>.interner, <a href="#266">bound_vars</a>);
+
+        <span class="kw">let </span>where_clauses = <a class="self" href="#262">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#265">def_id</a>, <a href="#266">bound_vars</a>);
+
+        <span class="kw">let </span>sig = <a class="self" href="#262">self</a>.interner.tcx.bound_fn_sig(<a href="#265">def_id</a>);
+        <span class="kw">let </span>(inputs_and_output, iobinders, <span class="kw">_</span>) = <a href="lowering.rs.html#846-850"><span class="kw">crate</span>::chalk::lowering::collect_bound_vars</a>(
+            <a class="self" href="#262">self</a>.interner,
+            <a class="self" href="#262">self</a>.interner.tcx,
+            <a href="#271">sig</a>.map_bound(|s| <a href="#275">s</a>.inputs_and_output()).<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#262">self</a>.interner.tcx, <a href="#266">bound_vars</a>),
+        );
+
+        <span class="kw">let </span>argument_types = <a href="#272">inputs_and_output</a>[..<a href="#272">inputs_and_output</a>.len() - <span class="number">1</span>]
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|t| <a href="#271">sig</a>.rebind(<span class="kw-2">*</span><a href="#280">t</a>).<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#262">self</a>.interner.tcx, <span class="kw-2">&amp;</span><a href="#266">bound_vars</a>).<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#262">self</a>.interner))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span>return_type = <a href="#271">sig</a>
+            .rebind(<a href="#272">inputs_and_output</a>[<a href="#272">inputs_and_output</a>.len() - <span class="number">1</span>])
+            .<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#262">self</a>.interner.tcx, <span class="kw-2">&amp;</span><a href="#266">bound_vars</a>)
+            .<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#262">self</a>.interner);
+
+        <span class="kw">let </span>bound = <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.FnDefDatumBound.html">chalk_solve::rust_ir::FnDefDatumBound</a> {
+            inputs_and_output: chalk_ir::Binders::new(
+                <a href="#272">iobinders</a>,
+                <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.FnDefInputsAndOutputDatum.html">chalk_solve::rust_ir::FnDefInputsAndOutputDatum</a> { <a href="#278">argument_types</a>, <a href="#283">return_type</a> },
+            ),
+            <a href="#269">where_clauses</a>,
+        };
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.FnDefDatum.html">chalk_solve::rust_ir::FnDefDatum</a> {
+            id: <a href="#263">fn_def_id</a>,
+            sig: <a href="#271">sig</a>.<span class="number">0</span>.<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#262">self</a>.interner),
+            binders: chalk_ir::Binders::new(<a href="#267">binders</a>, <a href="#288">bound</a>),
+        })
+    }
+
+    <span class="kw">fn </span>impl_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        impl_id: chalk_ir::ImplId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::ImplDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>def_id = <a href="#304">impl_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#303">self</a>.interner.tcx, <a href="#306">def_id</a>);
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#303">self</a>.interner, <a href="#307">bound_vars</a>);
+
+        <span class="kw">let </span>trait_ref = <a class="self" href="#303">self</a>.interner.tcx.bound_impl_trait_ref(<a href="#306">def_id</a>).expect(<span class="string">&quot;not an impl&quot;</span>);
+        <span class="kw">let </span>trait_ref = <a href="#310">trait_ref</a>.<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#303">self</a>.interner.tcx, <a href="#307">bound_vars</a>);
+
+        <span class="kw">let </span>where_clauses = <a class="self" href="#303">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#306">def_id</a>, <a href="#307">bound_vars</a>);
+
+        <span class="kw">let </span>value = <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.ImplDatumBound.html">chalk_solve::rust_ir::ImplDatumBound</a> {
+            trait_ref: <a href="#311">trait_ref</a>.<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#303">self</a>.interner),
+            <a href="#313">where_clauses</a>,
+        };
+
+        <span class="kw">let </span>associated_ty_value_ids: Vec&lt;<span class="kw">_</span>&gt; = <span class="self"><a href="#303">self</a>
+            </span>.interner
+            .tcx
+            .associated_items(<a href="#306">def_id</a>)
+            .in_definition_order()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|i| <a href="#325">i</a>.kind == AssocKind::Type)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|i| chalk_solve::rust_ir::AssociatedTyValueId(<a href="#326">i</a>.def_id))
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.ImplDatum.html">chalk_solve::rust_ir::ImplDatum</a> {
+            polarity: <a class="self" href="#303">self</a>.interner.tcx.impl_polarity(<a href="#306">def_id</a>).<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#303">self</a>.interner),
+            binders: chalk_ir::Binders::new(<a href="#308">binders</a>, <a href="#315">value</a>),
+            impl_type: chalk_solve::rust_ir::ImplType::Local,
+            <a href="#320">associated_ty_value_ids</a>,
+        })
+    }
+
+    <span class="kw">fn </span>impls_for_trait(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        trait_id: chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        parameters: <span class="kw-2">&amp;</span>[chalk_ir::GenericArg&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;],
+        _binders: <span class="kw-2">&amp;</span>chalk_ir::CanonicalVarKinds&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Vec&lt;chalk_ir::ImplId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>def_id = <a href="#339">trait_id</a>.<span class="number">0</span>;
+
+        <span class="comment">// FIXME(chalk): use TraitDef::for_each_relevant_impl, but that will
+        // require us to be able to interconvert `Ty&lt;&#39;tcx&gt;`, and we&#39;re
+        // not there yet.
+
+        </span><span class="kw">let </span>all_impls = <a class="self" href="#338">self</a>.interner.tcx.all_impls(<a href="#343">def_id</a>);
+        <span class="kw">let </span>matched_impls = <a href="#349">all_impls</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|impl_def_id| {
+            <span class="kw">use </span>chalk_ir::could_match::CouldMatch;
+            <span class="kw">let </span>trait_ref = <a class="self" href="#338">self</a>.interner.tcx.bound_impl_trait_ref(<span class="kw-2">*</span><a href="#350">impl_def_id</a>).unwrap();
+            <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#338">self</a>.interner.tcx, <span class="kw-2">*</span><a href="#350">impl_def_id</a>);
+
+            <span class="kw">let </span>self_ty = <a href="#352">trait_ref</a>.map_bound(|t| <a href="#355">t</a>.self_ty());
+            <span class="kw">let </span>self_ty = <a href="#355">self_ty</a>.<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#338">self</a>.interner.tcx, <a href="#353">bound_vars</a>);
+            <span class="kw">let </span>lowered_ty = <a href="#356">self_ty</a>.<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#338">self</a>.interner);
+
+            <a href="#340">parameters</a>[<span class="number">0</span>].assert_ty_ref(<a class="self" href="#338">self</a>.interner).could_match(
+                <a class="self" href="#338">self</a>.interner,
+                <a class="self" href="#338">self</a>.<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/trait.RustIrDatabase.html">unification_database</a>(),
+                <span class="kw-2">&amp;</span><a href="#357">lowered_ty</a>,
+            )
+        });
+
+        <span class="kw">let </span>impls = <a href="#350">matched_impls</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(chalk_ir::ImplId).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <a href="#366">impls</a>
+    }
+
+    <span class="kw">fn </span>impl_provided_for(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        auto_trait_id: chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        chalk_ty: <span class="kw-2">&amp;</span>chalk_ir::TyKind&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">use </span><a href="https://docs.rs/chalk-ir/0.80.0/chalk_ir/enum.Scalar.html">chalk_ir::Scalar</a>::<span class="kw-2">*</span>;
+        <span class="kw">use </span><a href="https://docs.rs/chalk-ir/0.80.0/chalk_ir/enum.TyKind.html">chalk_ir::TyKind</a>::<span class="kw-2">*</span>;
+
+        <span class="kw">let </span>trait_def_id = <a href="#372">auto_trait_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>all_impls = <a class="self" href="#371">self</a>.interner.tcx.all_impls(<a href="#378">trait_def_id</a>);
+        <span class="kw">for </span>impl_def_id <span class="kw">in </span>all_impls {
+            <span class="kw">let </span>trait_ref = <span class="self">self</span>.interner.tcx.impl_trait_ref(impl_def_id).unwrap();
+            <span class="kw">let </span>self_ty = trait_ref.self_ty();
+            <span class="kw">let </span>provides = <span class="kw">match </span>(self_ty.kind(), chalk_ty) {
+                (<span class="kw-2">&amp;</span>ty::Adt(impl_adt_def, ..), Adt(id, ..)) =&gt; impl_adt_def.did() == id.<span class="number">0</span>.did(),
+                (<span class="kw">_</span>, AssociatedType(_ty_id, ..)) =&gt; {
+                    <span class="comment">// FIXME(chalk): See https://github.com/rust-lang/rust/pull/77152#discussion_r494484774
+                    </span><span class="bool-val">false
+                </span>}
+                (ty::Bool, Scalar(Bool)) =&gt; <span class="bool-val">true</span>,
+                (ty::Char, Scalar(Char)) =&gt; <span class="bool-val">true</span>,
+                (ty::Int(ty1), Scalar(Int(ty2))) =&gt; <span class="macro">matches!</span>(
+                    (ty1, ty2),
+                    (ty::IntTy::Isize, chalk_ir::IntTy::Isize)
+                        | (ty::IntTy::I8, chalk_ir::IntTy::I8)
+                        | (ty::IntTy::I16, chalk_ir::IntTy::I16)
+                        | (ty::IntTy::I32, chalk_ir::IntTy::I32)
+                        | (ty::IntTy::I64, chalk_ir::IntTy::I64)
+                        | (ty::IntTy::I128, chalk_ir::IntTy::I128)
+                ),
+                (ty::Uint(ty1), Scalar(Uint(ty2))) =&gt; <span class="macro">matches!</span>(
+                    (ty1, ty2),
+                    (ty::UintTy::Usize, chalk_ir::UintTy::Usize)
+                        | (ty::UintTy::U8, chalk_ir::UintTy::U8)
+                        | (ty::UintTy::U16, chalk_ir::UintTy::U16)
+                        | (ty::UintTy::U32, chalk_ir::UintTy::U32)
+                        | (ty::UintTy::U64, chalk_ir::UintTy::U64)
+                        | (ty::UintTy::U128, chalk_ir::UintTy::U128)
+                ),
+                (ty::Float(ty1), Scalar(Float(ty2))) =&gt; <span class="macro">matches!</span>(
+                    (ty1, ty2),
+                    (ty::FloatTy::F32, chalk_ir::FloatTy::F32)
+                        | (ty::FloatTy::F64, chalk_ir::FloatTy::F64)
+                ),
+                (<span class="kw-2">&amp;</span>ty::Tuple(substs), Tuple(len, <span class="kw">_</span>)) =&gt; substs.len() == <span class="kw-2">*</span>len,
+                (<span class="kw-2">&amp;</span>ty::Array(..), Array(..)) =&gt; <span class="bool-val">true</span>,
+                (<span class="kw-2">&amp;</span>ty::Slice(..), Slice(..)) =&gt; <span class="bool-val">true</span>,
+                (<span class="kw-2">&amp;</span>ty::RawPtr(type_and_mut), Raw(mutability, <span class="kw">_</span>)) =&gt; {
+                    <span class="kw">match </span>(type_and_mut.mutbl, mutability) {
+                        (ast::Mutability::Mut, chalk_ir::Mutability::Mut) =&gt; <span class="bool-val">true</span>,
+                        (ast::Mutability::Mut, chalk_ir::Mutability::Not) =&gt; <span class="bool-val">false</span>,
+                        (ast::Mutability::Not, chalk_ir::Mutability::Mut) =&gt; <span class="bool-val">false</span>,
+                        (ast::Mutability::Not, chalk_ir::Mutability::Not) =&gt; <span class="bool-val">true</span>,
+                    }
+                }
+                (<span class="kw-2">&amp;</span>ty::Ref(.., mutability1), Ref(mutability2, ..)) =&gt; {
+                    <span class="kw">match </span>(mutability1, mutability2) {
+                        (ast::Mutability::Mut, chalk_ir::Mutability::Mut) =&gt; <span class="bool-val">true</span>,
+                        (ast::Mutability::Mut, chalk_ir::Mutability::Not) =&gt; <span class="bool-val">false</span>,
+                        (ast::Mutability::Not, chalk_ir::Mutability::Mut) =&gt; <span class="bool-val">false</span>,
+                        (ast::Mutability::Not, chalk_ir::Mutability::Not) =&gt; <span class="bool-val">true</span>,
+                    }
+                }
+                (<span class="kw-2">&amp;</span>ty::Opaque(def_id, ..), OpaqueType(opaque_ty_id, ..)) =&gt; def_id == opaque_ty_id.<span class="number">0</span>,
+                (<span class="kw-2">&amp;</span>ty::FnDef(def_id, ..), FnDef(fn_def_id, ..)) =&gt; def_id == fn_def_id.<span class="number">0</span>,
+                (<span class="kw-2">&amp;</span>ty::Str, Str) =&gt; <span class="bool-val">true</span>,
+                (<span class="kw-2">&amp;</span>ty::Never, Never) =&gt; <span class="bool-val">true</span>,
+                (<span class="kw-2">&amp;</span>ty::Closure(def_id, ..), Closure(closure_id, <span class="kw">_</span>)) =&gt; def_id == closure_id.<span class="number">0</span>,
+                (<span class="kw-2">&amp;</span>ty::Foreign(def_id), Foreign(foreign_def_id)) =&gt; def_id == foreign_def_id.<span class="number">0</span>,
+                (<span class="kw-2">&amp;</span>ty::Error(..), Error) =&gt; <span class="bool-val">false</span>,
+                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+            };
+            <span class="kw">if </span>provides {
+                <span class="kw">return </span><span class="bool-val">true</span>;
+            }
+        }
+        <span class="bool-val">false
+    </span>}
+
+    <span class="kw">fn </span>associated_ty_value(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        associated_ty_id: chalk_solve::rust_ir::AssociatedTyValueId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::AssociatedTyValue&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>def_id = <a href="#451">associated_ty_id</a>.<span class="number">0</span>;
+        <span class="kw">let </span>assoc_item = <a class="self" href="#450">self</a>.interner.tcx.associated_item(<a href="#453">def_id</a>);
+        <span class="kw">let </span>impl_id = <a href="#454">assoc_item</a>.container_id(<a class="self" href="#450">self</a>.interner.tcx);
+        <span class="kw">match </span><a href="#454">assoc_item</a>.kind {
+            AssocKind::Type =&gt; {}
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>(<span class="string">&quot;Not possible??&quot;</span>),
+        }
+
+        <span class="kw">let </span>trait_item_id = <a href="#454">assoc_item</a>.trait_item_def_id.expect(<span class="string">&quot;assoc_ty with no trait version&quot;</span>);
+        <span class="kw">let </span>bound_vars = <a href="#716">bound_vars_for_item</a>(<a class="self" href="#450">self</a>.interner.tcx, <a href="#453">def_id</a>);
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#450">self</a>.interner, <a href="#462">bound_vars</a>);
+        <span class="kw">let </span>ty = <span class="self"><a href="#450">self</a>
+            </span>.interner
+            .tcx
+            .bound_type_of(<a href="#453">def_id</a>)
+            .<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#450">self</a>.interner.tcx, <a href="#462">bound_vars</a>)
+            .<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#450">self</a>.interner);
+
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AssociatedTyValue.html">chalk_solve::rust_ir::AssociatedTyValue</a> {
+            impl_id: chalk_ir::ImplId(<a href="#455">impl_id</a>),
+            associated_ty_id: chalk_ir::AssocTypeId(<a href="#461">trait_item_id</a>),
+            value: chalk_ir::Binders::new(
+                <a href="#463">binders</a>,
+                <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.AssociatedTyValueBound.html">chalk_solve::rust_ir::AssociatedTyValueBound</a> { <a href="#464">ty</a> },
+            ),
+        })
+    }
+
+    <span class="kw">fn </span>custom_clauses(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;chalk_ir::ProgramClause&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[]
+    }
+
+    <span class="kw">fn </span>local_impls_to_coherence_check(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _trait_id: chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Vec&lt;chalk_ir::ImplId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>()
+    }
+
+    <span class="kw">fn </span>opaque_ty_data(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        opaque_ty_id: chalk_ir::OpaqueTyId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::OpaqueTyDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>bound_vars = ty::fold::shift_vars(
+            <a class="self" href="#493">self</a>.interner.tcx,
+            <a href="#716">bound_vars_for_item</a>(<a class="self" href="#493">self</a>.interner.tcx, <a href="#494">opaque_ty_id</a>.<span class="number">0</span>),
+            <span class="number">1</span>,
+        );
+        <span class="kw">let </span>where_clauses = <a class="self" href="#493">self</a>.<a href="#36-40">where_clauses_for</a>(<a href="#494">opaque_ty_id</a>.<span class="number">0</span>, <a href="#496">bound_vars</a>);
+
+        <span class="kw">let </span>identity_substs = InternalSubsts::identity_for_item(<a class="self" href="#493">self</a>.interner.tcx, <a href="#494">opaque_ty_id</a>.<span class="number">0</span>);
+
+        <span class="kw">let </span>explicit_item_bounds = <a class="self" href="#493">self</a>.interner.tcx.bound_explicit_item_bounds(<a href="#494">opaque_ty_id</a>.<span class="number">0</span>);
+        <span class="kw">let </span>bounds =
+            <a href="#505">explicit_item_bounds</a>
+                .<span class="number">0
+                </span>.iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(bound, <span class="kw">_</span>)| {
+                    <a href="#505">explicit_item_bounds</a>.rebind(<span class="kw-2">*</span><a href="#510">bound</a>).<a href="../../../rustc_middle/ty/subst/trait.Subst.html">subst</a>(<a class="self" href="#493">self</a>.interner.tcx, <span class="kw-2">&amp;</span><a href="#496">bound_vars</a>)
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|bound| {
+                    <a href="#513">bound</a>.<a href="../../../rustc_middle/ty/fold/trait.TypeFoldable.html">fold_with</a>(<span class="kw-2">&amp;mut </span><a href="#763">ReplaceOpaqueTyFolder</a> {
+                        tcx: <a class="self" href="#493">self</a>.interner.tcx,
+                        <a href="#494">opaque_ty_id</a>,
+                        <a href="#503">identity_substs</a>,
+                        binder_index: ty::INNERMOST,
+                    })
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|bound| {
+                    LowerInto::&lt;
+                    <span class="prelude-ty">Option</span>&lt;chalk_ir::QuantifiedWhereClause&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;
+                &gt;::lower_into(<a href="#521">bound</a>, <a class="self" href="#493">self</a>.interner)
+                })
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="comment">// Binder for the bound variable representing the concrete impl Trait type.
+        </span><span class="kw">let </span>existential_binder = chalk_ir::VariableKinds::from1(
+            <a class="self" href="#493">self</a>.interner,
+            chalk_ir::VariableKind::Ty(chalk_ir::TyVariableKind::General),
+        );
+
+        <span class="kw">let </span>value = <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.OpaqueTyDatumBound.html">chalk_solve::rust_ir::OpaqueTyDatumBound</a> {
+            bounds: chalk_ir::Binders::new(<a href="#529">existential_binder</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <a href="#506">bounds</a>),
+            where_clauses: chalk_ir::Binders::new(<a href="#529">existential_binder</a>, <a href="#501">where_clauses</a>),
+        };
+
+        <span class="kw">let </span>binders = <a href="#745-748">binders_for</a>(<a class="self" href="#493">self</a>.interner, <a href="#496">bound_vars</a>);
+        Arc::new(<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.OpaqueTyDatum.html">chalk_solve::rust_ir::OpaqueTyDatum</a> {
+            <a href="#494">opaque_ty_id</a>,
+            bound: chalk_ir::Binders::new(<a href="#539">binders</a>, <a href="#534">value</a>),
+        })
+    }
+
+    <span class="kw">fn </span>program_clauses_for_env(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        environment: <span class="kw-2">&amp;</span>chalk_ir::Environment&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::ProgramClauses&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        chalk_solve::program_clauses_for_env(<a class="self" href="#547">self</a>, <a href="#548">environment</a>)
+    }
+
+    <span class="kw">fn </span>well_known_trait_id(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        well_known_trait: <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/enum.WellKnownTrait.html">chalk_solve::rust_ir::WellKnownTrait</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">use </span><a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/enum.WellKnownTrait.html">chalk_solve::rust_ir::WellKnownTrait</a>::<span class="kw-2">*</span>;
+        <span class="kw">let </span>lang_items = <a class="self" href="#554">self</a>.interner.tcx.lang_items();
+        <span class="kw">let </span>def_id = <span class="kw">match </span><a href="#555">well_known_trait</a> {
+            Sized =&gt; <a href="#558">lang_items</a>.sized_trait(),
+            Copy =&gt; <a href="#558">lang_items</a>.copy_trait(),
+            Clone =&gt; <a href="#558">lang_items</a>.clone_trait(),
+            Drop =&gt; <a href="#558">lang_items</a>.drop_trait(),
+            Fn =&gt; <a href="#558">lang_items</a>.fn_trait(),
+            FnMut =&gt; <a href="#558">lang_items</a>.fn_mut_trait(),
+            FnOnce =&gt; <a href="#558">lang_items</a>.fn_once_trait(),
+            Generator =&gt; <a href="#558">lang_items</a>.gen_trait(),
+            Unsize =&gt; <a href="#558">lang_items</a>.unsize_trait(),
+            Unpin =&gt; <a href="#558">lang_items</a>.unpin_trait(),
+            CoerceUnsized =&gt; <a href="#558">lang_items</a>.coerce_unsized_trait(),
+            DiscriminantKind =&gt; <a href="#558">lang_items</a>.discriminant_kind_trait(),
+            DispatchFromDyn =&gt; <a href="#558">lang_items</a>.dispatch_from_dyn_trait(),
+        };
+        <a href="#559">def_id</a>.map(chalk_ir::TraitId)
+    }
+
+    <span class="kw">fn </span>is_object_safe(<span class="kw-2">&amp;</span><span class="self">self</span>, trait_id: chalk_ir::TraitId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#577">self</a>.interner.tcx.is_object_safe(<a href="#577">trait_id</a>.<span class="number">0</span>)
+    }
+
+    <span class="kw">fn </span>hidden_opaque_type(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _id: chalk_ir::OpaqueTyId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Ty&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="comment">// FIXME(chalk): actually get hidden ty
+        </span><a class="self" href="#582">self</a>.interner
+            .tcx
+            .mk_ty(ty::Tuple(<a class="self" href="#582">self</a>.interner.tcx.intern_type_list(<span class="kw-2">&amp;</span>[])))
+            .<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#582">self</a>.interner)
+    }
+
+    <span class="kw">fn </span>closure_kind(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _closure_id: chalk_ir::ClosureId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        substs: <span class="kw-2">&amp;</span>chalk_ir::Substitution&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/enum.ClosureKind.html">chalk_solve::rust_ir::ClosureKind</a> {
+        <span class="kw">let </span>kind = <span class="kw-2">&amp;</span><a href="#595">substs</a>.as_slice(<a class="self" href="#593">self</a>.interner)[<a href="#595">substs</a>.len(<a class="self" href="#593">self</a>.interner) - <span class="number">3</span>];
+        <span class="kw">match </span><a href="#597">kind</a>.assert_ty_ref(<a class="self" href="#593">self</a>.interner).kind(<a class="self" href="#593">self</a>.interner) {
+            chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Int(int_ty)) =&gt; <span class="kw">match </span><a href="#599">int_ty</a> {
+                chalk_ir::IntTy::I8 =&gt; chalk_solve::rust_ir::ClosureKind::Fn,
+                chalk_ir::IntTy::I16 =&gt; chalk_solve::rust_ir::ClosureKind::FnMut,
+                chalk_ir::IntTy::I32 =&gt; chalk_solve::rust_ir::ClosureKind::FnOnce,
+                <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;bad closure kind&quot;</span>),
+            },
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;bad closure kind&quot;</span>),
+        }
+    }
+
+    <span class="kw">fn </span>closure_inputs_and_output(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _closure_id: chalk_ir::ClosureId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        substs: <span class="kw-2">&amp;</span>chalk_ir::Substitution&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Binders&lt;chalk_solve::rust_ir::FnDefInputsAndOutputDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;
+    {
+        <span class="kw">let </span>sig = <span class="kw-2">&amp;</span><a href="#612">substs</a>.as_slice(<a class="self" href="#610">self</a>.interner)[<a href="#612">substs</a>.len(<a class="self" href="#610">self</a>.interner) - <span class="number">2</span>];
+        <span class="kw">match </span><a href="#615">sig</a>.assert_ty_ref(<a class="self" href="#610">self</a>.interner).kind(<a class="self" href="#610">self</a>.interner) {
+            chalk_ir::TyKind::Function(f) =&gt; {
+                <span class="kw">let </span>substitution = <a href="#617">f</a>.substitution.<span class="number">0</span>.as_slice(<a class="self" href="#610">self</a>.interner);
+                <span class="kw">let </span>return_type = <a href="#618">substitution</a>.last().unwrap().assert_ty_ref(<a class="self" href="#610">self</a>.interner).<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <span class="comment">// Closure arguments are tupled
+                </span><span class="kw">let </span>argument_tuple = <a href="#618">substitution</a>[<span class="number">0</span>].assert_ty_ref(<a class="self" href="#610">self</a>.interner);
+                <span class="kw">let </span>argument_types = <span class="kw">match </span><a href="#621">argument_tuple</a>.kind(<a class="self" href="#610">self</a>.interner) {
+                    chalk_ir::TyKind::Tuple(_len, substitution) =&gt; <a href="#623">substitution</a>
+                        .iter(<a class="self" href="#610">self</a>.interner)
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|arg| <a href="#625">arg</a>.assert_ty_ref(<a class="self" href="#610">self</a>.interner))
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">cloned</a>()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;Expecting closure FnSig args to be tupled.&quot;</span>),
+                };
+
+                chalk_ir::Binders::new(
+                    chalk_ir::VariableKinds::from_iter(
+                        <a class="self" href="#610">self</a>.interner,
+                        (<span class="number">0</span>..<a href="#617">f</a>.num_binders).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw">_</span>| chalk_ir::VariableKind::Lifetime),
+                    ),
+                    <a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/rust_ir/struct.FnDefInputsAndOutputDatum.html">chalk_solve::rust_ir::FnDefInputsAndOutputDatum</a> { <a href="#622">argument_types</a>, <a href="#619">return_type</a> },
+                )
+            }
+            <span class="kw">_ </span>=&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;Invalid sig.&quot;</span>),
+        }
+    }
+
+    <span class="kw">fn </span>closure_upvars(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _closure_id: chalk_ir::ClosureId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        substs: <span class="kw-2">&amp;</span>chalk_ir::Substitution&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Binders&lt;chalk_ir::Ty&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">let </span>inputs_and_output = <a class="self" href="#644">self</a>.<a href="https://docs.rs/chalk-solve/0.80.0/chalk_solve/trait.RustIrDatabase.html">closure_inputs_and_output</a>(<a href="#645">_closure_id</a>, <a href="#646">substs</a>);
+        <span class="kw">let </span>tuple = <a href="#646">substs</a>.as_slice(<a class="self" href="#644">self</a>.interner).last().unwrap().assert_ty_ref(<a class="self" href="#644">self</a>.interner);
+        <a href="#648">inputs_and_output</a>.map_ref(|<span class="kw">_</span>| <a href="#649">tuple</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>())
+    }
+
+    <span class="kw">fn </span>closure_fn_substitution(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _closure_id: chalk_ir::ClosureId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        substs: <span class="kw-2">&amp;</span>chalk_ir::Substitution&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Substitution&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>substitution = <span class="kw-2">&amp;</span><a href="#656">substs</a>.as_slice(<a class="self" href="#654">self</a>.interner)[<span class="number">0</span>..<a href="#656">substs</a>.len(<a class="self" href="#654">self</a>.interner) - <span class="number">3</span>];
+        chalk_ir::Substitution::from_iter(<a class="self" href="#654">self</a>.interner, <a href="#658">substitution</a>)
+    }
+
+    <span class="kw">fn </span>generator_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _generator_id: chalk_ir::GeneratorId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::GeneratorDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>()
+    }
+
+    <span class="kw">fn </span>generator_witness_datum(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        _generator_id: chalk_ir::GeneratorId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; Arc&lt;chalk_solve::rust_ir::GeneratorWitnessDatum&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>()
+    }
+
+    <span class="kw">fn </span>unification_database(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn </span>chalk_ir::UnificationDatabase&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="self"><a href="#676">self</a>
+    </span>}
+
+    <span class="kw">fn </span>discriminant_type(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="kw">_</span>: chalk_ir::Ty&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Ty&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; chalk_ir::UnificationDatabase&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>RustIrDatabase&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fn_def_variance(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        def_id: chalk_ir::FnDefId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Variances&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>variances = <a class="self" href="#690">self</a>.interner.tcx.variances_of(<a href="#691">def_id</a>.<span class="number">0</span>);
+        chalk_ir::Variances::from_iter(
+            <a class="self" href="#690">self</a>.interner,
+            <a href="#693">variances</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|v| <a href="#696">v</a>.<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#690">self</a>.interner)),
+        )
+    }
+
+    <span class="kw">fn </span>adt_variance(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        adt_id: chalk_ir::AdtId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; chalk_ir::Variances&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>variances = <a class="self" href="#701">self</a>.interner.tcx.variances_of(<a href="#702">adt_id</a>.<span class="number">0</span>.did());
+        chalk_ir::Variances::from_iter(
+            <a class="self" href="#701">self</a>.interner,
+            <a href="#704">variances</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|v| <a href="#707">v</a>.<a href="lowering.rs.html#51">lower_into</a>(<a class="self" href="#701">self</a>.interner)),
+        )
+    }
+}
+
+<span class="doccomment">/// Creates an `InternalSubsts` that maps each generic parameter to a higher-ranked
+/// var bound at index `0`. For types, we use a `BoundVar` index equal to
+/// the type parameter index. For regions, we use the `BoundRegionKind::BrNamed`
+/// variant (which has a `DefId`).
+</span><span class="kw">fn </span>bound_vars_for_item&lt;<span class="lifetime">&#39;tcx</span>&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    InternalSubsts::for_item(<a href="#716">tcx</a>, <a href="#716">def_id</a>, |param, substs| <span class="kw">match </span><a href="#717">param</a>.kind {
+        <a href="../../../rustc_middle/ty/generics/enum.GenericParamDefKind.html">ty::GenericParamDefKind::Type</a> { .. } =&gt; <a href="#716">tcx</a>
+            .mk_ty(ty::Bound(
+                ty::INNERMOST,
+                <a href="../../../rustc_middle/ty/sty/struct.BoundTy.html">ty::BoundTy</a> {
+                    var: ty::BoundVar::from(<a href="#717">param</a>.index),
+                    kind: ty::BoundTyKind::Param(<a href="#717">param</a>.name),
+                },
+            ))
+            .<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+
+        ty::GenericParamDefKind::Lifetime =&gt; {
+            <span class="kw">let </span>br = <a href="../../../rustc_middle/ty/sty/struct.BoundRegion.html">ty::BoundRegion</a> {
+                var: ty::BoundVar::from_usize(<a href="#717">substs</a>.len()),
+                kind: ty::BrAnon(<a href="#717">substs</a>.len() <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>),
+            };
+            <a href="#716">tcx</a>.mk_region(ty::ReLateBound(ty::INNERMOST, <a href="#729">br</a>)).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+        }
+
+        <a href="../../../rustc_middle/ty/generics/enum.GenericParamDefKind.html">ty::GenericParamDefKind::Const</a> { .. } =&gt; <a href="#716">tcx</a>
+            .mk_const(<a href="../../../rustc_middle/ty/consts/struct.ConstS.html">ty::ConstS</a> {
+                kind: ty::ConstKind::Bound(ty::INNERMOST, ty::BoundVar::from(<a href="#717">param</a>.index)),
+                ty: <a href="#716">tcx</a>.type_of(<a href="#717">param</a>.def_id),
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+    })
+}
+
+<span class="kw">fn </span>binders_for&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    interner: RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    bound_vars: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; chalk_ir::VariableKinds&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    chalk_ir::VariableKinds::from_iter(
+        <a href="#746">interner</a>,
+        <a href="#747">bound_vars</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|arg| <span class="kw">match </span><a href="#751">arg</a>.unpack() {
+            ty::subst::GenericArgKind::Lifetime(_re) =&gt; chalk_ir::VariableKind::Lifetime,
+            ty::subst::GenericArgKind::Type(_ty) =&gt; {
+                chalk_ir::VariableKind::Ty(chalk_ir::TyVariableKind::General)
+            }
+            ty::subst::GenericArgKind::Const(c) =&gt; {
+                chalk_ir::VariableKind::Const(<a href="#756">c</a>.ty().<a href="lowering.rs.html#51">lower_into</a>(<a href="#746">interner</a>))
+            }
+        }),
+    )
+}
+
+<span class="kw">struct </span>ReplaceOpaqueTyFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    opaque_ty_id: chalk_ir::OpaqueTyId&lt;RustInterner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    identity_substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    binder_index: <a href="../../../rustc_type_ir/struct.DebruijnIndex.html">ty::DebruijnIndex</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; ty::TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ReplaceOpaqueTyFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#771">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_binder&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a class="self" href="#776">self</a>.binder_index.shift_in(<span class="number">1</span>);
+        <span class="kw">let </span>t = <a href="#777">t</a>.<a href="../../../rustc_middle/ty/fold/trait.TypeSuperFoldable.html">super_fold_with</a>(<a class="self" href="#776">self</a>);
+        <a class="self" href="#776">self</a>.binder_index.shift_out(<span class="number">1</span>);
+        <a href="#780">t</a>
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span>ty::Opaque(def_id, substs) = <span class="kw-2">*</span><a href="#785">ty</a>.kind() {
+            <span class="kw">if </span>def_id == <span class="self">self</span>.opaque_ty_id.<span class="number">0 </span>&amp;&amp; substs == <span class="self">self</span>.identity_substs {
+                <span class="kw">return </span><a class="self" href="#785">self</a>.tcx.mk_ty(ty::Bound(
+                    <a class="self" href="#785">self</a>.binder_index,
+                    ty::BoundTy::from(ty::BoundVar::from_u32(<span class="number">0</span>)),
+                ));
+            }
+        }
+        <a href="#785">ty</a>
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_traits" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

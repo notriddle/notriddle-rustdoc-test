@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["MaybeRequiresStorage","Dataflow analysis that determines whether each local requires storage at a given location; i.e. whether its storage can go away without being observed."],["MaybeStorageLive",""],["MoveVisitor",""]],"type":[["BorrowedLocalsResults",""]]};

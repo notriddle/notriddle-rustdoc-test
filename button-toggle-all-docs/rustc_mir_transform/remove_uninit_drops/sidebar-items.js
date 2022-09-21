@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["is_needs_drop_and_init",""],["variant_needs_drop",""]],"struct":[["RemoveUninitDrops","Removes `Drop` and `DropAndReplace` terminators whose target is known to be uninitialized at that point."]]};

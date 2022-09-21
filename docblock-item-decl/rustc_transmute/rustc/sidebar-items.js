@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["TransmuteTypeEnv",""],["Types","The source and destination types of a transmutation."]]};

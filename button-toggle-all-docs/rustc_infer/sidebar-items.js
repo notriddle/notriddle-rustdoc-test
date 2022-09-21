@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["errors",""],["infer",""],["traits","Trait Resolution. See the rustc-dev-guide for more information on how this works."]]};

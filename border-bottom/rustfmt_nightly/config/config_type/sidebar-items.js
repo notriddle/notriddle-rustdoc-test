@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["create_config",""]],"trait":[["ConfigType","Trait for types that can be used in `Config`."]]};

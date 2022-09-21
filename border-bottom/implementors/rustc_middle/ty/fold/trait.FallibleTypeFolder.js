@@ -1,0 +1,5 @@
+(function() {var implementors = {
+"rustc_infer":[["impl&lt;'a, 'tcx&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.FallibleTypeFolder.html\" title=\"trait rustc_middle::ty::fold::FallibleTypeFolder\">FallibleTypeFolder</a>&lt;'tcx&gt; for <a class=\"struct\" href=\"rustc_infer/infer/resolve/struct.FullTypeResolver.html\" title=\"struct rustc_infer::infer::resolve::FullTypeResolver\">FullTypeResolver</a>&lt;'a, 'tcx&gt;"]],
+"rustc_middle":[],
+"rustc_trait_selection":[["impl&lt;'cx, 'tcx&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.FallibleTypeFolder.html\" title=\"trait rustc_middle::ty::fold::FallibleTypeFolder\">FallibleTypeFolder</a>&lt;'tcx&gt; for <a class=\"struct\" href=\"rustc_trait_selection/traits/query/normalize/struct.QueryNormalizer.html\" title=\"struct rustc_trait_selection::traits::query::normalize::QueryNormalizer\">QueryNormalizer</a>&lt;'cx, 'tcx&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["RemoveFalseEdges","Removes `FalseEdge` and `FalseUnwind` terminators from the MIR."]]};

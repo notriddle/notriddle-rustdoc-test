@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["renumber_mir","Replaces all free regions appearing in the MIR with fresh inference variables, returning the number of variables created."],["renumber_regions","Replaces all regions appearing in `value` with fresh inference variables."],["renumber_regions_in_mir_constant",""]],"struct":[["NllVisitor",""]]};

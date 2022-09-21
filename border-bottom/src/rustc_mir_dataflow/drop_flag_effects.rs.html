@@ -1,0 +1,538 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_dataflow/src/drop_flag_effects.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>drop_flag_effects.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_mir_dataflow/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="elaborate_drops.rs.html#15"><span class="kw">crate</span>::elaborate_drops::DropFlagState</a>;
+<span class="kw">use </span>rustc_middle::mir::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Body.html">Body</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_target/abi/struct.VariantIdx.html">rustc_target::abi::VariantIdx</a>;
+
+<span class="kw">use </span><a href="move_paths/mod.rs.html#16-20"><span class="kw">super</span>::indexes::MovePathIndex</a>;
+<span class="kw">use </span><span class="kw">super</span>::move_paths::{<a href="move_paths/mod.rs.html#269">InitKind</a>, <a href="move_paths/mod.rs.html#310">LookupResult</a>, <a href="move_paths/mod.rs.html#172">MoveData</a>};
+<span class="kw">use </span><a href="lib.rs.html#50"><span class="kw">super</span>::MoveDataParamEnv</a>;
+
+<span class="kw">pub fn </span>move_path_children_matching&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    path: <a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>,
+    <span class="kw-2">mut </span>cond: F,
+) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>&gt;
+<span class="kw">where
+    </span>F: FnMut(mir::PlaceElem&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+{
+    <span class="kw">let </span><span class="kw-2">mut </span>next_child = <a href="#11">move_data</a>.move_paths[<a href="#12">path</a>].first_child;
+    <span class="kw">while let </span><span class="prelude-val">Some</span>(child_index) = next_child {
+        <span class="kw">let </span>move_path_children = <span class="kw-2">&amp;</span>move_data.move_paths[child_index];
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>elem) = move_path_children.place.projection.last() {
+            <span class="kw">if </span>cond(elem) {
+                <span class="kw">return </span><span class="prelude-val">Some</span>(child_index);
+            }
+        }
+        next_child = move_path_children.next_sibling;
+    }
+
+    <span class="prelude-val">None
+</span>}
+
+<span class="doccomment">/// When enumerating the child fragments of a path, don&#39;t recurse into
+/// paths (1.) past arrays, slices, and pointers, nor (2.) into a type
+/// that implements `Drop`.
+///
+/// Places behind references or arrays are not tracked by elaboration
+/// and are always assumed to be initialized when accessible. As
+/// references and indexes can be reseated, trying to track them can
+/// only lead to trouble.
+///
+/// Places behind ADT&#39;s with a Drop impl are not tracked by
+/// elaboration since they can never have a drop-flag state that
+/// differs from that of the parent with the Drop impl.
+///
+/// In both cases, the contents can only be accessed if and only if
+/// their parents are initialized. This implies for example that there
+/// is no need to maintain separate drop flags to track such state.
+</span><span class="comment">//
+// FIXME: we have to do something for moving slice patterns.
+</span><span class="kw">fn </span>place_contents_drop_state_cannot_differ&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    place: mir::Place&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">let </span>ty = <a href="#53">place</a>.ty(<a href="#52">body</a>, <a href="#51">tcx</a>).ty;
+    <span class="kw">match </span><a href="#55">ty</a>.kind() {
+        ty::Array(..) =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;place_contents_drop_state_cannot_differ place: {:?} ty: {:?} =&gt; false&quot;</span>,
+                place, ty
+            );
+            <span class="bool-val">false
+        </span>}
+        ty::Slice(..) | ty::Ref(..) | ty::RawPtr(..) =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;place_contents_drop_state_cannot_differ place: {:?} ty: {:?} refd =&gt; true&quot;</span>,
+                place, ty
+            );
+            <span class="bool-val">true
+        </span>}
+        ty::Adt(def, <span class="kw">_</span>) <span class="kw">if </span>(<a href="#71">def</a>.has_dtor(<a href="#51">tcx</a>) &amp;&amp; !<a href="#71">def</a>.is_box()) || <a href="#71">def</a>.is_union() =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+                <span class="string">&quot;place_contents_drop_state_cannot_differ place: {:?} ty: {:?} Drop =&gt; true&quot;</span>,
+                place, ty
+            );
+            <span class="bool-val">true
+        </span>}
+        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+    }
+}
+
+<span class="kw">pub fn </span>on_lookup_result_bits&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    lookup_result: <a href="move_paths/mod.rs.html#310">LookupResult</a>,
+    each_child: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+{
+    <span class="kw">match </span><a href="#86">lookup_result</a> {
+        <a href="move_paths/mod.rs.html#312">LookupResult::Parent</a>(..) =&gt; {
+            <span class="comment">// access to untracked value - do not touch children
+        </span>}
+        <a href="move_paths/mod.rs.html#311">LookupResult::Exact</a>(e) =&gt; <a href="#99-106">on_all_children_bits</a>(<a href="#83">tcx</a>, <a href="#84">body</a>, <a href="#85">move_data</a>, <a href="#95">e</a>, <a href="#87">each_child</a>),
+    }
+}
+
+<span class="kw">pub fn </span>on_all_children_bits&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    move_path_index: <a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>,
+    <span class="kw-2">mut </span>each_child: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+{
+    <span class="kw">fn </span>is_terminal_path&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        path: <a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#50-54">place_contents_drop_state_cannot_differ</a>(<a href="#109">tcx</a>, <a href="#110">body</a>, <a href="#111">move_data</a>.move_paths[<a href="#112">path</a>].place)
+    }
+
+    <span class="kw">fn </span>on_all_children_bits&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        move_path_index: <a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>,
+        each_child: <span class="kw-2">&amp;mut </span>F,
+    ) <span class="kw">where
+        </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+    {
+        <a href="#122">each_child</a>(<a href="#121">move_path_index</a>);
+
+        <span class="kw">if </span>is_terminal_path(tcx, body, move_data, move_path_index) {
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>next_child_index = <a href="#120">move_data</a>.move_paths[<a href="#121">move_path_index</a>].first_child;
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(child_index) = next_child_index {
+            on_all_children_bits(tcx, body, move_data, child_index, each_child);
+            next_child_index = move_data.move_paths[child_index].next_sibling;
+        }
+    }
+    <a href="#117-124">on_all_children_bits</a>(<a href="#100">tcx</a>, <a href="#101">body</a>, <a href="#102">move_data</a>, <a href="#103">move_path_index</a>, <span class="kw-2">&amp;mut </span><a href="#104">each_child</a>);
+}
+
+<span class="kw">pub fn </span>on_all_drop_children_bits&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ctxt: <span class="kw-2">&amp;</span>MoveDataParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    path: <a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>,
+    <span class="kw-2">mut </span>each_child: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+{
+    <a href="#99-106">on_all_children_bits</a>(<a href="#142">tcx</a>, <a href="#143">body</a>, <span class="kw-2">&amp;</span><a href="#144">ctxt</a>.move_data, <a href="#145">path</a>, |child| {
+        <span class="kw">let </span>place = <span class="kw-2">&amp;</span><a href="#144">ctxt</a>.move_data.move_paths[<a href="#145">path</a>].place;
+        <span class="kw">let </span>ty = <a href="#151">place</a>.ty(<a href="#143">body</a>, <a href="#142">tcx</a>).ty;
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;on_all_drop_children_bits({:?}, {:?} : {:?})&quot;</span>, path, place, ty);
+
+        <span class="kw">let </span>erased_ty = <a href="#142">tcx</a>.erase_regions(<a href="#152">ty</a>);
+        <span class="kw">if </span>erased_ty.needs_drop(tcx, ctxt.param_env) {
+            <a href="#146">each_child</a>(<a href="#150">child</a>);
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;on_all_drop_children_bits - skipping&quot;</span>)
+        }
+    })
+}
+
+<span class="kw">pub fn </span>drop_flag_effects_for_function_entry&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ctxt: <span class="kw-2">&amp;</span>MoveDataParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    <span class="kw-2">mut </span>callback: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>, <a href="elaborate_drops.rs.html#15">DropFlagState</a>),
+{
+    <span class="kw">let </span>move_data = <span class="kw-2">&amp;</span><a href="#167">ctxt</a>.move_data;
+    <span class="kw">for </span>arg <span class="kw">in </span>body.args_iter() {
+        <span class="kw">let </span>place = mir::Place::from(arg);
+        <span class="kw">let </span>lookup_result = move_data.rev_lookup.find(place.as_ref());
+        on_lookup_result_bits(tcx, body, move_data, lookup_result, |mpi| {
+            callback(mpi, DropFlagState::Present)
+        });
+    }
+}
+
+<span class="kw">pub fn </span>drop_flag_effects_for_location&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ctxt: <span class="kw-2">&amp;</span>MoveDataParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    loc: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>,
+    <span class="kw-2">mut </span>callback: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>, <a href="elaborate_drops.rs.html#15">DropFlagState</a>),
+{
+    <span class="kw">let </span>move_data = <span class="kw-2">&amp;</span><a href="#185">ctxt</a>.move_data;
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;drop_flag_effects_for_location({:?})&quot;</span>, loc);
+
+    <span class="comment">// first, move out of the RHS
+    </span><span class="kw">for </span>mi <span class="kw">in </span><span class="kw-2">&amp;</span>move_data.loc_map[loc] {
+        <span class="kw">let </span>path = mi.move_path_index(move_data);
+        <span class="macro">debug!</span>(<span class="string">&quot;moving out of path {:?}&quot;</span>, move_data.move_paths[path]);
+
+        on_all_children_bits(tcx, body, move_data, path, |mpi| callback(mpi, DropFlagState::Absent))
+    }
+
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;drop_flag_effects: assignment for location({:?})&quot;</span>, loc);
+
+    <a href="#207-214">for_location_inits</a>(<a href="#183">tcx</a>, <a href="#184">body</a>, <a href="#191">move_data</a>, <a href="#186">loc</a>, |mpi| <a href="#187">callback</a>(<a href="#204">mpi</a>, <a href="elaborate_drops.rs.html#17">DropFlagState::Present</a>));
+}
+
+<span class="kw">pub fn </span>for_location_inits&lt;<span class="lifetime">&#39;tcx</span>, F&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    loc: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>,
+    <span class="kw-2">mut </span>callback: F,
+) <span class="kw">where
+    </span>F: FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+{
+    <span class="kw">for </span>ii <span class="kw">in </span><span class="kw-2">&amp;</span>move_data.init_loc_map[loc] {
+        <span class="kw">let </span>init = move_data.inits[<span class="kw-2">*</span>ii];
+        <span class="kw">match </span>init.kind {
+            InitKind::Deep =&gt; {
+                <span class="kw">let </span>path = init.path;
+
+                on_all_children_bits(tcx, body, move_data, path, <span class="kw-2">&amp;mut </span>callback)
+            }
+            InitKind::Shallow =&gt; {
+                <span class="kw">let </span>mpi = init.path;
+                callback(mpi);
+            }
+            InitKind::NonPanicPathOnly =&gt; (),
+        }
+    }
+}
+
+<span class="doccomment">/// Calls `handle_inactive_variant` for each descendant move path of `enum_place` that contains a
+/// `Downcast` to a variant besides the `active_variant`.
+///
+/// NOTE: If there are no move paths corresponding to an inactive variant,
+/// `handle_inactive_variant` will not be called for that variant.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>on_all_inactive_variants&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    move_data: <span class="kw-2">&amp;</span>MoveData&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    enum_place: mir::Place&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    active_variant: <a href="../../rustc_target/abi/struct.VariantIdx.html">VariantIdx</a>,
+    <span class="kw-2">mut </span>handle_inactive_variant: <span class="kw">impl </span>FnMut(<a href="move_paths/mod.rs.html#16-20">MovePathIndex</a>),
+) {
+    <span class="kw">let </span><a href="move_paths/mod.rs.html#311">LookupResult::Exact</a>(enum_mpi) = <a href="#241">move_data</a>.rev_lookup.<a href="move_paths/mod.rs.html#320">find</a>(<a href="#242">enum_place</a>.as_ref()) <span class="kw">else </span>{
+        <span class="kw">return</span>;
+    };
+
+    <span class="kw">let </span>enum_path = <span class="kw-2">&amp;</span><a href="#241">move_data</a>.move_paths[<a href="#246">enum_mpi</a>];
+    <span class="kw">for </span>(variant_mpi, variant_path) <span class="kw">in </span>enum_path.children(<span class="kw-2">&amp;</span>move_data.move_paths) {
+        <span class="comment">// Because of the way we build the `MoveData` tree, each child should have exactly one more
+        // projection than `enum_place`. This additional projection must be a downcast since the
+        // base is an enum.
+        </span><span class="kw">let </span>(downcast, base_proj) = variant_path.place.projection.split_last().unwrap();
+        <span class="macro">assert_eq!</span>(enum_place.projection.len(), base_proj.len());
+
+        <span class="kw">let </span>mir::ProjectionElem::Downcast(<span class="kw">_</span>, variant_idx) = <span class="kw-2">*</span>downcast <span class="kw">else </span>{
+            <span class="macro">unreachable!</span>();
+        };
+
+        <span class="kw">if </span>variant_idx != active_variant {
+            on_all_children_bits(tcx, body, move_data, variant_mpi, |mpi| {
+                handle_inactive_variant(mpi)
+            });
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_mir_dataflow" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

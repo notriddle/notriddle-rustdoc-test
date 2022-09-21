@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["involves_a_union","Miri lazily allocates memory for locals on assignment, so we must preserve writes to unions and union fields, or it will ICE on reads of those fields."],["maybe_zst","A cheap, approximate check to avoid unnecessary `layout_of` calls."]],"struct":[["RemoveZsts",""]]};

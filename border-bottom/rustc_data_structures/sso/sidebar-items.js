@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["SsoHashMap","Small-storage-optimized implementation of a map."]],"mod":[["either_iter",""],["map",""],["set",""]],"struct":[["SsoHashSet","Small-storage-optimized implementation of a set."]]};

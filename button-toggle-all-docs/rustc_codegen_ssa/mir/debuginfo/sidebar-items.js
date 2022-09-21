@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["VariableKind",""]],"struct":[["DebugScope",""],["FunctionDebugContext",""],["PerLocalVarDebugInfo","Like `mir::VarDebugInfo`, but within a `mir::Local`."]]};

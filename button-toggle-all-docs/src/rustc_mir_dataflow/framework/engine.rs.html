@@ -1,0 +1,828 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_dataflow/src/framework/engine.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>engine.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_mir_dataflow/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_mir_dataflow/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+</pre><pre class="rust"><code><span class="doccomment">//! A solver for dataflow problems.
+
+</span><span class="kw">use </span><span class="kw">crate</span>::errors::{
+    <a href="../errors.rs.html#20">DuplicateValuesFor</a>, <a href="../errors.rs.html#6">PathMustEndInFilename</a>, <a href="../errors.rs.html#28">RequiresAnArgument</a>, <a href="../errors.rs.html#13">UnknownFormatter</a>,
+};
+<span class="kw">use </span><a href="mod.rs.html#56"><span class="kw">crate</span>::framework::BitSetExt</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/ffi/os_str/struct.OsString.html">std::ffi::OsString</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">std::path::PathBuf</a>;
+
+<span class="kw">use </span><a href="../../../rustc_ast/index.html">rustc_ast</a> <span class="kw">as </span>ast;
+<span class="kw">use </span><a href="../../../rustc_data_structures/work_queue/struct.WorkQueue.html">rustc_data_structures::work_queue::WorkQueue</a>;
+<span class="kw">use </span><a href="../../../rustc_graphviz/index.html">rustc_graphviz</a> <span class="kw">as </span>dot;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_index/bit_set/struct.BitSet.html">rustc_index::bit_set::BitSet</a>;
+<span class="kw">use </span>rustc_index::vec::{<a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>, <a href="../../../rustc_index/vec/struct.IndexVec.html">IndexVec</a>};
+<span class="kw">use </span>rustc_middle::mir::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/traversal/index.html">traversal</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>};
+<span class="kw">use </span>rustc_middle::mir::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/fn.create_dump_file.html">create_dump_file</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/fn.dump_enabled.html">dump_enabled</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">rustc_middle::ty::TyCtxt</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+
+<span class="kw">use </span><a href="fmt.rs.html#9"><span class="kw">super</span>::fmt::DebugWithContext</a>;
+<span class="kw">use </span><a href="mod.rs.html#44"><span class="kw">super</span>::graphviz</a>;
+<span class="kw">use super</span>::{
+    <a href="visitor.rs.html#7-13">visit_results</a>, <a href="mod.rs.html#146">Analysis</a>, <a href="direction.rs.html#11">Direction</a>, <a href="mod.rs.html#439">GenKill</a>, <a href="mod.rs.html#280">GenKillAnalysis</a>, <a href="mod.rs.html#467">GenKillSet</a>, <a href="lattice.rs.html#51">JoinSemiLattice</a>,
+    <a href="cursor.rs.html#26">ResultsCursor</a>, <a href="visitor.rs.html#29">ResultsVisitor</a>,
+};
+
+<span class="doccomment">/// A dataflow analysis that has converged to fixpoint.
+</span><span class="kw">pub struct </span>Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="kw">pub </span>analysis: A,
+    <span class="kw">pub</span>(<span class="kw">super</span>) entry_sets: IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, A::Domain&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, A&gt; Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    <span class="doccomment">/// Creates a `ResultsCursor` that can inspect these `Results`.
+    </span><span class="kw">pub fn </span>into_results_cursor&lt;<span class="lifetime">&#39;mir</span>&gt;(
+        <span class="self">self</span>,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; ResultsCursor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, A&gt; {
+        ResultsCursor::new(<a href="#45">body</a>, <a class="self" href="#44">self</a>)
+    }
+
+    <span class="doccomment">/// Gets the dataflow state for the given block.
+    </span><span class="kw">pub fn </span>entry_set_for_block(<span class="kw-2">&amp;</span><span class="self">self</span>, block: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>) -&gt; <span class="kw-2">&amp;</span>A::Domain {
+        <span class="kw-2">&amp;</span><a class="self" href="#51">self</a>.entry_sets[<a href="#51">block</a>]
+    }
+
+    <span class="kw">pub fn </span>visit_with&lt;<span class="lifetime">&#39;mir</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        blocks: <span class="kw">impl </span>IntoIterator&lt;Item = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;,
+        vis: <span class="kw-2">&amp;mut </span><span class="kw">impl </span>ResultsVisitor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, FlowState = A::Domain&gt;,
+    ) {
+        <a href="visitor.rs.html#7-13">visit_results</a>(<a href="#57">body</a>, <a href="#58">blocks</a>, <a class="self" href="#56">self</a>, <a href="#59">vis</a>)
+    }
+
+    <span class="kw">pub fn </span>visit_reachable_with&lt;<span class="lifetime">&#39;mir</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;mir </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        vis: <span class="kw-2">&amp;mut </span><span class="kw">impl </span>ResultsVisitor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, FlowState = A::Domain&gt;,
+    ) {
+        <span class="kw">let </span>blocks = mir::traversal::reachable(<a href="#66">body</a>);
+        <a href="visitor.rs.html#7-13">visit_results</a>(<a href="#66">body</a>, <a href="#69">blocks</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(bb, <span class="kw">_</span>)| <a href="#70">bb</a>), <a class="self" href="#65">self</a>, <a href="#67">vis</a>)
+    }
+}
+
+<span class="doccomment">/// A solver for dataflow problems.
+</span><span class="kw">pub struct </span>Engine&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, A&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+{
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    dead_unwinds: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;&gt;,
+    entry_sets: IndexVec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, A::Domain&gt;,
+    pass_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;,
+    analysis: A,
+
+    <span class="doccomment">/// Cached, cumulative transfer functions for each block.
+    </span><span class="comment">//
+    // FIXME(ecstaticmorse): This boxed `Fn` trait object is invoked inside a tight loop for
+    // gen/kill problems on cyclic CFGs. This is not ideal, but it doesn&#39;t seem to degrade
+    // performance in practice. I&#39;ve tried a few ways to avoid this, but they have downsides. See
+    // the message for the commit that added this FIXME for more information.
+    </span>apply_trans_for_block: <span class="prelude-ty">Option</span>&lt;Box&lt;<span class="kw">dyn </span>Fn(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="kw-2">&amp;mut </span>A::Domain)&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, A, D, T&gt; Engine&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, A&gt;
+<span class="kw">where
+    </span>A: GenKillAnalysis&lt;<span class="lifetime">&#39;tcx</span>, Idx = T, Domain = D&gt;,
+    D: <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a> + <a href="lattice.rs.html#51">JoinSemiLattice</a> + GenKill&lt;T&gt; + BitSetExt&lt;T&gt;,
+    T: <a href="../../../rustc_index/vec/trait.Idx.html">Idx</a>,
+{
+    <span class="doccomment">/// Creates a new `Engine` to solve a gen-kill dataflow problem.
+    </span><span class="kw">pub fn </span>new_gen_kill(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, analysis: A) -&gt; <span class="self">Self </span>{
+        <span class="comment">// If there are no back-edges in the control-flow graph, we only ever need to apply the
+        // transfer function for each block exactly once (assuming that we process blocks in RPO).
+        //
+        // In this case, there&#39;s no need to compute the block transfer functions ahead of time.
+        </span><span class="kw">if </span>!body.basic_blocks.is_cfg_cyclic() {
+            <span class="kw">return </span><span class="self">Self</span>::new(<a href="#102">tcx</a>, <a href="#102">body</a>, <a href="#102">analysis</a>, <span class="prelude-val">None</span>);
+        }
+
+        <span class="comment">// Otherwise, compute and store the cumulative transfer function for each block.
+
+        </span><span class="kw">let </span>identity = GenKillSet::identity(<a href="#102">analysis</a>.<a href="mod.rs.html#117">bottom_value</a>(<a href="#102">body</a>).<a href="mod.rs.html#57">domain_size</a>());
+        <span class="kw">let </span><span class="kw-2">mut </span>trans_for_block = IndexVec::from_elem(<a href="#113">identity</a>, <span class="kw-2">&amp;</span><a href="#102">body</a>.basic_blocks);
+
+        <span class="kw">for </span>(block, block_data) <span class="kw">in </span>body.basic_blocks.iter_enumerated() {
+            <span class="kw">let </span>trans = <span class="kw-2">&amp;mut </span>trans_for_block[block];
+            A::Direction::gen_kill_effects_in_block(<span class="kw-2">&amp;</span>analysis, trans, block, block_data);
+        }
+
+        <span class="kw">let </span>apply_trans = Box::new(<span class="kw">move </span>|bb: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, state: <span class="kw-2">&amp;mut </span>A::Domain| {
+            <a href="#114">trans_for_block</a>[<a href="#121">bb</a>].<a href="mod.rs.html#481">apply</a>(<a href="#121">state</a>);
+        });
+
+        <span class="self">Self</span>::new(<a href="#102">tcx</a>, <a href="#102">body</a>, <a href="#102">analysis</a>, <span class="prelude-val">Some</span>(<a href="#121">apply_trans</a> <span class="kw">as </span>Box&lt;<span class="kw">_</span>&gt;))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, A, D&gt; Engine&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, A&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>, Domain = D&gt;,
+    D: <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a> + <a href="lattice.rs.html#51">JoinSemiLattice</a>,
+{
+    <span class="doccomment">/// Creates a new `Engine` to solve a dataflow problem with an arbitrary transfer
+    /// function.
+    ///
+    /// Gen-kill problems should use `new_gen_kill`, which will coalesce transfer functions for
+    /// better performance.
+    </span><span class="kw">pub fn </span>new_generic(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;, analysis: A) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(<a href="#139">tcx</a>, <a href="#139">body</a>, <a href="#139">analysis</a>, <span class="prelude-val">None</span>)
+    }
+
+    <span class="kw">fn </span>new(
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        analysis: A,
+        apply_trans_for_block: <span class="prelude-ty">Option</span>&lt;Box&lt;<span class="kw">dyn </span>Fn(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>, <span class="kw-2">&amp;mut </span>A::Domain)&gt;&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>bottom_value = <a href="#146">analysis</a>.<a href="mod.rs.html#117">bottom_value</a>(<a href="#145">body</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>entry_sets = IndexVec::from_elem(<a href="#149">bottom_value</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <span class="kw-2">&amp;</span><a href="#145">body</a>.basic_blocks);
+        <a href="#146">analysis</a>.<a href="mod.rs.html#127">initialize_start_block</a>(<a href="#145">body</a>, <span class="kw-2">&amp;mut </span><a href="#150">entry_sets</a>[mir::START_BLOCK]);
+
+        <span class="kw">if </span>A::Direction::IS_BACKWARD &amp;&amp; entry_sets[mir::START_BLOCK] != bottom_value {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;`initialize_start_block` is not yet supported for backward dataflow analyses&quot;</span>);
+        }
+
+        <a href="#75">Engine</a> {
+            <a href="#146">analysis</a>,
+            <a href="#144">tcx</a>,
+            <a href="#145">body</a>,
+            dead_unwinds: <span class="prelude-val">None</span>,
+            pass_name: <span class="prelude-val">None</span>,
+            <a href="#150">entry_sets</a>,
+            <a href="#147">apply_trans_for_block</a>,
+        }
+    }
+
+    <span class="doccomment">/// Signals that we do not want dataflow state to propagate across unwind edges for these
+    /// `BasicBlock`s.
+    ///
+    /// You must take care that `dead_unwinds` does not contain a `BasicBlock` that *can* actually
+    /// unwind during execution. Otherwise, your dataflow results will not be correct.
+    </span><span class="kw">pub fn </span>dead_unwinds(<span class="kw-2">mut </span><span class="self">self</span>, dead_unwinds: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BitSet&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt;) -&gt; <span class="self">Self </span>{
+        <a class="self" href="#173">self</a>.dead_unwinds = <span class="prelude-val">Some</span>(<a href="#173">dead_unwinds</a>);
+        <span class="self"><a href="#173">self</a>
+    </span>}
+
+    <span class="doccomment">/// Adds an identifier to the graphviz output for this particular run of a dataflow analysis.
+    ///
+    /// Some analyses are run multiple times in the compilation pipeline. Give them a `pass_name`
+    /// to differentiate them. Otherwise, only the results for the latest run will be saved.
+    </span><span class="kw">pub fn </span>pass_name(<span class="kw-2">mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <span class="self">Self </span>{
+        <a class="self" href="#182">self</a>.pass_name = <span class="prelude-val">Some</span>(<a href="#182">name</a>);
+        <span class="self"><a href="#182">self</a>
+    </span>}
+
+    <span class="doccomment">/// Computes the fixpoint for this dataflow problem and returns it.
+    </span><span class="kw">pub fn </span>iterate_to_fixpoint(<span class="self">self</span>) -&gt; Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;
+    <span class="kw">where
+        </span>A::Domain: DebugWithContext&lt;A&gt;,
+    {
+        <span class="kw">let </span><a href="#75">Engine</a> {
+            analysis,
+            body,
+            dead_unwinds,
+            <span class="kw-2">mut </span>entry_sets,
+            tcx,
+            apply_trans_for_block,
+            pass_name,
+            ..
+        } = <a class="self" href="#188">self</a>;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>dirty_queue: WorkQueue&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>&gt; = WorkQueue::with_none(<a href="#194">body</a>.basic_blocks.len());
+
+        <span class="kw">if </span>A::Direction::IS_FORWARD {
+            <span class="kw">for </span>(bb, <span class="kw">_</span>) <span class="kw">in </span>traversal::reverse_postorder(body) {
+                dirty_queue.insert(bb);
+            }
+        } <span class="kw">else </span>{
+            <span class="comment">// Reverse post-order on the reverse CFG may generate a better iteration order for
+            // backward dataflow analyses, but probably not enough to matter.
+            </span><span class="kw">for </span>(bb, <span class="kw">_</span>) <span class="kw">in </span>traversal::postorder(body) {
+                dirty_queue.insert(bb);
+            }
+        }
+
+        <span class="comment">// `state` is not actually used between iterations;
+        // this is just an optimization to avoid reallocating
+        // every iteration.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>state = <a href="#193">analysis</a>.<a href="mod.rs.html#117">bottom_value</a>(<a href="#194">body</a>);
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(bb) = dirty_queue.pop() {
+            <span class="kw">let </span>bb_data = <span class="kw-2">&amp;</span>body[bb];
+
+            <span class="comment">// Set the state to the entry state of the block.
+            // This is equivalent to `state = entry_sets[bb].clone()`,
+            // but it saves an allocation, thus improving compile times.
+            </span>state.clone_from(<span class="kw-2">&amp;</span>entry_sets[bb]);
+
+            <span class="comment">// Apply the block transfer function, using the cached one if it exists.
+            </span><span class="kw">match </span><span class="kw-2">&amp;</span>apply_trans_for_block {
+                <span class="prelude-val">Some</span>(apply) =&gt; apply(bb, <span class="kw-2">&amp;mut </span>state),
+                <span class="prelude-val">None </span>=&gt; A::Direction::apply_effects_in_block(<span class="kw-2">&amp;</span>analysis, <span class="kw-2">&amp;mut </span>state, bb, bb_data),
+            }
+
+            A::Direction::join_state_into_successors_of(
+                <span class="kw-2">&amp;</span>analysis,
+                tcx,
+                body,
+                dead_unwinds,
+                <span class="kw-2">&amp;mut </span>state,
+                (bb, bb_data),
+                |target: BasicBlock, state: <span class="kw-2">&amp;</span>A::Domain| {
+                    <span class="kw">let </span>set_changed = entry_sets[target].join(state);
+                    <span class="kw">if </span>set_changed {
+                        dirty_queue.insert(target);
+                    }
+                },
+            );
+        }
+
+        <span class="kw">let </span>results = <a href="#30">Results</a> { <a href="#193">analysis</a>, <a href="#196">entry_sets</a> };
+
+        <span class="kw">let </span>res = <a href="#266-274">write_graphviz_results</a>(<a href="#197">tcx</a>, <span class="kw-2">&amp;</span><a href="#194">body</a>, <span class="kw-2">&amp;</span><a href="#251">results</a>, <a href="#199">pass_name</a>);
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = <a href="#253">res</a> {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.error.html">error!</a>(<span class="string">&quot;Failed to write graphviz dataflow results: {}&quot;</span>, e);
+        }
+
+        <a href="#251">results</a>
+    }
+}
+
+<span class="comment">// Graphviz
+
+</span><span class="doccomment">/// Writes a DOT file containing the results of a dataflow analysis if the user requested it via
+/// `rustc_mir` attributes.
+</span><span class="kw">fn </span>write_graphviz_results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span>mir::Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    results: <span class="kw-2">&amp;</span>Results&lt;<span class="lifetime">&#39;tcx</span>, A&gt;,
+    pass_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;,
+) -&gt; std::io::Result&lt;()&gt;
+<span class="kw">where
+    </span>A: Analysis&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    A::Domain: DebugWithContext&lt;A&gt;,
+{
+    <span class="kw">use </span>std::fs;
+    <span class="kw">use </span>std::io::{<a class="self" href="https://doc.rust-lang.org/nightly/std/io/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html">Write</a>};
+
+    <span class="kw">let </span>def_id = <a href="#268">body</a>.source.def_id();
+    <span class="kw">let </span><span class="prelude-val">Ok</span>(attrs) = RustcMirAttrs::parse(<a href="#267">tcx</a>, <a href="#279">def_id</a>) <span class="kw">else </span>{
+        <span class="comment">// Invalid `rustc_mir` attrs are reported in `RustcMirAttrs::parse`
+        </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+    };
+
+    <span class="kw">let </span><span class="kw-2">mut </span>file = <span class="kw">match </span><a href="#280">attrs</a>.<a href="#402">output_path</a>(A::NAME) {
+        <span class="prelude-val">Some</span>(path) =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;printing dataflow results for {:?} to {}&quot;</span>, def_id, path.display());
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = <a href="#286">path</a>.parent() {
+                fs::create_dir_all(parent)<span class="question-mark">?</span>;
+            }
+            io::BufWriter::new(fs::File::create(<span class="kw-2">&amp;</span>path)<span class="question-mark">?</span>)
+        }
+
+        <span class="prelude-val">None </span><span class="kw">if </span><a href="#267">tcx</a>.sess.opts.unstable_opts.dump_mir_dataflow
+            &amp;&amp; <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/pretty/fn.dump_enabled.html">dump_enabled</a>(<a href="#267">tcx</a>, A::NAME, <a href="#279">def_id</a>) =&gt;
+        {
+            create_dump_file(
+                tcx,
+                <span class="string">&quot;.dot&quot;</span>,
+                <span class="prelude-val">None</span>,
+                A::NAME,
+                <span class="kw-2">&amp;</span>pass_name.unwrap_or(<span class="string">&quot;-----&quot;</span>),
+                body.source,
+            )<span class="question-mark">?
+        </span>}
+
+        <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(()),
+    };
+
+    <span class="kw">let </span>style = <span class="kw">match </span><a href="#280">attrs</a>.formatter {
+        <span class="prelude-val">Some</span>(sym::two_phase) =&gt; <a href="graphviz.rs.html#18">graphviz::OutputStyle::BeforeAndAfter</a>,
+        <span class="kw">_ </span>=&gt; <a href="graphviz.rs.html#17">graphviz::OutputStyle::AfterOnly</a>,
+    };
+
+    <span class="kw">let </span><span class="kw-2">mut </span>buf = Vec::new();
+
+    <span class="kw">let </span>graphviz = graphviz::Formatter::new(<a href="#268">body</a>, <a href="#269">results</a>, <a href="#310">style</a>);
+    <span class="kw">let </span><span class="kw-2">mut </span>render_opts =
+        <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[dot::RenderOption::Fontname(tcx.sess.opts.unstable_opts.graphviz_font.clone())];
+    <span class="kw">if </span>tcx.sess.opts.unstable_opts.graphviz_dark_mode {
+        <a href="#318">render_opts</a>.push(dot::RenderOption::DarkTheme);
+    }
+    dot::render_opts(<span class="kw-2">&amp;</span>graphviz, <span class="kw-2">&amp;mut </span>buf, <span class="kw-2">&amp;</span>render_opts)<span class="question-mark">?</span>;
+
+    file.write_all(<span class="kw-2">&amp;</span>buf)<span class="question-mark">?</span>;
+
+    <span class="prelude-val">Ok</span>(())
+}
+
+<span class="attribute">#[derive(Default)]
+</span><span class="kw">struct </span>RustcMirAttrs {
+    basename_and_suffix: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">PathBuf</a>&gt;,
+    formatter: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#331">RustcMirAttrs</a> {
+    <span class="kw">fn </span>parse(tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ()&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">Ok</span>(());
+        <span class="kw">let </span><span class="kw-2">mut </span>ret = RustcMirAttrs::default();
+
+        <span class="kw">let </span>rustc_mir_attrs = <a href="#337">tcx</a>
+            .get_attrs(<a href="#337">def_id</a>, sym::rustc_mir)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|attr| <a href="#343">attr</a>.meta_item_list().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|v| <a href="#343">v</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()));
+
+        <span class="kw">for </span>attr <span class="kw">in </span>rustc_mir_attrs {
+            <span class="kw">let </span>attr_result = <span class="kw">if </span>attr.has_name(sym::borrowck_graphviz_postflow) {
+                <span class="self">Self</span>::set_field(<span class="kw-2">&amp;mut </span>ret.basename_and_suffix, tcx, <span class="kw-2">&amp;</span>attr, |s| {
+                    <span class="kw">let </span>path = PathBuf::from(s.to_string());
+                    <span class="kw">match </span>path.file_name() {
+                        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(path),
+                        <span class="prelude-val">None </span>=&gt; {
+                            tcx.sess.emit_err(PathMustEndInFilename { span: attr.span() });
+                            <span class="prelude-val">Err</span>(())
+                        }
+                    }
+                })
+            } <span class="kw">else if </span>attr.has_name(sym::borrowck_graphviz_format) {
+                <span class="self">Self</span>::set_field(<span class="kw-2">&amp;mut </span>ret.formatter, tcx, <span class="kw-2">&amp;</span>attr, |s| <span class="kw">match </span>s {
+                    sym::gen_kill | sym::two_phase =&gt; <span class="prelude-val">Ok</span>(s),
+                    <span class="kw">_ </span>=&gt; {
+                        tcx.sess.emit_err(UnknownFormatter { span: attr.span() });
+                        <span class="prelude-val">Err</span>(())
+                    }
+                })
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Ok</span>(())
+            };
+
+            result = result.and(attr_result);
+        }
+
+        <a href="#338">result</a>.map(|()| <a href="#339">ret</a>)
+    }
+
+    <span class="kw">fn </span>set_field&lt;T&gt;(
+        field: <span class="kw-2">&amp;mut </span><span class="prelude-ty">Option</span>&lt;T&gt;,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;,
+        attr: <span class="kw-2">&amp;</span><a href="../../../rustc_ast/ast/enum.NestedMetaItem.html">ast::NestedMetaItem</a>,
+        mapper: <span class="kw">impl </span>FnOnce(<a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) -&gt; <span class="prelude-ty">Result</span>&lt;T, ()&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ()&gt; {
+        <span class="kw">if </span>field.is_some() {
+            <a href="#377">tcx</a>.sess.emit_err(<a href="../errors.rs.html#20">DuplicateValuesFor</a> { span: <a href="#378">attr</a>.span(), name: <a href="#378">attr</a>.name_or_empty() });
+
+            <span class="kw">return </span><span class="prelude-val">Err</span>(());
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <a href="#378">attr</a>.value_str() {
+            <span class="kw-2">*</span><a href="#376">field</a> = <span class="prelude-val">Some</span>(mapper(s)<span class="question-mark">?</span>);
+            <span class="prelude-val">Ok</span>(())
+        } <span class="kw">else </span>{
+            <a href="#377">tcx</a>.sess.emit_err(<a href="../errors.rs.html#28">RequiresAnArgument</a> { span: <a href="#378">attr</a>.span(), name: <a href="#378">attr</a>.name_or_empty() });
+            <span class="prelude-val">Err</span>(())
+        }
+    }
+
+    <span class="doccomment">/// Returns the path where dataflow results should be written, or `None`
+    /// `borrowck_graphviz_postflow` was not specified.
+    ///
+    /// This performs the following transformation to the argument of `borrowck_graphviz_postflow`:
+    ///
+    /// &quot;path/suffix.dot&quot; -&gt; &quot;path/analysis_name_suffix.dot&quot;
+    </span><span class="kw">fn </span>output_path(<span class="kw-2">&amp;</span><span class="self">self</span>, analysis_name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">PathBuf</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>ret = <span class="self">self</span>.basename_and_suffix.as_ref().cloned()<span class="question-mark">?</span>;
+        <span class="kw">let </span>suffix = <a href="#403">ret</a>.file_name().unwrap(); <span class="comment">// Checked when parsing attrs
+
+        </span><span class="kw">let </span><span class="kw-2">mut </span>file_name: <a href="https://doc.rust-lang.org/nightly/std/ffi/os_str/struct.OsString.html">OsString</a> = <a href="#402">analysis_name</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>();
+        <a href="#406">file_name</a>.push(<span class="string">&quot;_&quot;</span>);
+        <a href="#406">file_name</a>.push(<a href="#404">suffix</a>);
+        <a href="#403">ret</a>.set_file_name(<a href="#406">file_name</a>);
+
+        <span class="prelude-val">Some</span>(<a href="#403">ret</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_mir_dataflow" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

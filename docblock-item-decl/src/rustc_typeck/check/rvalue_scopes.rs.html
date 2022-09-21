@@ -1,0 +1,168 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/rvalue_scopes.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>rvalue_scopes.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="fn_ctxt/mod.rs.html#40"><span class="kw">super</span>::FnCtxt</a>;
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/hir/enum.Node.html">hir::Node</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_middle::middle::region::{<a href="../../../rustc_middle/middle/region/enum.RvalueCandidateType.html">RvalueCandidateType</a>, <a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a>, <a href="../../../rustc_middle/middle/region/struct.ScopeTree.html">ScopeTree</a>};
+<span class="kw">use </span><a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">rustc_middle::ty::RvalueScopes</a>;
+
+<span class="doccomment">/// Applied to an expression `expr` if `expr` -- or something owned or partially owned by
+/// `expr` -- is going to be indirectly referenced by a variable in a let statement. In that
+/// case, the &quot;temporary lifetime&quot; or `expr` is extended to be the block enclosing the `let`
+/// statement.
+///
+/// More formally, if `expr` matches the grammar `ET`, record the rvalue scope of the matching
+/// `&lt;rvalue&gt;` as `blk_id`:
+///
+/// ```text
+///     ET = *ET
+///        | ET[...]
+///        | ET.f
+///        | (ET)
+///        | &lt;rvalue&gt;
+/// ```
+///
+/// Note: ET is intended to match &quot;rvalues or places based on rvalues&quot;.
+</span><span class="kw">fn </span>record_rvalue_scope_rec(
+    rvalue_scopes: <span class="kw-2">&amp;mut </span><a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">RvalueScopes</a>,
+    <span class="kw-2">mut </span>expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+    lifetime: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_middle/middle/region/struct.Scope.html">Scope</a>&gt;,
+) {
+    <span class="kw">loop </span>{
+        <span class="comment">// Note: give all the expressions matching `ET` with the
+        // extended temporary lifetime, not just the innermost rvalue,
+        // because in codegen if we must compile e.g., `*rvalue()`
+        // into a temporary, we request the temporary scope of the
+        // outer expression.
+
+        </span><a href="#26">rvalue_scopes</a>.record_rvalue_scope(<a href="#27">expr</a>.hir_id.local_id, <a href="#28">lifetime</a>);
+
+        <span class="kw">match </span><a href="#27">expr</a>.kind {
+            hir::ExprKind::AddrOf(<span class="kw">_</span>, <span class="kw">_</span>, subexpr)
+            | hir::ExprKind::Unary(hir::UnOp::Deref, subexpr)
+            | hir::ExprKind::Field(subexpr, <span class="kw">_</span>)
+            | hir::ExprKind::Index(subexpr, <span class="kw">_</span>) =&gt; {
+                <a href="#27">expr</a> = <a href="#40">subexpr</a>;
+            }
+            <span class="kw">_ </span>=&gt; {
+                <span class="kw">return</span>;
+            }
+        }
+    }
+}
+<span class="kw">fn </span>record_rvalue_scope(
+    rvalue_scopes: <span class="kw-2">&amp;mut </span><a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">RvalueScopes</a>,
+    expr: <span class="kw-2">&amp;</span>hir::Expr&lt;<span class="lifetime">&#39;_</span>&gt;,
+    candidate: <span class="kw-2">&amp;</span><a href="../../../rustc_middle/middle/region/enum.RvalueCandidateType.html">RvalueCandidateType</a>,
+) {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;resolve_rvalue_scope(expr={expr:?}, candidate={candidate:?})&quot;</span>);
+    <span class="kw">match </span><a href="#55">candidate</a> {
+        <a href="../../../rustc_middle/middle/region/enum.RvalueCandidateType.html">RvalueCandidateType::Borrow</a> { lifetime, .. }
+        | <a href="../../../rustc_middle/middle/region/enum.RvalueCandidateType.html">RvalueCandidateType::Pattern</a> { lifetime, .. } =&gt; {
+            <a href="#25-29">record_rvalue_scope_rec</a>(<a href="#53">rvalue_scopes</a>, <a href="#54">expr</a>, <span class="kw-2">*</span><a href="#59">lifetime</a>)
+        } <span class="comment">// FIXME(@dingxiangfei2009): handle the candidates in the function call arguments
+    </span>}
+}
+
+<span class="kw">pub fn </span>resolve_rvalue_scopes&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(
+    fcx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+    scope_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../rustc_middle/middle/region/struct.ScopeTree.html">ScopeTree</a>,
+    def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+) -&gt; <a href="../../../rustc_middle/ty/rvalue_scopes/struct.RvalueScopes.html">RvalueScopes</a> {
+    <span class="kw">let </span>tcx = <span class="kw-2">&amp;</span><a href="#67">fcx</a>.tcx;
+    <span class="kw">let </span>hir_map = <a href="#71">tcx</a>.hir();
+    <span class="kw">let </span><span class="kw-2">mut </span>rvalue_scopes = RvalueScopes::new();
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;start resolving rvalue scopes, def_id={def_id:?}&quot;</span>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;rvalue_scope: rvalue_candidates={:?}&quot;</span>, scope_tree.rvalue_candidates);
+    <span class="kw">for </span>(<span class="kw-2">&amp;</span>hir_id, candidate) <span class="kw">in </span><span class="kw-2">&amp;</span>scope_tree.rvalue_candidates {
+        <span class="kw">let </span><span class="prelude-val">Some</span>(Node::Expr(expr)) = hir_map.find(hir_id) <span class="kw">else </span>{
+            <span class="macro">bug!</span>(<span class="string">&quot;hir node does not exist&quot;</span>)
+        };
+        record_rvalue_scope(<span class="kw-2">&amp;mut </span>rvalue_scopes, expr, candidate);
+    }
+    <a href="#73">rvalue_scopes</a>
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

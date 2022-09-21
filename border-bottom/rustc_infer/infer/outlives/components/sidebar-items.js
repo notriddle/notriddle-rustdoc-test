@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Component",""]],"fn":[["compute_components",""],["compute_components_recursive","Collect [Component]s for all the substs of `parent`."],["push_outlives_components","Push onto `out` all the things that must outlive `'a` for the condition `ty0: 'a` to hold. Note that `ty0` must be a fully resolved type."]]};

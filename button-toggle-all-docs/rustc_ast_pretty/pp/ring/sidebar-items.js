@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["RingBuffer","A view onto a finite range of an infinitely long sequence of T."]]};

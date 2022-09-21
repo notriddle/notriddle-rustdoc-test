@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["FileMatch",""]],"fn":[["get_or_default_sysroot","This function checks if sysroot is found using env::args().next(), and if it is not found, uses env::current_exe() to imply sysroot."],["make_target_lib_path",""]],"struct":[["FileSearch",""]]};

@@ -1,0 +1,1372 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_metadata/src/rmeta/decoder/cstore_impl.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>cstore_impl.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_metadata/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_metadata/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_metadata/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::creader::{<a href="../../creader.rs.html#38">CStore</a>, <a href="../../creader.rs.html#71">LoadedMacro</a>};
+<span class="kw">use </span><a href="../../lib.rs.html#37"><span class="kw">crate</span>::foreign_modules</a>;
+<span class="kw">use </span><a href="../../lib.rs.html#38"><span class="kw">crate</span>::native_libs</a>;
+
+<span class="kw">use </span><a href="../../../../rustc_ast/index.html">rustc_ast</a> <span class="kw">as </span>ast;
+<span class="kw">use </span><a href="../../../../rustc_attr/builtin/struct.Deprecation.html">rustc_attr::Deprecation</a>;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../../../rustc_hir/def/enum.CtorKind.html">CtorKind</a>, <a href="../../../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_span/def_id/type.DefIdMap.html">DefIdMap</a>, <a href="../../../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>};
+<span class="kw">use </span>rustc_hir::definitions::{<a href="../../../../rustc_hir/definitions/struct.DefKey.html">DefKey</a>, <a href="../../../../rustc_hir/definitions/struct.DefPath.html">DefPath</a>, DefPathHash};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/arena/trait.ArenaAllocatable.html">rustc_middle::arena::ArenaAllocatable</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">rustc_middle::metadata::ModChild</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/exported_symbols/enum.ExportedSymbol.html">rustc_middle::middle::exported_symbols::ExportedSymbol</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/stability/struct.DeprecationEntry.html">rustc_middle::middle::stability::DeprecationEntry</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fast_reject/type.SimplifiedType.html">rustc_middle::ty::fast_reject::SimplifiedType</a>;
+<span class="kw">use </span>rustc_middle::ty::query::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.ExternProviders.html">ExternProviders</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.Visibility.html">Visibility</a>};
+<span class="kw">use </span>rustc_session::cstore::{<a href="../../../../rustc_session/cstore/struct.CrateSource.html">CrateSource</a>, <a href="../../../../rustc_session/cstore/trait.CrateStore.html">CrateStore</a>};
+<span class="kw">use </span><a href="../../../../rustc_session/utils/enum.NativeLibKind.html">rustc_session::utils::NativeLibKind</a>;
+<span class="kw">use </span>rustc_session::{<a href="../../../../rustc_session/session/struct.Session.html">Session</a>, <a href="../../../../rustc_span/def_id/struct.StableCrateId.html">StableCrateId</a>};
+<span class="kw">use </span>rustc_span::hygiene::{<a href="../../../../rustc_span/hygiene/struct.ExpnHash.html">ExpnHash</a>, <a href="../../../../rustc_span/hygiene/struct.ExpnId.html">ExpnId</a>};
+<span class="kw">use </span>rustc_span::source_map::{<a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../../rustc_span/source_map/struct.Spanned.html">Spanned</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/rc/struct.Rc.html">rustc_data_structures::sync::Lrc</a>;
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">smallvec::SmallVec</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">std::any::Any</a>;
+
+<span class="kw">use super</span>::{<a href="../../../../rustc_serialize/serialize/trait.Decodable.html">Decodable</a>, <a href="../decoder.rs.html#155">DecodeContext</a>, <a href="../decoder.rs.html#270">DecodeIterator</a>};
+
+<span class="kw">trait </span>ProcessQueryValue&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+    <span class="kw">fn </span>process_decoded(<span class="self">self</span>, _tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, _err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; T;
+}
+
+<span class="kw">impl</span>&lt;T&gt; ProcessQueryValue&lt;<span class="lifetime">&#39;_</span>, <span class="prelude-ty">Option</span>&lt;T&gt;&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;T&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, _tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, _err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; <span class="prelude-ty">Option</span>&lt;T&gt; {
+        <span class="self"><a href="#36">self</a>
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;T&gt; ProcessQueryValue&lt;<span class="lifetime">&#39;_</span>, T&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;T&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, _tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; T {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <span class="self"><a href="#43">self</a> </span>{ <a href="#44">value</a> } <span class="kw">else </span>{ <a href="#43">err</a>() }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, T: ArenaAllocatable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; ProcessQueryValue&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>T&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;T&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>T {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <span class="self"><a href="#50">self</a> </span>{ <a href="#50">tcx</a>.arena.alloc(<a href="#51">value</a>) } <span class="kw">else </span>{ <a href="#50">err</a>() }
+    }
+}
+
+<span class="kw">impl</span>&lt;T, E&gt; ProcessQueryValue&lt;<span class="lifetime">&#39;_</span>, <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;T&gt;, E&gt;&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;T&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, _tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, _err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;T&gt;, E&gt; {
+        <span class="prelude-val">Ok</span>(<a class="self" href="#57">self</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, T: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> + Decodable&lt;DecodeContext&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; ProcessQueryValue&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>[T]&gt;
+    <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;DecodeIterator&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>, T&gt;&gt;
+{
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, _err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>[T] {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(iter) = <span class="self"><a href="#66">self</a> </span>{ <a href="#66">tcx</a>.arena.alloc_from_iter(<a href="#67">iter</a>) } <span class="kw">else </span>{ <span class="kw-2">&amp;</span>[] }
+    }
+}
+
+<span class="kw">impl </span>ProcessQueryValue&lt;<span class="lifetime">&#39;_</span>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/stability/struct.DeprecationEntry.html">DeprecationEntry</a>&gt;&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;<a href="../../../../rustc_attr/builtin/struct.Deprecation.html">Deprecation</a>&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>process_decoded(<span class="self">self</span>, _tcx: TyCtxt&lt;<span class="lifetime">&#39;_</span>&gt;, _err: <span class="kw">impl </span>Fn() -&gt; !) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/stability/struct.DeprecationEntry.html">DeprecationEntry</a>&gt; {
+        <a class="self" href="#73">self</a>.map(DeprecationEntry::external)
+    }
+}
+
+<span class="macro">macro_rules! </span>provide_one {
+    (<span class="macro-nonterminal">$tcx</span>:ident, <span class="macro-nonterminal">$def_id</span>:ident, <span class="macro-nonterminal">$other</span>:ident, <span class="macro-nonterminal">$cdata</span>:ident, <span class="macro-nonterminal">$name</span>:ident =&gt; { table }) =&gt; {
+        <span class="macro">provide_one! </span>{
+            <span class="macro-nonterminal">$tcx</span>, <span class="macro-nonterminal">$def_id</span>, <span class="macro-nonterminal">$other</span>, <span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$name </span>=&gt; {
+                <span class="macro-nonterminal">$cdata
+                    </span>.root
+                    .tables
+                    .<span class="macro-nonterminal">$name
+                    </span>.get(<span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$def_id</span>.index)
+                    .map(|lazy| lazy.decode((<span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$tcx</span>)))
+                    .process_decoded(<span class="macro-nonterminal">$tcx</span>, || <span class="macro">panic!</span>(<span class="string">&quot;{:?} does not have a {:?}&quot;</span>, <span class="macro-nonterminal">$def_id</span>, <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>)))
+            }
+        }
+    };
+    (<span class="macro-nonterminal">$tcx</span>:ident, <span class="macro-nonterminal">$def_id</span>:ident, <span class="macro-nonterminal">$other</span>:ident, <span class="macro-nonterminal">$cdata</span>:ident, <span class="macro-nonterminal">$name</span>:ident =&gt; { table_direct }) =&gt; {
+        <span class="macro">provide_one! </span>{
+            <span class="macro-nonterminal">$tcx</span>, <span class="macro-nonterminal">$def_id</span>, <span class="macro-nonterminal">$other</span>, <span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$name </span>=&gt; {
+                <span class="comment">// We don&#39;t decode `table_direct`, since it&#39;s not a Lazy, but an actual value
+                </span><span class="macro-nonterminal">$cdata
+                    </span>.root
+                    .tables
+                    .<span class="macro-nonterminal">$name
+                    </span>.get(<span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$def_id</span>.index)
+                    .process_decoded(<span class="macro-nonterminal">$tcx</span>, || <span class="macro">panic!</span>(<span class="string">&quot;{:?} does not have a {:?}&quot;</span>, <span class="macro-nonterminal">$def_id</span>, <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>)))
+            }
+        }
+    };
+    (<span class="macro-nonterminal">$tcx</span>:ident, <span class="macro-nonterminal">$def_id</span>:ident, <span class="macro-nonterminal">$other</span>:ident, <span class="macro-nonterminal">$cdata</span>:ident, <span class="macro-nonterminal">$name</span>:ident =&gt; <span class="macro-nonterminal">$compute</span>:block) =&gt; {
+        <span class="kw">fn </span><span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+            <span class="macro-nonterminal">$tcx</span>: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+            def_id_arg: ty::query::query_keys::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        ) -&gt; ty::query::query_values::<span class="macro-nonterminal">$name</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+            <span class="kw">let </span>_prof_timer =
+                <span class="macro-nonterminal">$tcx</span>.prof.generic_activity(<span class="macro">concat!</span>(<span class="string">&quot;metadata_decode_entry_&quot;</span>, <span class="macro">stringify!</span>(<span class="macro-nonterminal">$name</span>)));
+
+            <span class="attribute">#[allow(unused_variables)]
+            </span><span class="kw">let </span>(<span class="macro-nonterminal">$def_id</span>, <span class="macro-nonterminal">$other</span>) = def_id_arg.into_args();
+            <span class="macro">assert!</span>(!<span class="macro-nonterminal">$def_id</span>.is_local());
+
+            <span class="comment">// External query providers call `crate_hash` in order to register a dependency
+            // on the crate metadata. The exception is `crate_hash` itself, which obviously
+            // doesn&#39;t need to do this (and can&#39;t, as it would cause a query cycle).
+            </span><span class="kw">use </span>rustc_middle::dep_graph::DepKind;
+            <span class="kw">if </span>DepKind::<span class="macro-nonterminal">$name </span>!= DepKind::crate_hash &amp;&amp; <span class="macro-nonterminal">$tcx</span>.dep_graph.is_fully_enabled() {
+                <span class="macro-nonterminal">$tcx</span>.ensure().crate_hash(<span class="macro-nonterminal">$def_id</span>.krate);
+            }
+
+            <span class="kw">let </span><span class="macro-nonterminal">$cdata </span>= CStore::from_tcx(<span class="macro-nonterminal">$tcx</span>).get_crate_data(<span class="macro-nonterminal">$def_id</span>.krate);
+
+            <span class="macro-nonterminal">$compute
+        </span>}
+    };
+}
+
+<span class="macro">macro_rules! </span>provide {
+    (<span class="macro-nonterminal">$tcx</span>:ident, <span class="macro-nonterminal">$def_id</span>:ident, <span class="macro-nonterminal">$other</span>:ident, <span class="macro-nonterminal">$cdata</span>:ident,
+      $(<span class="macro-nonterminal">$name</span>:ident =&gt; { $(<span class="macro-nonterminal">$compute</span>:tt)* })<span class="kw-2">*</span>) =&gt; {
+        <span class="kw">pub fn </span>provide_extern(providers: <span class="kw-2">&amp;mut </span>ExternProviders) {
+            $(<span class="macro">provide_one! </span>{
+                <span class="macro-nonterminal">$tcx</span>, <span class="macro-nonterminal">$def_id</span>, <span class="macro-nonterminal">$other</span>, <span class="macro-nonterminal">$cdata</span>, <span class="macro-nonterminal">$name </span>=&gt; { $(<span class="macro-nonterminal">$compute</span>)* }
+            })*
+
+            <span class="kw-2">*</span>providers = ExternProviders {
+                $(<span class="macro-nonterminal">$name</span>,)*
+                ..<span class="kw-2">*</span>providers
+            };
+        }
+    }
+}
+
+<span class="comment">// small trait to work around different signature queries all being defined via
+// the macro above.
+</span><span class="kw">trait </span>IntoArgs {
+    <span class="kw">type </span>Other;
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <span class="self">Self</span>::Other);
+}
+
+<span class="kw">impl </span><a href="#150">IntoArgs</a> <span class="kw">for </span><a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a> {
+    <span class="kw">type </span>Other = ();
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, ()) {
+        (<a class="self" href="#157">self</a>, ())
+    }
+}
+
+<span class="kw">impl </span><a href="#150">IntoArgs</a> <span class="kw">for </span><a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a> {
+    <span class="kw">type </span>Other = ();
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, ()) {
+        (<a class="self" href="#164">self</a>.as_def_id(), ())
+    }
+}
+
+<span class="kw">impl </span><a href="#150">IntoArgs</a> <span class="kw">for </span>(<a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) {
+    <span class="kw">type </span>Other = <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>;
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) {
+        (<a class="self" href="#171">self</a>.<span class="number">0</span>.as_def_id(), <a class="self" href="#171">self</a>.<span class="number">1</span>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="#150">IntoArgs</a> <span class="kw">for </span>ty::InstanceDef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>Other = ();
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, ()) {
+        (<a class="self" href="#178">self</a>.def_id(), ())
+    }
+}
+
+<span class="kw">impl </span><a href="#150">IntoArgs</a> <span class="kw">for </span>(<a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fast_reject/type.SimplifiedType.html">SimplifiedType</a>) {
+    <span class="kw">type </span>Other = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fast_reject/type.SimplifiedType.html">SimplifiedType</a>;
+    <span class="kw">fn </span>into_args(<span class="self">self</span>) -&gt; (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fast_reject/type.SimplifiedType.html">SimplifiedType</a>) {
+        (<a class="self" href="#185">self</a>.<span class="number">0</span>.as_def_id(), <a class="self" href="#185">self</a>.<span class="number">1</span>)
+    }
+}
+
+<a class="macro" href="#132-146">provide! </a>{ tcx, def_id, other, cdata,
+    explicit_item_bounds =&gt; { table }
+    explicit_predicates_of =&gt; { table }
+    generics_of =&gt; { table }
+    inferred_outlives_of =&gt; { table }
+    super_predicates_of =&gt; { table }
+    type_of =&gt; { table }
+    variances_of =&gt; { table }
+    fn_sig =&gt; { table }
+    codegen_fn_attrs =&gt; { table }
+    impl_trait_ref =&gt; { table }
+    const_param_default =&gt; { table }
+    object_lifetime_default =&gt; { table }
+    thir_abstract_const =&gt; { table }
+    optimized_mir =&gt; { table }
+    mir_for_ctfe =&gt; { table }
+    promoted_mir =&gt; { table }
+    def_span =&gt; { table }
+    def_ident_span =&gt; { table }
+    lookup_stability =&gt; { table }
+    lookup_const_stability =&gt; { table }
+    lookup_default_body_stability =&gt; { table }
+    lookup_deprecation_entry =&gt; { table }
+    unused_generic_params =&gt; { table }
+    opt_def_kind =&gt; { table_direct }
+    impl_parent =&gt; { table }
+    impl_polarity =&gt; { table_direct }
+    impl_defaultness =&gt; { table_direct }
+    constness =&gt; { table_direct }
+    coerce_unsized_info =&gt; { table }
+    mir_const_qualif =&gt; { table }
+    rendered_const =&gt; { table }
+    asyncness =&gt; { table_direct }
+    fn_arg_names =&gt; { table }
+    generator_kind =&gt; { table }
+    trait_def =&gt; { table }
+
+    visibility =&gt; { cdata.get_visibility(def_id.index) }
+    adt_def =&gt; { cdata.get_adt_def(def_id.index, tcx) }
+    adt_destructor =&gt; {
+        <span class="kw">let _ </span>= cdata;
+        tcx.calculate_dtor(def_id, |<span class="kw">_</span>,<span class="kw">_</span>| <span class="prelude-val">Ok</span>(()))
+    }
+    associated_item_def_ids =&gt; {
+        tcx.arena.alloc_from_iter(cdata.get_associated_item_def_ids(def_id.index, tcx.sess))
+    }
+    associated_item =&gt; { cdata.get_associated_item(def_id.index, tcx.sess) }
+    inherent_impls =&gt; { cdata.get_inherent_implementations_for_type(tcx, def_id.index) }
+    is_foreign_item =&gt; { cdata.is_foreign_item(def_id.index) }
+    item_attrs =&gt; { tcx.arena.alloc_from_iter(cdata.get_item_attrs(def_id.index, tcx.sess)) }
+    is_mir_available =&gt; { cdata.is_item_mir_available(def_id.index) }
+    is_ctfe_mir_available =&gt; { cdata.is_ctfe_mir_available(def_id.index) }
+
+    dylib_dependency_formats =&gt; { cdata.get_dylib_dependency_formats(tcx) }
+    is_private_dep =&gt; { cdata.private_dep }
+    is_panic_runtime =&gt; { cdata.root.panic_runtime }
+    is_compiler_builtins =&gt; { cdata.root.compiler_builtins }
+    has_global_allocator =&gt; { cdata.root.has_global_allocator }
+    has_panic_handler =&gt; { cdata.root.has_panic_handler }
+    is_profiler_runtime =&gt; { cdata.root.profiler_runtime }
+    required_panic_strategy =&gt; { cdata.root.required_panic_strategy }
+    panic_in_drop_strategy =&gt; { cdata.root.panic_in_drop_strategy }
+    extern_crate =&gt; {
+        <span class="kw">let </span>r = <span class="kw-2">*</span>cdata.extern_crate.lock();
+        r.map(|c| <span class="kw-2">&amp;*</span>tcx.arena.alloc(c))
+    }
+    is_no_builtins =&gt; { cdata.root.no_builtins }
+    symbol_mangling_version =&gt; { cdata.root.symbol_mangling_version }
+    reachable_non_generics =&gt; {
+        <span class="kw">let </span>reachable_non_generics = tcx
+            .exported_symbols(cdata.cnum)
+            .iter()
+            .filter_map(|<span class="kw-2">&amp;</span>(exported_symbol, export_info)| {
+                <span class="kw">if let </span>ExportedSymbol::NonGeneric(def_id) = exported_symbol {
+                    <span class="prelude-val">Some</span>((def_id, export_info))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            })
+            .collect();
+
+        reachable_non_generics
+    }
+    native_libraries =&gt; { cdata.get_native_libraries(tcx.sess).collect() }
+    foreign_modules =&gt; { cdata.get_foreign_modules(tcx.sess).map(|m| (m.def_id, m)).collect() }
+    crate_hash =&gt; { cdata.root.hash }
+    crate_host_hash =&gt; { cdata.host_hash }
+    crate_name =&gt; { cdata.root.name }
+
+    extra_filename =&gt; { cdata.root.extra_filename.clone() }
+
+    traits_in_crate =&gt; { tcx.arena.alloc_from_iter(cdata.get_traits()) }
+    implementations_of_trait =&gt; { cdata.get_implementations_of_trait(tcx, other) }
+    crate_incoherent_impls =&gt; { cdata.get_incoherent_impls(tcx, other) }
+
+    dep_kind =&gt; {
+        <span class="kw">let </span>r = <span class="kw-2">*</span>cdata.dep_kind.lock();
+        r
+    }
+    module_children =&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = SmallVec::&lt;[<span class="kw">_</span>; <span class="number">8</span>]&gt;::new();
+        cdata.for_each_module_child(def_id.index, |child| result.push(child), tcx.sess);
+        tcx.arena.alloc_slice(<span class="kw-2">&amp;</span>result)
+    }
+    defined_lib_features =&gt; { cdata.get_lib_features(tcx) }
+    stability_implications =&gt; {
+        cdata.get_stability_implications(tcx).iter().copied().collect()
+    }
+    is_intrinsic =&gt; { cdata.get_is_intrinsic(def_id.index) }
+    defined_lang_items =&gt; { cdata.get_lang_items(tcx) }
+    diagnostic_items =&gt; { cdata.get_diagnostic_items() }
+    missing_lang_items =&gt; { cdata.get_missing_lang_items(tcx) }
+
+    missing_extern_crate_item =&gt; {
+        <span class="kw">let </span>r = <span class="macro">matches!</span>(<span class="kw-2">*</span>cdata.extern_crate.borrow(), <span class="prelude-val">Some</span>(extern_crate) <span class="kw">if </span>!extern_crate.is_direct());
+        r
+    }
+
+    used_crate_source =&gt; { Lrc::clone(<span class="kw-2">&amp;</span>cdata.source) }
+    debugger_visualizers =&gt; { cdata.get_debugger_visualizers() }
+
+    exported_symbols =&gt; {
+        <span class="kw">let </span>syms = cdata.exported_symbols(tcx);
+
+        <span class="comment">// FIXME rust-lang/rust#64319, rust-lang/rust#64872: We want
+        // to block export of generics from dylibs, but we must fix
+        // rust-lang/rust#65890 before we can do that robustly.
+
+        </span>syms
+    }
+
+    crate_extern_paths =&gt; { cdata.source().paths().cloned().collect() }
+    expn_that_defined =&gt; { cdata.get_expn_that_defined(def_id.index, tcx.sess) }
+    generator_diagnostic_data =&gt; { cdata.get_generator_diagnostic_data(tcx, def_id.index) }
+}
+
+<span class="kw">pub</span>(<span class="kw">in </span><span class="kw">crate</span>::rmeta) <span class="kw">fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <span class="comment">// FIXME(#44234) - almost all of these queries have no sub-queries and
+    // therefore no actual inputs, they&#39;re just reading tables calculated in
+    // resolve! Does this work? Unsure! That&#39;s what the issue is about
+    </span><span class="kw-2">*</span><a href="#326">providers</a> = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a> {
+        allocator_kind: |tcx, ()| CStore::from_tcx(<a href="#331">tcx</a>).<a href="../../creader.rs.html#196">allocator_kind</a>(),
+        is_dllimport_foreign_item: |tcx, id| <span class="kw">match </span><a href="#332">tcx</a>.native_library_kind(<a href="#332">id</a>) {
+            <span class="prelude-val">Some</span>(
+                <a href="../../../../rustc_session/utils/enum.NativeLibKind.html">NativeLibKind::Dylib</a> { .. } | NativeLibKind::RawDylib | NativeLibKind::Unspecified,
+            ) =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        },
+        is_statically_included_foreign_item: |tcx, id| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(tcx.native_library_kind(id), <span class="prelude-val">Some</span>(NativeLibKind::Static { .. }))
+        },
+        is_private_dep: |_tcx, cnum| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(cnum, LOCAL_CRATE);
+            <span class="bool-val">false
+        </span>},
+        native_library_kind: |tcx, id| <a href="#345">tcx</a>.native_library(<a href="#345">id</a>).map(|l| <a href="#345">l</a>.kind),
+        native_library: |tcx, id| {
+            <a href="#346">tcx</a>.native_libraries(<a href="#346">id</a>.krate)
+                .iter()
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|lib| <a href="../../native_libs.rs.html#90">native_libs::relevant_lib</a>(<span class="kw-2">&amp;</span><a href="#346">tcx</a>.sess, <a href="#349">lib</a>))
+                .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">find</a>(|lib| {
+                    <span class="kw">let </span><span class="prelude-val">Some</span>(fm_id) = <a href="#350">lib</a>.foreign_module <span class="kw">else </span>{
+                        <span class="kw">return </span><span class="bool-val">false</span>;
+                    };
+                    <span class="kw">let </span>map = <a href="#346">tcx</a>.foreign_modules(<a href="#346">id</a>.krate);
+                    <a href="#354">map</a>.get(<span class="kw-2">&amp;</span><a href="#351">fm_id</a>)
+                        .expect(<span class="string">&quot;failed to find foreign module&quot;</span>)
+                        .foreign_items
+                        .contains(<span class="kw-2">&amp;</span><a href="#346">id</a>)
+                })
+        },
+        native_libraries: |tcx, cnum| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(cnum, LOCAL_CRATE);
+            <a href="../../native_libs.rs.html#81">native_libs::collect</a>(<a href="#361">tcx</a>)
+        },
+        foreign_modules: |tcx, cnum| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(cnum, LOCAL_CRATE);
+            <a href="../../foreign_modules.rs.html#6">foreign_modules::collect</a>(<a href="#365">tcx</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|m| (<a href="#367">m</a>.def_id, <a href="#367">m</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>()
+        },
+
+        <span class="comment">// Returns a map from a sufficiently visible external item (i.e., an
+        // external item that is visible from at least one local module) to a
+        // sufficiently visible parent (considering modules that re-export the
+        // external item to be parents).
+        </span>visible_parent_map: |tcx, ()| {
+            <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/collections/hash/map/enum.Entry.html">std::collections::hash_map::Entry</a>;
+            <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/collections/vec_deque/struct.VecDeque.html">std::collections::vec_deque::VecDeque</a>;
+
+            <span class="kw">let </span><span class="kw-2">mut </span>visible_parent_map: DefIdMap&lt;<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; = <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>();
+            <span class="comment">// This is a secondary visible_parent_map, storing the DefId of
+            // parents that re-export the child as `_` or module parents
+            // which are `#[doc(hidden)]`. Since we prefer paths that don&#39;t
+            // do this, merge this map at the end, only if we&#39;re missing
+            // keys from the former.
+            // This is a rudimentary check that does not catch all cases,
+            // just the easiest.
+            </span><span class="kw">let </span><span class="kw-2">mut </span>fallback_map: DefIdMap&lt;<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; = <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>();
+
+            <span class="comment">// Issue 46112: We want the map to prefer the shortest
+            // paths when reporting the path to an item. Therefore we
+            // build up the map via a breadth-first search (BFS),
+            // which naturally yields minimal-length paths.
+            //
+            // Note that it needs to be a BFS over the whole forest of
+            // crates, not just each individual crate; otherwise you
+            // only get paths that are locally minimal with respect to
+            // whatever crate we happened to encounter first in this
+            // traversal, but not globally minimal across all crates.
+            </span><span class="kw">let </span>bfs_queue = <span class="kw-2">&amp;mut </span>VecDeque::new();
+
+            <span class="kw">for </span><span class="kw-2">&amp;</span>cnum <span class="kw">in </span>tcx.crates(()) {
+                <span class="comment">// Ignore crates without a corresponding local `extern crate` item.
+                </span><span class="kw">if </span>tcx.missing_extern_crate_item(cnum) {
+                    <span class="kw">continue</span>;
+                }
+
+                bfs_queue.push_back(cnum.as_def_id());
+            }
+
+            <span class="kw">let </span><span class="kw-2">mut </span>add_child = |bfs_queue: <span class="kw-2">&amp;mut </span>VecDeque&lt;<span class="kw">_</span>&gt;, child: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">ModChild</a>, parent: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>| {
+                <span class="kw">if </span>!child.vis.is_public() {
+                    <span class="kw">return</span>;
+                }
+
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(def_id) = <a href="#409">child</a>.res.opt_def_id() {
+                    <span class="kw">if </span>child.ident.name == kw::Underscore {
+                        <a href="#386">fallback_map</a>.insert(<a href="#414">def_id</a>, <a href="#409">parent</a>);
+                        <span class="kw">return</span>;
+                    }
+
+                    <span class="kw">if </span>ty::util::is_doc_hidden(tcx, parent) {
+                        <a href="#386">fallback_map</a>.insert(<a href="#414">def_id</a>, <a href="#409">parent</a>);
+                        <span class="kw">return</span>;
+                    }
+
+                    <span class="kw">match </span><a href="#378">visible_parent_map</a>.entry(<a href="#414">def_id</a>) {
+                        Entry::Occupied(<span class="kw-2">mut </span>entry) =&gt; {
+                            <span class="comment">// If `child` is defined in crate `cnum`, ensure
+                            // that it is mapped to a parent in `cnum`.
+                            </span><span class="kw">if </span>def_id.is_local() &amp;&amp; entry.get().is_local() {
+                                <a href="#426">entry</a>.insert(<a href="#409">parent</a>);
+                            }
+                        }
+                        Entry::Vacant(entry) =&gt; {
+                            <a href="#433">entry</a>.insert(<a href="#409">parent</a>);
+                            <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                                child.res,
+                                Res::Def(DefKind::Mod | DefKind::Enum | DefKind::Trait, <span class="kw">_</span>)
+                            ) {
+                                <a href="#409">bfs_queue</a>.push_back(<a href="#414">def_id</a>);
+                            }
+                        }
+                    }
+                }
+            };
+
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(def) = bfs_queue.pop_front() {
+                <span class="kw">for </span>child <span class="kw">in </span>tcx.module_children(def).iter() {
+                    add_child(bfs_queue, child, def);
+                }
+            }
+
+            <span class="comment">// Fill in any missing entries with the less preferable path.
+            // If this path re-exports the child as `_`, we still use this
+            // path in a diagnostic that suggests importing `::*`.
+            </span><span class="kw">for </span>(child, parent) <span class="kw">in </span>fallback_map {
+                visible_parent_map.entry(child).or_insert(parent);
+            }
+
+            <a href="#378">visible_parent_map</a>
+        },
+
+        dependency_formats: |tcx, ()| Lrc::new(<a href="../../dependency_format.rs.html#68"><span class="kw">crate</span>::dependency_format::calculate</a>(<a href="#462">tcx</a>)),
+        has_global_allocator: |tcx, cnum| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(cnum, LOCAL_CRATE);
+            CStore::from_tcx(<a href="#463">tcx</a>).<a href="../../creader.rs.html#200">has_global_allocator</a>()
+        },
+        postorder_cnums: |tcx, ()| {
+            <a href="#467">tcx</a>.arena
+                .alloc_slice(<span class="kw-2">&amp;</span>CStore::from_tcx(<a href="#467">tcx</a>).<a href="../../creader.rs.html#174">crate_dependencies_in_postorder</a>(<a href="../../../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>))
+        },
+        crates: |tcx, ()| <a href="#471">tcx</a>.arena.alloc_from_iter(CStore::from_tcx(<a href="#471">tcx</a>).<a href="#554">crates_untracked</a>()),
+        ..<span class="kw-2">*</span><a href="#326">providers</a>
+    };
+}
+
+<span class="kw">impl </span><a href="../../creader.rs.html#38">CStore</a> {
+    <span class="kw">pub fn </span>struct_field_names_untracked&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = Spanned&lt;<a href="../../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>&gt;&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#478">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#479">def</a>.krate).<a href="../decoder.rs.html#1184-1188">get_struct_field_names</a>(<a href="#479">def</a>.index, <a href="#480">sess</a>)
+    }
+
+    <span class="kw">pub fn </span>struct_field_visibilities_untracked(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = Visibility&lt;<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt;&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#486">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#487">def</a>.krate).<a href="../decoder.rs.html#1198-1201">get_struct_field_visibilities</a>(<a href="#487">def</a>.index)
+    }
+
+    <span class="kw">pub fn </span>ctor_def_id_and_kind_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_hir/def/enum.CtorKind.html">CtorKind</a>)&gt; {
+        <a class="self" href="#492">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#492">def</a>.krate).<a href="../decoder.rs.html#1149">get_ctor_def_id_and_kind</a>(<a href="#492">def</a>.index)
+    }
+
+    <span class="kw">pub fn </span>visibility_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; Visibility&lt;<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; {
+        <a class="self" href="#496">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#496">def</a>.krate).<a href="../decoder.rs.html#921">get_visibility</a>(<a href="#496">def</a>.index)
+    }
+
+    <span class="kw">pub fn </span>module_children_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; Vec&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/metadata/struct.ModChild.html">ModChild</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <a class="self" href="#500">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#500">def_id</a>.krate).<a href="../decoder.rs.html#985-990">for_each_module_child</a>(
+            <a href="#500">def_id</a>.index,
+            |child| <a href="#501">result</a>.push(<a href="#504">child</a>),
+            <a href="#500">sess</a>,
+        );
+        <a href="#501">result</a>
+    }
+
+    <span class="kw">pub fn </span>load_macro_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="../../creader.rs.html#71">LoadedMacro</a> {
+        <span class="kw">let </span>_prof_timer = <a href="#510">sess</a>.prof.generic_activity(<span class="string">&quot;metadata_load_macro&quot;</span>);
+
+        <span class="kw">let </span>data = <a class="self" href="#510">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#510">id</a>.krate);
+        <span class="kw">if </span>data.root.is_proc_macro_crate() {
+            <span class="kw">return </span><a href="../../creader.rs.html#73">LoadedMacro::ProcMacro</a>(<a href="#513">data</a>.<a href="../decoder.rs.html#819">load_proc_macro</a>(<a href="#510">id</a>.index, <a href="#510">sess</a>));
+        }
+
+        <span class="kw">let </span>span = <a href="#513">data</a>.<a href="../decoder.rs.html#810">get_span</a>(<a href="#510">id</a>.index, <a href="#510">sess</a>);
+
+        <a href="../../creader.rs.html#72">LoadedMacro::MacroDef</a>(
+            <a href="../../../../rustc_ast/ast/struct.Item.html">ast::Item</a> {
+                ident: <a href="#513">data</a>.<a href="../decoder.rs.html#790">item_ident</a>(<a href="#510">id</a>.index, <a href="#510">sess</a>),
+                id: ast::DUMMY_NODE_ID,
+                <a href="#518">span</a>,
+                attrs: <a href="#513">data</a>.<a href="../decoder.rs.html#1159-1163">get_item_attrs</a>(<a href="#510">id</a>.index, <a href="#510">sess</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>(),
+                kind: ast::ItemKind::MacroDef(<a href="#513">data</a>.<a href="../decoder.rs.html#1342">get_macro</a>(<a href="#510">id</a>.index, <a href="#510">sess</a>)),
+                vis: <a href="../../../../rustc_ast/ast/struct.Visibility.html">ast::Visibility</a> {
+                    span: <a href="#518">span</a>.shrink_to_lo(),
+                    kind: ast::VisibilityKind::Inherited,
+                    tokens: <span class="prelude-val">None</span>,
+                },
+                tokens: <span class="prelude-val">None</span>,
+            },
+            <a href="#513">data</a>.root.edition,
+        )
+    }
+
+    <span class="kw">pub fn </span>fn_has_self_parameter_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#538">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#538">def</a>.krate).<a href="../decoder.rs.html#1102">get_fn_has_self_parameter</a>(<a href="#538">def</a>.index, <a href="#538">sess</a>)
+    }
+
+    <span class="kw">pub fn </span>crate_source_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; Lrc&lt;<a href="../../../../rustc_session/cstore/struct.CrateSource.html">CrateSource</a>&gt; {
+        <a class="self" href="#542">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#542">cnum</a>).source.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>()
+    }
+
+    <span class="kw">pub fn </span>get_span_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <a class="self" href="#546">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#546">def_id</a>.krate).<a href="../decoder.rs.html#810">get_span</a>(<a href="#546">def_id</a>.index, <a href="#546">sess</a>)
+    }
+
+    <span class="kw">pub fn </span>def_kind(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../../../rustc_hir/def/enum.DefKind.html">DefKind</a> {
+        <a class="self" href="#550">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#550">def</a>.krate).<a href="../decoder.rs.html#799">def_kind</a>(<a href="#550">def</a>.index)
+    }
+
+    <span class="kw">pub fn </span>crates_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#554">self</a>.<a href="../../creader.rs.html#155">iter_crate_data</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(cnum, <span class="kw">_</span>)| <a href="#555">cnum</a>)
+    }
+
+    <span class="kw">pub fn </span>item_generics_num_lifetimes(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#558">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#558">def_id</a>.krate).<a href="../decoder.rs.html#917">get_generics</a>(<a href="#558">def_id</a>.index, <a href="#558">sess</a>).own_counts().lifetimes
+    }
+
+    <span class="kw">pub fn </span>module_expansion_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>) -&gt; <a href="../../../../rustc_span/hygiene/struct.ExpnId.html">ExpnId</a> {
+        <a class="self" href="#562">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#562">def_id</a>.krate).<a href="../decoder.rs.html#1095">module_expansion</a>(<a href="#562">def_id</a>.index, <a href="#562">sess</a>)
+    }
+
+    <span class="doccomment">/// Only public-facing way to traverse all the definitions in a non-local crate.
+    /// Critically useful for this third-party project: &lt;https://github.com/hacspec/hacspec&gt;.
+    /// See &lt;https://github.com/rust-lang/rust/pull/85889&gt; for context.
+    </span><span class="kw">pub fn </span>num_def_ids_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#569">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#569">cnum</a>).<a href="../decoder.rs.html#1797">num_def_ids</a>()
+    }
+
+    <span class="kw">pub fn </span>item_attrs_untracked&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../../rustc_ast/ast/struct.Attribute.html">ast::Attribute</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#574">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#575">def_id</a>.krate).<a href="../decoder.rs.html#1159-1163">get_item_attrs</a>(<a href="#575">def_id</a>.index, <a href="#576">sess</a>)
+    }
+
+    <span class="kw">pub fn </span>get_proc_macro_quoted_span_untracked(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>,
+        id: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>,
+    ) -&gt; <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a> {
+        <a class="self" href="#582">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#583">cnum</a>).<a href="../decoder.rs.html#1306">get_proc_macro_quoted_span</a>(<a href="#584">id</a>, <a href="#585">sess</a>)
+    }
+
+    <span class="doccomment">/// Decodes all traits in the crate (for rustdoc).
+    </span><span class="kw">pub fn </span>traits_in_crate_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#591">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#591">cnum</a>).<a href="../decoder.rs.html#1243">get_traits</a>()
+    }
+
+    <span class="doccomment">/// Decodes all trait impls in the crate (for rustdoc).
+    </span><span class="kw">pub fn </span>trait_impls_in_crate_untracked(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fast_reject/type.SimplifiedType.html">SimplifiedType</a>&gt;)&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#597">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#598">cnum</a>).<a href="../decoder.rs.html#1248">get_trait_impls</a>()
+    }
+
+    <span class="doccomment">/// Decodes all inherent impls in the crate (for rustdoc).
+    </span><span class="kw">pub fn </span>inherent_impls_in_crate_untracked(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>)&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#605">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#606">cnum</a>).<a href="../decoder.rs.html#1228">get_inherent_impls</a>()
+    }
+
+    <span class="doccomment">/// Decodes all incoherent inherent impls in the crate (for rustdoc).
+    </span><span class="kw">pub fn </span>incoherent_impls_in_crate_untracked(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; + <span class="lifetime">&#39;_ </span>{
+        <a class="self" href="#613">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#614">cnum</a>).<a href="../decoder.rs.html#1260">get_all_incoherent_impls</a>()
+    }
+
+    <span class="kw">pub fn </span>associated_item_def_ids_untracked&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        sess: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; + <span class="lifetime">&#39;a </span>{
+        <a class="self" href="#620">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#621">def_id</a>.krate).<a href="../decoder.rs.html#1113-1117">get_associated_item_def_ids</a>(<a href="#621">def_id</a>.index, <a href="#622">sess</a>)
+    }
+
+    <span class="kw">pub fn </span>may_have_doc_links_untracked(<span class="kw-2">&amp;</span><span class="self">self</span>, def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#627">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#627">def_id</a>.krate).<a href="../decoder.rs.html#1654">get_may_have_doc_links</a>(<a href="#627">def_id</a>.index)
+    }
+}
+
+<span class="kw">impl </span><a href="../../../../rustc_session/cstore/trait.CrateStore.html">CrateStore</a> <span class="kw">for </span><a href="../../creader.rs.html#38">CStore</a> {
+    <span class="kw">fn </span>as_any(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a> {
+        <span class="self"><a href="#633">self</a>
+    </span>}
+
+    <span class="kw">fn </span>crate_name(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; <a href="../../../../rustc_span/symbol/struct.Symbol.html">Symbol</a> {
+        <a class="self" href="#637">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#637">cnum</a>).root.name
+    }
+
+    <span class="kw">fn </span>stable_crate_id(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) -&gt; <a href="../../../../rustc_span/def_id/struct.StableCrateId.html">StableCrateId</a> {
+        <a class="self" href="#641">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#641">cnum</a>).root.stable_crate_id
+    }
+
+    <span class="kw">fn </span>stable_crate_id_to_crate_num(<span class="kw-2">&amp;</span><span class="self">self</span>, stable_crate_id: <a href="../../../../rustc_span/def_id/struct.StableCrateId.html">StableCrateId</a>) -&gt; <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a> {
+        <a class="self" href="#645">self</a>.stable_crate_ids[<span class="kw-2">&amp;</span><a href="#645">stable_crate_id</a>]
+    }
+
+    <span class="doccomment">/// Returns the `DefKey` for a given `DefId`. This indicates the
+    /// parent `DefId` as well as some idea of what kind of data the
+    /// `DefId` refers to.
+    </span><span class="kw">fn </span>def_key(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../../../rustc_hir/definitions/struct.DefKey.html">DefKey</a> {
+        <a class="self" href="#652">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#652">def</a>.krate).<a href="../decoder.rs.html#1363">def_key</a>(<a href="#652">def</a>.index)
+    }
+
+    <span class="kw">fn </span>def_path(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../../../rustc_hir/definitions/struct.DefPath.html">DefPath</a> {
+        <a class="self" href="#656">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#656">def</a>.krate).<a href="../decoder.rs.html#1372">def_path</a>(<a href="#656">def</a>.index)
+    }
+
+    <span class="kw">fn </span>def_path_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; <a href="../../../../rustc_span/def_id/struct.DefPathHash.html">DefPathHash</a> {
+        <a class="self" href="#660">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#660">def</a>.krate).<a href="../decoder.rs.html#1388">def_path_hash</a>(<a href="#660">def</a>.index)
+    }
+
+    <span class="kw">fn </span>def_path_hash_to_def_id(<span class="kw-2">&amp;</span><span class="self">self</span>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>, hash: <a href="../../../../rustc_span/def_id/struct.DefPathHash.html">DefPathHash</a>) -&gt; <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a> {
+        <span class="kw">let </span>def_index = <a class="self" href="#664">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#664">cnum</a>).<a href="../decoder.rs.html#1394">def_path_hash_to_def_index</a>(<a href="#664">hash</a>);
+        <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a> { krate: <a href="#664">cnum</a>, index: <a href="#665">def_index</a> }
+    }
+
+    <span class="kw">fn </span>expn_hash_to_expn_id(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>,
+        cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>,
+        index_guess: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+        hash: <a href="../../../../rustc_span/hygiene/struct.ExpnHash.html">ExpnHash</a>,
+    ) -&gt; <a href="../../../../rustc_span/hygiene/struct.ExpnId.html">ExpnId</a> {
+        <a class="self" href="#670">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#672">cnum</a>).<a href="../decoder.rs.html#1398">expn_hash_to_expn_id</a>(<a href="#671">sess</a>, <a href="#673">index_guess</a>, <a href="#674">hash</a>)
+    }
+
+    <span class="kw">fn </span>import_source_files(<span class="kw-2">&amp;</span><span class="self">self</span>, sess: <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a>, cnum: <a href="../../../../rustc_span/def_id/struct.CrateNum.html">CrateNum</a>) {
+        <span class="kw">let </span>cdata = <a class="self" href="#679">self</a>.<a href="../../creader.rs.html#143">get_crate_data</a>(<a href="#679">cnum</a>);
+        <span class="kw">for </span>file_index <span class="kw">in </span><span class="number">0</span>..cdata.root.source_map.size() {
+            cdata.imported_source_file(file_index <span class="kw">as </span>u32, sess);
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_metadata" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

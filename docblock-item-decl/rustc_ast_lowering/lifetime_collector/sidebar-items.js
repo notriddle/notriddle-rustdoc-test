@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["lifetimes_in_bounds",""],["lifetimes_in_ret_ty",""]],"struct":[["LifetimeCollectVisitor",""]]};

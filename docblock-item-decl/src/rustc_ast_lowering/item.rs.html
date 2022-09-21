@@ -1,0 +1,3068 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_ast_lowering/src/item.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>item.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_ast_lowering/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_ast_lowering/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_ast_lowering/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+<span id="1041">1041</span>
+<span id="1042">1042</span>
+<span id="1043">1043</span>
+<span id="1044">1044</span>
+<span id="1045">1045</span>
+<span id="1046">1046</span>
+<span id="1047">1047</span>
+<span id="1048">1048</span>
+<span id="1049">1049</span>
+<span id="1050">1050</span>
+<span id="1051">1051</span>
+<span id="1052">1052</span>
+<span id="1053">1053</span>
+<span id="1054">1054</span>
+<span id="1055">1055</span>
+<span id="1056">1056</span>
+<span id="1057">1057</span>
+<span id="1058">1058</span>
+<span id="1059">1059</span>
+<span id="1060">1060</span>
+<span id="1061">1061</span>
+<span id="1062">1062</span>
+<span id="1063">1063</span>
+<span id="1064">1064</span>
+<span id="1065">1065</span>
+<span id="1066">1066</span>
+<span id="1067">1067</span>
+<span id="1068">1068</span>
+<span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
+<span id="1086">1086</span>
+<span id="1087">1087</span>
+<span id="1088">1088</span>
+<span id="1089">1089</span>
+<span id="1090">1090</span>
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+<span id="1193">1193</span>
+<span id="1194">1194</span>
+<span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+<span id="1411">1411</span>
+<span id="1412">1412</span>
+<span id="1413">1413</span>
+<span id="1414">1414</span>
+<span id="1415">1415</span>
+<span id="1416">1416</span>
+<span id="1417">1417</span>
+<span id="1418">1418</span>
+<span id="1419">1419</span>
+<span id="1420">1420</span>
+<span id="1421">1421</span>
+<span id="1422">1422</span>
+<span id="1423">1423</span>
+<span id="1424">1424</span>
+<span id="1425">1425</span>
+<span id="1426">1426</span>
+<span id="1427">1427</span>
+<span id="1428">1428</span>
+<span id="1429">1429</span>
+<span id="1430">1430</span>
+<span id="1431">1431</span>
+<span id="1432">1432</span>
+<span id="1433">1433</span>
+<span id="1434">1434</span>
+<span id="1435">1435</span>
+<span id="1436">1436</span>
+<span id="1437">1437</span>
+<span id="1438">1438</span>
+<span id="1439">1439</span>
+<span id="1440">1440</span>
+<span id="1441">1441</span>
+<span id="1442">1442</span>
+<span id="1443">1443</span>
+<span id="1444">1444</span>
+<span id="1445">1445</span>
+<span id="1446">1446</span>
+<span id="1447">1447</span>
+<span id="1448">1448</span>
+<span id="1449">1449</span>
+<span id="1450">1450</span>
+<span id="1451">1451</span>
+<span id="1452">1452</span>
+<span id="1453">1453</span>
+<span id="1454">1454</span>
+<span id="1455">1455</span>
+<span id="1456">1456</span>
+<span id="1457">1457</span>
+<span id="1458">1458</span>
+<span id="1459">1459</span>
+<span id="1460">1460</span>
+<span id="1461">1461</span>
+<span id="1462">1462</span>
+<span id="1463">1463</span>
+<span id="1464">1464</span>
+<span id="1465">1465</span>
+<span id="1466">1466</span>
+<span id="1467">1467</span>
+<span id="1468">1468</span>
+<span id="1469">1469</span>
+<span id="1470">1470</span>
+<span id="1471">1471</span>
+<span id="1472">1472</span>
+<span id="1473">1473</span>
+<span id="1474">1474</span>
+<span id="1475">1475</span>
+<span id="1476">1476</span>
+<span id="1477">1477</span>
+<span id="1478">1478</span>
+<span id="1479">1479</span>
+<span id="1480">1480</span>
+<span id="1481">1481</span>
+<span id="1482">1482</span>
+<span id="1483">1483</span>
+<span id="1484">1484</span>
+<span id="1485">1485</span>
+<span id="1486">1486</span>
+<span id="1487">1487</span>
+<span id="1488">1488</span>
+<span id="1489">1489</span>
+<span id="1490">1490</span>
+<span id="1491">1491</span>
+<span id="1492">1492</span>
+<span id="1493">1493</span>
+<span id="1494">1494</span>
+<span id="1495">1495</span>
+<span id="1496">1496</span>
+<span id="1497">1497</span>
+<span id="1498">1498</span>
+<span id="1499">1499</span>
+<span id="1500">1500</span>
+<span id="1501">1501</span>
+<span id="1502">1502</span>
+<span id="1503">1503</span>
+<span id="1504">1504</span>
+<span id="1505">1505</span>
+<span id="1506">1506</span>
+<span id="1507">1507</span>
+<span id="1508">1508</span>
+<span id="1509">1509</span>
+<span id="1510">1510</span>
+<span id="1511">1511</span>
+<span id="1512">1512</span>
+<span id="1513">1513</span>
+<span id="1514">1514</span>
+<span id="1515">1515</span>
+<span id="1516">1516</span>
+<span id="1517">1517</span>
+<span id="1518">1518</span>
+<span id="1519">1519</span>
+<span id="1520">1520</span>
+<span id="1521">1521</span>
+<span id="1522">1522</span>
+<span id="1523">1523</span>
+<span id="1524">1524</span>
+<span id="1525">1525</span>
+<span id="1526">1526</span>
+<span id="1527">1527</span>
+<span id="1528">1528</span>
+<span id="1529">1529</span>
+<span id="1530">1530</span>
+<span id="1531">1531</span>
+<span id="1532">1532</span>
+<span id="1533">1533</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::errors::{<a href="errors.rs.html#34">InvalidAbi</a>, <a href="errors.rs.html#312">MisplacedRelaxTraitBound</a>};
+<span class="kw">use </span><a href="lib.rs.html#160"><span class="kw">super</span>::ResolverAstLoweringExt</a>;
+<span class="kw">use super</span>::{<a href="lib.rs.html#151-158">Arena</a>, <a href="lib.rs.html#344">AstOwner</a>, <a href="lib.rs.html#240">ImplTraitContext</a>, <a href="lib.rs.html#265">ImplTraitPosition</a>};
+<span class="kw">use super</span>::{<a href="lib.rs.html#316">FnDeclKind</a>, <a href="lib.rs.html#92">LoweringContext</a>, <a href="lib.rs.html#457">ParamMode</a>};
+
+<span class="kw">use </span><a href="../../rustc_ast/ptr/fn.P.html">rustc_ast::ptr::P</a>;
+<span class="kw">use </span><a href="../../rustc_ast/visit/enum.AssocCtxt.html">rustc_ast::visit::AssocCtxt</a>;
+<span class="kw">use </span><a href="../../rustc_ast/index.html">rustc_ast</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span><a href="../../rustc_data_structures/sorted_map/struct.SortedMap.html">rustc_data_structures::sorted_map::SortedMap</a>;
+<span class="kw">use </span><a href="../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span>rustc_hir::def_id::{<a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, <a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>};
+<span class="kw">use </span><a href="../../rustc_hir/hir/enum.PredicateOrigin.html">rustc_hir::PredicateOrigin</a>;
+<span class="kw">use </span>rustc_index::vec::{<a href="../../rustc_index/vec/trait.Idx.html">Idx</a>, <a href="../../rustc_index/vec/struct.IndexVec.html">IndexVec</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a href="../../rustc_middle/ty/trait.DefIdTree.html">DefIdTree</a>, <a href="../../rustc_middle/ty/struct.ResolverAstLowering.html">ResolverAstLowering</a>, <a href="../../rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../rustc_span/hygiene/enum.DesugaringKind.html">rustc_span::source_map::DesugaringKind</a>;
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>};
+<span class="kw">use </span><a href="../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+<span class="kw">use </span><a href="../../rustc_target/spec/abi/index.html">rustc_target::spec::abi</a>;
+<span class="kw">use </span>smallvec::{<a href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec</a>, <a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">SmallVec</a>};
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>ItemLowerer&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;hir</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) tcx: TyCtxt&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    <span class="kw">pub</span>(<span class="kw">super</span>) resolver: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><a href="../../rustc_middle/ty/struct.ResolverAstLowering.html">ResolverAstLowering</a>,
+    <span class="kw">pub</span>(<span class="kw">super</span>) ast_arena: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Arena&lt;<span class="lifetime">&#39;static</span>&gt;,
+    <span class="kw">pub</span>(<span class="kw">super</span>) ast_index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>IndexVec&lt;<a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, AstOwner&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">super</span>) owners: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>IndexVec&lt;<a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>, hir::MaybeOwner&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::OwnerInfo&lt;<span class="lifetime">&#39;hir</span>&gt;&gt;&gt;,
+}
+
+<span class="doccomment">/// When we have a ty alias we *may* have two where clauses. To give the best diagnostics, we set the span
+/// to the where clause that is preferred, if it exists. Otherwise, it sets the span to the other where
+/// clause if it exists.
+</span><span class="kw">fn </span>add_ty_alias_where_clause(
+    generics: <span class="kw-2">&amp;mut </span><a href="../../rustc_ast/ast/struct.Generics.html">ast::Generics</a>,
+    <span class="kw-2">mut </span>where_clauses: (<a href="../../rustc_ast/ast/struct.TyAliasWhereClause.html">TyAliasWhereClause</a>, <a href="../../rustc_ast/ast/struct.TyAliasWhereClause.html">TyAliasWhereClause</a>),
+    prefer_first: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) {
+    <span class="kw">if </span>!prefer_first {
+        <a href="#38">where_clauses</a> = (<a href="#38">where_clauses</a>.<span class="number">1</span>, <a href="#38">where_clauses</a>.<span class="number">0</span>);
+    }
+    <span class="kw">if </span>where_clauses.<span class="number">0.0 </span>|| !where_clauses.<span class="number">1.0 </span>{
+        <a href="#37">generics</a>.where_clause.has_where_token = <a href="#38">where_clauses</a>.<span class="number">0.0</span>;
+        <a href="#37">generics</a>.where_clause.span = <a href="#38">where_clauses</a>.<span class="number">0.1</span>;
+    } <span class="kw">else </span>{
+        <a href="#37">generics</a>.where_clause.has_where_token = <a href="#38">where_clauses</a>.<span class="number">1.0</span>;
+        <a href="#37">generics</a>.where_clause.span = <a href="#38">where_clauses</a>.<span class="number">1.1</span>;
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;hir</span>&gt; ItemLowerer&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;hir</span>&gt; {
+    <span class="kw">fn </span>with_lctx(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        owner: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>LoweringContext&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;hir</span>&gt;) -&gt; hir::OwnerNode&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    ) {
+        <span class="kw">let </span><span class="kw-2">mut </span>lctx = <a href="lib.rs.html#92">LoweringContext</a> {
+            <span class="comment">// Pseudo-globals.
+            </span>tcx: <a class="self" href="#55">self</a>.tcx,
+            resolver: <a class="self" href="#55">self</a>.resolver,
+            arena: <a class="self" href="#55">self</a>.tcx.hir_arena,
+            ast_arena: <a class="self" href="#55">self</a>.ast_arena,
+
+            <span class="comment">// HirId handling.
+            </span>bodies: Vec::new(),
+            attrs: SortedMap::default(),
+            children: FxHashMap::default(),
+            current_hir_id_owner: <a href="../../rustc_span/def_id/constant.CRATE_DEF_ID.html">CRATE_DEF_ID</a>,
+            item_local_id_counter: hir::ItemLocalId::new(<span class="number">0</span>),
+            node_id_to_local_id: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            local_id_to_def_id: SortedMap::new(),
+            trait_map: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+
+            <span class="comment">// Lowering state.
+            </span>catch_scope: <span class="prelude-val">None</span>,
+            loop_scope: <span class="prelude-val">None</span>,
+            is_in_loop_condition: <span class="bool-val">false</span>,
+            is_in_trait_impl: <span class="bool-val">false</span>,
+            is_in_dyn_type: <span class="bool-val">false</span>,
+            generator_kind: <span class="prelude-val">None</span>,
+            task_context: <span class="prelude-val">None</span>,
+            current_item: <span class="prelude-val">None</span>,
+            impl_trait_defs: Vec::new(),
+            impl_trait_bounds: Vec::new(),
+            allow_try_trait: <span class="prelude-val">Some</span>([sym::try_trait_v2, sym::yeet_desugar_details][..].<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+            allow_gen_future: <span class="prelude-val">Some</span>([sym::gen_future][..].<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+            allow_into_future: <span class="prelude-val">Some</span>([sym::into_future][..].<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+            generics_def_id_map: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+        };
+        <a href="#59">lctx</a>.<a href="lib.rs.html#559">with_hir_id_owner</a>(<a href="#56">owner</a>, |lctx| <a href="#57">f</a>(<a href="#92">lctx</a>));
+
+        <span class="kw">for </span>(def_id, info) <span class="kw">in </span>lctx.children {
+            <span class="self">self</span>.owners.ensure_contains_elem(def_id, || hir::MaybeOwner::Phantom);
+            <span class="macro">debug_assert!</span>(<span class="macro">matches!</span>(<span class="self">self</span>.owners[def_id], hir::MaybeOwner::Phantom));
+            <span class="self">self</span>.owners[def_id] = info;
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        def_id: <a href="../../rustc_span/def_id/struct.LocalDefId.html">LocalDefId</a>,
+    ) -&gt; hir::MaybeOwner&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::OwnerInfo&lt;<span class="lifetime">&#39;hir</span>&gt;&gt; {
+        <a class="self" href="#102">self</a>.owners.ensure_contains_elem(<a href="#103">def_id</a>, || hir::MaybeOwner::Phantom);
+        <span class="kw">if let </span>hir::MaybeOwner::Phantom = <a class="self" href="#102">self</a>.owners[<a href="#103">def_id</a>] {
+            <span class="kw">let </span>node = <a class="self" href="#102">self</a>.ast_index[<a href="#103">def_id</a>];
+            <span class="kw">match </span><a href="#107">node</a> {
+                <a href="lib.rs.html#345">AstOwner::NonOwner</a> =&gt; {}
+                <a href="lib.rs.html#346">AstOwner::Crate</a>(c) =&gt; <a class="self" href="#102">self</a>.<a href="#120">lower_crate</a>(<a href="#110">c</a>),
+                <a href="lib.rs.html#347">AstOwner::Item</a>(item) =&gt; <a class="self" href="#102">self</a>.<a href="#130">lower_item</a>(<a href="#111">item</a>),
+                <a href="lib.rs.html#348">AstOwner::AssocItem</a>(item, ctxt) =&gt; <a class="self" href="#102">self</a>.<a href="#135">lower_assoc_item</a>(<a href="#112">item</a>, <a href="#112">ctxt</a>),
+                <a href="lib.rs.html#349">AstOwner::ForeignItem</a>(item) =&gt; <a class="self" href="#102">self</a>.<a href="#158">lower_foreign_item</a>(<a href="#113">item</a>),
+            }
+        }
+
+        <a class="self" href="#102">self</a>.owners[<a href="#103">def_id</a>]
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>, c))]
+    </span><span class="kw">fn </span>lower_crate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Crate.html">Crate</a>) {
+        <span class="macro">debug_assert_eq!</span>(<span class="self">self</span>.resolver.node_id_to_def_id[<span class="kw-2">&amp;</span>CRATE_NODE_ID], CRATE_DEF_ID);
+        <span class="self">self</span>.with_lctx(CRATE_NODE_ID, |lctx| {
+            <span class="kw">let </span>module = lctx.lower_mod(<span class="kw-2">&amp;</span>c.items, <span class="kw-2">&amp;</span>c.spans);
+            lctx.lower_attrs(hir::CRATE_HIR_ID, <span class="kw-2">&amp;</span>c.attrs);
+            hir::OwnerNode::Crate(module)
+        })
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>lower_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>) {
+        <span class="self">self</span>.with_lctx(item.id, |lctx| hir::OwnerNode::Item(lctx.lower_item(item)))
+    }
+
+    <span class="kw">fn </span>lower_assoc_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>, ctxt: <a href="../../rustc_ast/visit/enum.AssocCtxt.html">AssocCtxt</a>) {
+        <span class="kw">let </span>def_id = <a class="self" href="#135">self</a>.resolver.node_id_to_def_id[<span class="kw-2">&amp;</span><a href="#135">item</a>.id];
+
+        <span class="kw">let </span>parent_id = <a class="self" href="#135">self</a>.tcx.<a href="../../rustc_middle/ty/trait.DefIdTree.html">local_parent</a>(<a href="#136">def_id</a>);
+        <span class="kw">let </span>parent_hir = <a class="self" href="#135">self</a>.<a href="#101-104">lower_node</a>(<a href="#138">parent_id</a>).unwrap();
+        <a class="self" href="#135">self</a>.<a href="#54-58">with_lctx</a>(<a href="#135">item</a>.id, |lctx| {
+            <span class="comment">// Evaluate with the lifetimes in `params` in-scope.
+            // This is used to track which lifetimes have already been defined,
+            // and which need to be replicated when lowering an async fn.
+            </span><span class="kw">match </span><a href="#139">parent_hir</a>.node().expect_item().kind {
+                hir::ItemKind::Impl(<a href="../../rustc_hir/hir/struct.Impl.html">hir::Impl</a> { <span class="kw-2">ref </span>of_trait, .. }) =&gt; {
+                    <a href="#140">lctx</a>.is_in_trait_impl = <a href="#145">of_trait</a>.is_some();
+                }
+                <span class="kw">_ </span>=&gt; {}
+            };
+
+            <span class="kw">match </span><a href="#135">ctxt</a> {
+                AssocCtxt::Trait =&gt; hir::OwnerNode::TraitItem(<a href="#140">lctx</a>.<a href="#766">lower_trait_item</a>(<a href="#135">item</a>)),
+                AssocCtxt::Impl =&gt; hir::OwnerNode::ImplItem(<a href="#140">lctx</a>.<a href="#867">lower_impl_item</a>(<a href="#135">item</a>)),
+            }
+        })
+    }
+
+    <span class="kw">fn </span>lower_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, item: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>) {
+        <a class="self" href="#158">self</a>.<a href="#54-58">with_lctx</a>(<a href="#158">item</a>.id, |lctx| hir::OwnerNode::ForeignItem(<a href="#159">lctx</a>.<a href="#647">lower_foreign_item</a>(<a href="#158">item</a>)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;hir</span>&gt; LoweringContext&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;hir</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_mod(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        items: <span class="kw-2">&amp;</span>[P&lt;<a href="../../rustc_ast/ast/struct.Item.html">Item</a>&gt;],
+        spans: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.ModSpans.html">ModSpans</a>,
+    ) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Mod&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <a class="self" href="#165">self</a>.arena.alloc(<a href="../../rustc_hir/hir/struct.Mod.html">hir::Mod</a> {
+            spans: <a href="../../rustc_hir/hir/struct.ModSpans.html">hir::ModSpans</a> {
+                inner_span: <a class="self" href="#165">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#167">spans</a>.inner_span),
+                inject_use_span: <a class="self" href="#165">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#167">spans</a>.inject_use_span),
+            },
+            item_ids: <a class="self" href="#165">self</a>.arena.alloc_from_iter(<a href="#166">items</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flat_map</a>(|x| <a class="self" href="#165">self</a>.<a href="#178">lower_item_ref</a>(<a href="#174">x</a>))),
+        })
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>) -&gt; SmallVec&lt;[<a href="../../rustc_hir/hir/struct.ItemId.html">hir::ItemId</a>; <span class="number">1</span>]&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>node_ids = <a class="macro" href="https://docs.rs/smallvec/1.8.1/smallvec/macro.smallvec.html">smallvec!</a>[hir::ItemId { def_id: <span class="self">self</span>.local_def_id(i.id) }];
+        <span class="kw">if let </span>ItemKind::Use(<span class="kw-2">ref </span>use_tree) = <span class="kw-2">&amp;</span><a href="#178">i</a>.kind {
+            <a class="self" href="#178">self</a>.<a href="#186-191">lower_item_id_use_tree</a>(<a href="#180">use_tree</a>, <a href="#178">i</a>.id, <span class="kw-2">&amp;mut </span><a href="#179">node_ids</a>);
+        }
+        <a href="#179">node_ids</a>
+    }
+
+    <span class="kw">fn </span>lower_item_id_use_tree(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        tree: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.UseTree.html">UseTree</a>,
+        base_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        vec: <span class="kw-2">&amp;mut </span>SmallVec&lt;[<a href="../../rustc_hir/hir/struct.ItemId.html">hir::ItemId</a>; <span class="number">1</span>]&gt;,
+    ) {
+        <span class="kw">match </span><a href="#188">tree</a>.kind {
+            UseTreeKind::Nested(<span class="kw-2">ref </span>nested_vec) =&gt; {
+                <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>nested, id) <span class="kw">in </span>nested_vec {
+                    vec.push(hir::ItemId { def_id: <span class="self">self</span>.local_def_id(id) });
+                    <span class="self">self</span>.lower_item_id_use_tree(nested, id, vec);
+                }
+            }
+            UseTreeKind::Glob =&gt; {}
+            UseTreeKind::Simple(<span class="kw">_</span>, id1, id2) =&gt; {
+                <span class="kw">for </span>(<span class="kw">_</span>, <span class="kw-2">&amp;</span>id) <span class="kw">in
+                    </span>iter::zip(<span class="self">self</span>.expect_full_res_from_use(base_id).skip(<span class="number">1</span>), <span class="kw-2">&amp;</span>[id1, id2])
+                {
+                    vec.push(hir::ItemId { def_id: <span class="self">self</span>.local_def_id(id) });
+                }
+            }
+        }
+    }
+
+    <span class="kw">fn </span>lower_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Item.html">Item</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Item&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>ident = <a href="#210">i</a>.ident;
+        <span class="kw">let </span>vis_span = <a class="self" href="#210">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#210">i</a>.vis.span);
+        <span class="kw">let </span>hir_id = <a class="self" href="#210">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#210">i</a>.id);
+        <span class="kw">let </span>attrs = <a class="self" href="#210">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#213">hir_id</a>, <span class="kw-2">&amp;</span><a href="#210">i</a>.attrs);
+        <span class="kw">let </span>kind = <a class="self" href="#210">self</a>.<a href="#226-235">lower_item_kind</a>(<a href="#210">i</a>.span, <a href="#210">i</a>.id, <a href="#213">hir_id</a>, <span class="kw-2">&amp;mut </span><a href="#211">ident</a>, <a href="#214">attrs</a>, <a href="#212">vis_span</a>, <span class="kw-2">&amp;</span><a href="#210">i</a>.kind);
+        <span class="kw">let </span>item = <a href="../../rustc_hir/hir/struct.Item.html">hir::Item</a> {
+            def_id: <a href="#213">hir_id</a>.expect_owner(),
+            ident: <a class="self" href="#210">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#211">ident</a>),
+            <a href="#215">kind</a>,
+            <a href="#212">vis_span</a>,
+            span: <a class="self" href="#210">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#210">i</a>.span),
+        };
+        <a class="self" href="#210">self</a>.arena.alloc(<a href="#216">item</a>)
+    }
+
+    <span class="kw">fn </span>lower_item_kind(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        hir_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+        ident: <span class="kw-2">&amp;mut </span><a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+        attrs: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>[<a href="../../rustc_ast/ast/struct.Attribute.html">Attribute</a>]&gt;,
+        vis_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/enum.ItemKind.html">ItemKind</a>,
+    ) -&gt; hir::ItemKind&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#234">i</a> {
+            ItemKind::ExternCrate(orig_name) =&gt; hir::ItemKind::ExternCrate(<a href="#237">orig_name</a>),
+            ItemKind::Use(<span class="kw-2">ref </span>use_tree) =&gt; {
+                <span class="comment">// Start with an empty prefix.
+                </span><span class="kw">let </span>prefix = <a href="../../rustc_ast/ast/struct.Path.html">Path</a> { segments: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[], span: <a href="#238">use_tree</a>.span, tokens: <span class="prelude-val">None </span>};
+
+                <a class="self" href="#227">self</a>.<a href="#488">lower_use_tree</a>(<a href="#238">use_tree</a>, <span class="kw-2">&amp;</span><a href="#240">prefix</a>, <a href="#229">id</a>, <a href="#233">vis_span</a>, <a href="#231">ident</a>, <a href="#232">attrs</a>)
+            }
+            ItemKind::Static(<span class="kw-2">ref </span>t, m, <span class="kw-2">ref </span>e) =&gt; {
+                <span class="kw">let </span>(ty, body_id) = <a class="self" href="#227">self</a>.<a href="#478-483">lower_const_item</a>(<a href="#244">t</a>, <a href="#228">span</a>, <a href="#244">e</a>.as_deref());
+                hir::ItemKind::Static(<a href="#245">ty</a>, <a href="#244">m</a>, <a href="#245">body_id</a>)
+            }
+            ItemKind::Const(<span class="kw">_</span>, <span class="kw-2">ref </span>t, <span class="kw-2">ref </span>e) =&gt; {
+                <span class="kw">let </span>(ty, body_id) = <a class="self" href="#227">self</a>.<a href="#478-483">lower_const_item</a>(<a href="#248">t</a>, <a href="#228">span</a>, <a href="#248">e</a>.as_deref());
+                hir::ItemKind::Const(<a href="#249">ty</a>, <a href="#249">body_id</a>)
+            }
+            ItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> {
+                sig: <a href="../../rustc_ast/ast/struct.FnSig.html">FnSig</a> { <span class="kw-2">ref </span>decl, header, span: fn_sig_span },
+                <span class="kw-2">ref </span>generics,
+                <span class="kw-2">ref </span>body,
+                ..
+            }) =&gt; {
+                <a class="self" href="#227">self</a>.<a href="lib.rs.html#872">with_new_scopes</a>(|this| {
+                    <a href="#258">this</a>.current_item = <span class="prelude-val">Some</span>(<a href="#231">ident</a>.span);
+
+                    <span class="comment">// Note: we don&#39;t need to change the return type from `T` to
+                    // `impl Future&lt;Output = T&gt;` here because lower_body
+                    // only cares about the input argument patterns in the function
+                    // declaration (decl), not the return types.
+                    </span><span class="kw">let </span>asyncness = <a href="#253">header</a>.asyncness;
+                    <span class="kw">let </span>body_id =
+                        <a href="#258">this</a>.<a href="#1045-1051">lower_maybe_async_body</a>(<a href="#228">span</a>, <span class="kw-2">&amp;</span><a href="#253">decl</a>, <a href="#265">asyncness</a>, <a href="#255">body</a>.as_deref());
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>itctx = <a href="lib.rs.html#246">ImplTraitContext::Universal</a>;
+                    <span class="kw">let </span>(generics, decl) = <a href="#258">this</a>.<a href="#1313">lower_generics</a>(<a href="#254">generics</a>, <a href="#229">id</a>, <span class="kw-2">&amp;mut </span><a href="#269">itctx</a>, |this| {
+                        <span class="kw">let </span>ret_id = <a href="#265">asyncness</a>.opt_return_id();
+                        <a href="#270">this</a>.<a href="lib.rs.html#1662">lower_fn_decl</a>(<span class="kw-2">&amp;</span><a href="#253">decl</a>, <span class="prelude-val">Some</span>(<a href="#229">id</a>), <a href="#253">fn_sig_span</a>, <a href="lib.rs.html#317">FnDeclKind::Fn</a>, <a href="#271">ret_id</a>)
+                    });
+                    <span class="kw">let </span>sig = <a href="../../rustc_hir/hir/struct.FnSig.html">hir::FnSig</a> {
+                        <a href="#270">decl</a>,
+                        header: <a href="#258">this</a>.<a href="#1258">lower_fn_header</a>(<a href="#253">header</a>),
+                        span: <a href="#258">this</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#253">fn_sig_span</a>),
+                    };
+                    hir::ItemKind::Fn(<a href="#274">sig</a>, <a href="#270">generics</a>, <a href="#266">body_id</a>)
+                })
+            }
+            ItemKind::Mod(<span class="kw">_</span>, <span class="kw-2">ref </span>mod_kind) =&gt; <span class="kw">match </span><a href="#282">mod_kind</a> {
+                ModKind::Loaded(items, <span class="kw">_</span>, spans) =&gt; {
+                    hir::ItemKind::Mod(<a class="self" href="#227">self</a>.<a href="#164-168">lower_mod</a>(<a href="#283">items</a>, <a href="#283">spans</a>))
+                }
+                ModKind::Unloaded =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`mod` items should have been loaded by now&quot;</span>),
+            },
+            ItemKind::ForeignMod(<span class="kw-2">ref </span>fm) =&gt; <a href="../../rustc_hir/hir/enum.ItemKind.html">hir::ItemKind::ForeignMod</a> {
+                abi: <a href="#288">fm</a>.abi.map_or(abi::Abi::FALLBACK, |abi| <a class="self" href="#227">self</a>.<a href="#1267">lower_abi</a>(<a href="#289">abi</a>)),
+                items: <span class="self"><a href="#227">self</a>
+                    </span>.arena
+                    .alloc_from_iter(<a href="#288">fm</a>.items.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|x| <a class="self" href="#227">self</a>.<a href="#689">lower_foreign_item_ref</a>(<a href="#292">x</a>))),
+            },
+            ItemKind::GlobalAsm(<span class="kw-2">ref </span>asm) =&gt; {
+                hir::ItemKind::GlobalAsm(<a class="self" href="#227">self</a>.<a href="asm.rs.html#25-29">lower_inline_asm</a>(<a href="#228">span</a>, <a href="#294">asm</a>))
+            }
+            ItemKind::TyAlias(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.TyAlias.html">TyAlias</a> {
+                <span class="kw-2">ref </span>generics,
+                where_clauses,
+                ty: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>ty),
+                ..
+            }) =&gt; {
+                <span class="comment">// We lower
+                //
+                // type Foo = impl Trait
+                //
+                // to
+                //
+                // type Foo = Foo1
+                // opaque type Foo1: Trait
+                </span><span class="kw">let </span><span class="kw-2">mut </span>generics = <a href="#298">generics</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <a href="#36-40">add_ty_alias_where_clause</a>(<span class="kw-2">&amp;mut </span><a href="#311">generics</a>, <a href="#299">where_clauses</a>, <span class="bool-val">true</span>);
+                <span class="kw">let </span>(generics, ty) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <span class="kw-2">&amp;</span><a href="#311">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| <a href="#317">this</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#300">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#258">ImplTraitContext::TypeAliasesOpaqueTy</a>),
+                );
+                hir::ItemKind::TyAlias(<a href="#313">ty</a>, <a href="#313">generics</a>)
+            }
+            ItemKind::TyAlias(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.TyAlias.html">TyAlias</a> {
+                <span class="kw-2">ref </span>generics, <span class="kw-2">ref </span>where_clauses, ty: <span class="prelude-val">None</span>, ..
+            }) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>generics = <a href="#322">generics</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <a href="#36-40">add_ty_alias_where_clause</a>(<span class="kw-2">&amp;mut </span><a href="#324">generics</a>, <span class="kw-2">*</span><a href="#322">where_clauses</a>, <span class="bool-val">true</span>);
+                <span class="kw">let </span>(generics, ty) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <span class="kw-2">&amp;</span><a href="#324">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| <a href="#330">this</a>.arena.alloc(<a href="#330">this</a>.<a href="lib.rs.html#1230">ty</a>(<a href="#228">span</a>, hir::TyKind::Err)),
+                );
+                hir::ItemKind::TyAlias(<a href="#326">ty</a>, <a href="#326">generics</a>)
+            }
+            ItemKind::Enum(<span class="kw-2">ref </span>enum_definition, <span class="kw-2">ref </span>generics) =&gt; {
+                <span class="kw">let </span>(generics, variants) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <a href="#334">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| {
+                        <a href="#339">this</a>.arena.alloc_from_iter(
+                            <a href="#334">enum_definition</a>.variants.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|x| <a href="#339">this</a>.<a href="#697">lower_variant</a>(<a href="#341">x</a>)),
+                        )
+                    },
+                );
+                hir::ItemKind::Enum(<a href="../../rustc_hir/hir/struct.EnumDef.html">hir::EnumDef</a> { <a href="#335">variants</a> }, <a href="#335">generics</a>)
+            }
+            ItemKind::Struct(<span class="kw-2">ref </span>struct_def, <span class="kw-2">ref </span>generics) =&gt; {
+                <span class="kw">let </span>(generics, struct_def) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <a href="#347">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| <a href="#352">this</a>.<a href="#709-713">lower_variant_data</a>(<a href="#230">hir_id</a>, <a href="#347">struct_def</a>),
+                );
+                hir::ItemKind::Struct(<a href="#348">struct_def</a>, <a href="#348">generics</a>)
+            }
+            ItemKind::Union(<span class="kw-2">ref </span>vdata, <span class="kw-2">ref </span>generics) =&gt; {
+                <span class="kw">let </span>(generics, vdata) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <a href="#356">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| <a href="#361">this</a>.<a href="#709-713">lower_variant_data</a>(<a href="#230">hir_id</a>, <a href="#356">vdata</a>),
+                );
+                hir::ItemKind::Union(<a href="#357">vdata</a>, <a href="#357">generics</a>)
+            }
+            ItemKind::Impl(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Impl.html">Impl</a> {
+                unsafety,
+                polarity,
+                defaultness,
+                constness,
+                generics: <span class="kw-2">ref </span>ast_generics,
+                of_trait: <span class="kw-2">ref </span>trait_ref,
+                self_ty: <span class="kw-2">ref </span>ty,
+                items: <span class="kw-2">ref </span>impl_items,
+            }) =&gt; {
+                <span class="comment">// Lower the &quot;impl header&quot; first. This ordering is important
+                // for in-band lifetimes! Consider `&#39;a` here:
+                //
+                //     impl Foo&lt;&#39;a&gt; for u32 {
+                //         fn method(&amp;&#39;a self) { .. }
+                //     }
+                //
+                // Because we start by lowering the `Foo&lt;&#39;a&gt; for u32`
+                // part, we will add `&#39;a` to the list of generics on
+                // the impl. When we then encounter it later in the
+                // method, it will not be considered an in-band
+                // lifetime to be added, but rather a reference to a
+                // parent lifetime.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>itctx = <a href="lib.rs.html#246">ImplTraitContext::Universal</a>;
+                <span class="kw">let </span>(generics, (trait_ref, lowered_ty)) =
+                    <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(<a href="#370">ast_generics</a>, <a href="#229">id</a>, <span class="kw-2">&amp;mut </span><a href="#388">itctx</a>, |this| {
+                        <span class="kw">let </span>trait_ref = <a href="#371">trait_ref</a>.as_ref().map(|trait_ref| {
+                            <a href="#390">this</a>.<a href="lib.rs.html#2219">lower_trait_ref</a>(
+                                <a href="#391">trait_ref</a>,
+                                <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#269">ImplTraitPosition::Trait</a>),
+                            )
+                        });
+
+                        <span class="kw">let </span>lowered_ty = <a href="#390">this</a>
+                            .<a href="lib.rs.html#1184">lower_ty</a>(<a href="#372">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>));
+
+                        (<a href="#391">trait_ref</a>, <a href="#398">lowered_ty</a>)
+                    });
+
+                <span class="kw">let </span>new_impl_items = <span class="self"><a href="#227">self</a>
+                    </span>.arena
+                    .alloc_from_iter(<a href="#373">impl_items</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|item| <a class="self" href="#227">self</a>.<a href="#931">lower_impl_item_ref</a>(<a href="#406">item</a>)));
+
+                <span class="comment">// `defaultness.has_value()` is never called for an `impl`, always `true` in order
+                // to not cause an assertion failure inside the `lower_defaultness` function.
+                </span><span class="kw">let </span>has_val = <span class="bool-val">true</span>;
+                <span class="kw">let </span>(defaultness, defaultness_span) = <a class="self" href="#227">self</a>.<a href="#948-952">lower_defaultness</a>(<a href="#368">defaultness</a>, <a href="#410">has_val</a>);
+                <span class="kw">let </span>polarity = <span class="kw">match </span><a href="#367">polarity</a> {
+                    ImplPolarity::Positive =&gt; ImplPolarity::Positive,
+                    ImplPolarity::Negative(s) =&gt; ImplPolarity::Negative(<a class="self" href="#227">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#414">s</a>)),
+                };
+                hir::ItemKind::Impl(<a class="self" href="#227">self</a>.arena.alloc(<a href="../../rustc_hir/hir/struct.Impl.html">hir::Impl</a> {
+                    unsafety: <a class="self" href="#227">self</a>.<a href="#1304">lower_unsafety</a>(<a href="#366">unsafety</a>),
+                    <a href="#412">polarity</a>,
+                    <a href="#411">defaultness</a>,
+                    <a href="#411">defaultness_span</a>,
+                    constness: <a class="self" href="#227">self</a>.<a href="#1297">lower_constness</a>(<a href="#369">constness</a>),
+                    <a href="#389">generics</a>,
+                    of_trait: <a href="#389">trait_ref</a>,
+                    self_ty: <a href="#389">lowered_ty</a>,
+                    items: <a href="#404">new_impl_items</a>,
+                }))
+            }
+            ItemKind::Trait(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Trait.html">Trait</a> {
+                is_auto,
+                unsafety,
+                <span class="kw-2">ref </span>generics,
+                <span class="kw-2">ref </span>bounds,
+                <span class="kw-2">ref </span>items,
+            }) =&gt; {
+                <span class="kw">let </span>(generics, (unsafety, items, bounds)) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <a href="#431">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| {
+                        <span class="kw">let </span>bounds = <a href="#439">this</a>.<a href="lib.rs.html#2243">lower_param_bounds</a>(
+                            <a href="#432">bounds</a>,
+                            <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#271">ImplTraitPosition::Bound</a>),
+                        );
+                        <span class="kw">let </span>items = <a href="#439">this</a>.arena.alloc_from_iter(
+                            <a href="#433">items</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|item| <a href="#439">this</a>.<a href="#844">lower_trait_item_ref</a>(<a href="#445">item</a>)),
+                        );
+                        <span class="kw">let </span>unsafety = <a href="#439">this</a>.<a href="#1304">lower_unsafety</a>(<a href="#430">unsafety</a>);
+                        (<a href="#447">unsafety</a>, <a href="#444">items</a>, <a href="#440">bounds</a>)
+                    },
+                );
+                hir::ItemKind::Trait(<a href="#429">is_auto</a>, <a href="#435">unsafety</a>, <a href="#435">generics</a>, <a href="#435">bounds</a>, <a href="#435">items</a>)
+            }
+            ItemKind::TraitAlias(<span class="kw-2">ref </span>generics, <span class="kw-2">ref </span>bounds) =&gt; {
+                <span class="kw">let </span>(generics, bounds) = <a class="self" href="#227">self</a>.<a href="#1313">lower_generics</a>(
+                    <a href="#453">generics</a>,
+                    <a href="#229">id</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| {
+                        <a href="#458">this</a>.<a href="lib.rs.html#2243">lower_param_bounds</a>(
+                            <a href="#453">bounds</a>,
+                            <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#271">ImplTraitPosition::Bound</a>),
+                        )
+                    },
+                );
+                hir::ItemKind::TraitAlias(<a href="#454">generics</a>, <a href="#454">bounds</a>)
+            }
+            ItemKind::MacroDef(<a href="../../rustc_ast/ast/struct.MacroDef.html">MacroDef</a> { <span class="kw-2">ref </span>body, macro_rules }) =&gt; {
+                <span class="kw">let </span>body = <a href="../../rustc_ast/ptr/fn.P.html">P</a>(<a class="self" href="#227">self</a>.<a href="lib.rs.html#928">lower_mac_args</a>(<a href="#467">body</a>));
+                <span class="kw">let </span>macro_kind = <a class="self" href="#227">self</a>.resolver.<a href="lib.rs.html#167">decl_macro_kind</a>(<a class="self" href="#227">self</a>.<a href="lib.rs.html#522">local_def_id</a>(<a href="#229">id</a>));
+                hir::ItemKind::Macro(<a href="../../rustc_ast/ast/struct.MacroDef.html">ast::MacroDef</a> { <a href="#468">body</a>, <a href="#467">macro_rules</a> }, <a href="#469">macro_kind</a>)
+            }
+            ItemKind::MacCall(..) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`TyMac` should have been expanded by now&quot;</span>)
+            }
+        }
+    }
+
+    <span class="kw">fn </span>lower_const_item(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ty: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Ty.html">Ty</a>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Expr.html">Expr</a>&gt;,
+    ) -&gt; (<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Ty&lt;<span class="lifetime">&#39;hir</span>&gt;, <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a>) {
+        <span class="kw">let </span>ty = <a class="self" href="#479">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#480">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>));
+        (<a href="#484">ty</a>, <a class="self" href="#479">self</a>.<a href="#1033">lower_const_body</a>(<a href="#481">span</a>, <a href="#482">body</a>))
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>lower_use_tree(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        tree: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.UseTree.html">UseTree</a>,
+        prefix: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Path.html">Path</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        vis_span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        ident: <span class="kw-2">&amp;mut </span><a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+        attrs: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>[<a href="../../rustc_ast/ast/struct.Attribute.html">Attribute</a>]&gt;,
+    ) -&gt; hir::ItemKind&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>path = <span class="kw-2">&amp;</span>tree.prefix;
+        <span class="kw">let </span>segments = prefix.segments.iter().chain(path.segments.iter()).cloned().collect();
+
+        <span class="kw">match </span>tree.kind {
+            UseTreeKind::Simple(rename, id1, id2) =&gt; {
+                <span class="kw-2">*</span>ident = tree.ident();
+
+                <span class="comment">// First, apply the prefix to the path.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>path = Path { segments, span: path.span, tokens: <span class="prelude-val">None </span>};
+
+                <span class="comment">// Correctly resolve `self` imports.
+                </span><span class="kw">if </span>path.segments.len() &gt; <span class="number">1
+                    </span>&amp;&amp; path.segments.last().unwrap().ident.name == kw::SelfLower
+                {
+                    <span class="kw">let _ </span>= path.segments.pop();
+                    <span class="kw">if </span>rename.is_none() {
+                        <span class="kw-2">*</span>ident = path.segments.last().unwrap().ident;
+                    }
+                }
+
+                <span class="kw">let </span><span class="kw-2">mut </span>resolutions = <span class="self">self</span>.expect_full_res_from_use(id).fuse();
+                <span class="comment">// We want to return *something* from this function, so hold onto the first item
+                // for later.
+                </span><span class="kw">let </span>ret_res = <span class="self">self</span>.lower_res(resolutions.next().unwrap_or(Res::Err));
+
+                <span class="comment">// Here, we are looping over namespaces, if they exist for the definition
+                // being imported. We only handle type and value namespaces because we
+                // won&#39;t be dealing with macros in the rest of the compiler.
+                // Essentially a single `use` which imports two names is desugared into
+                // two imports.
+                </span><span class="kw">for </span>new_node_id <span class="kw">in </span>[id1, id2] {
+                    <span class="kw">let </span>new_id = <span class="self">self</span>.local_def_id(new_node_id);
+                    <span class="kw">let </span><span class="prelude-val">Some</span>(res) = resolutions.next() <span class="kw">else </span>{
+                        <span class="comment">// Associate an HirId to both ids even if there is no resolution.
+                        </span><span class="kw">let </span>_old = <span class="self">self</span>.children.insert(
+                            new_id,
+                            hir::MaybeOwner::NonOwner(hir::HirId::make_owner(new_id)),
+                        );
+                        <span class="macro">debug_assert!</span>(_old.is_none());
+                        <span class="kw">continue</span>;
+                    };
+                    <span class="kw">let </span>ident = <span class="kw-2">*</span>ident;
+                    <span class="kw">let </span><span class="kw-2">mut </span>path = path.clone();
+                    <span class="kw">for </span>seg <span class="kw">in </span><span class="kw-2">&amp;mut </span>path.segments {
+                        seg.id = <span class="self">self</span>.next_node_id();
+                    }
+                    <span class="kw">let </span>span = path.span;
+
+                    <span class="self">self</span>.with_hir_id_owner(new_node_id, |this| {
+                        <span class="kw">let </span>res = this.lower_res(res);
+                        <span class="kw">let </span>path = this.lower_path_extra(res, <span class="kw-2">&amp;</span>path, ParamMode::Explicit);
+                        <span class="kw">let </span>kind = hir::ItemKind::Use(path, hir::UseKind::Single);
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(attrs) = attrs {
+                            this.attrs.insert(hir::ItemLocalId::new(<span class="number">0</span>), attrs);
+                        }
+
+                        <span class="kw">let </span>item = hir::Item {
+                            def_id: new_id,
+                            ident: this.lower_ident(ident),
+                            kind,
+                            vis_span,
+                            span: this.lower_span(span),
+                        };
+                        hir::OwnerNode::Item(this.arena.alloc(item))
+                    });
+                }
+
+                <span class="kw">let </span>path = <span class="self">self</span>.lower_path_extra(ret_res, <span class="kw-2">&amp;</span>path, ParamMode::Explicit);
+                hir::ItemKind::Use(path, hir::UseKind::Single)
+            }
+            UseTreeKind::Glob =&gt; {
+                <span class="kw">let </span>path = <span class="self">self</span>.lower_path(
+                    id,
+                    <span class="kw-2">&amp;</span>Path { segments, span: path.span, tokens: <span class="prelude-val">None </span>},
+                    ParamMode::Explicit,
+                );
+                hir::ItemKind::Use(path, hir::UseKind::Glob)
+            }
+            UseTreeKind::Nested(<span class="kw-2">ref </span>trees) =&gt; {
+                <span class="comment">// Nested imports are desugared into simple imports.
+                // So, if we start with
+                //
+                // ```
+                // pub(x) use foo::{a, b};
+                // ```
+                //
+                // we will create three items:
+                //
+                // ```
+                // pub(x) use foo::a;
+                // pub(x) use foo::b;
+                // pub(x) use foo::{}; // &lt;-- this is called the `ListStem`
+                // ```
+                //
+                // The first two are produced by recursively invoking
+                // `lower_use_tree` (and indeed there may be things
+                // like `use foo::{a::{b, c}}` and so forth).  They
+                // wind up being directly added to
+                // `self.items`. However, the structure of this
+                // function also requires us to return one item, and
+                // for that we return the `{}` import (called the
+                // `ListStem`).
+
+                </span><span class="kw">let </span>prefix = Path { segments, span: prefix.span.to(path.span), tokens: <span class="prelude-val">None </span>};
+
+                <span class="comment">// Add all the nested `PathListItem`s to the HIR.
+                </span><span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>use_tree, id) <span class="kw">in </span>trees {
+                    <span class="kw">let </span>new_hir_id = <span class="self">self</span>.local_def_id(id);
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>prefix = prefix.clone();
+
+                    <span class="comment">// Give the segments new node-ids since they are being cloned.
+                    </span><span class="kw">for </span>seg <span class="kw">in </span><span class="kw-2">&amp;mut </span>prefix.segments {
+                        seg.id = <span class="self">self</span>.next_node_id();
+                    }
+
+                    <span class="comment">// Each `use` import is an item and thus are owners of the
+                    // names in the path. Up to this point the nested import is
+                    // the current owner, since we want each desugared import to
+                    // own its own names, we have to adjust the owner before
+                    // lowering the rest of the import.
+                    </span><span class="self">self</span>.with_hir_id_owner(id, |this| {
+                        <span class="kw">let </span><span class="kw-2">mut </span>ident = <span class="kw-2">*</span>ident;
+
+                        <span class="kw">let </span>kind =
+                            this.lower_use_tree(use_tree, <span class="kw-2">&amp;</span>prefix, id, vis_span, <span class="kw-2">&amp;mut </span>ident, attrs);
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(attrs) = attrs {
+                            this.attrs.insert(hir::ItemLocalId::new(<span class="number">0</span>), attrs);
+                        }
+
+                        <span class="kw">let </span>item = hir::Item {
+                            def_id: new_hir_id,
+                            ident: this.lower_ident(ident),
+                            kind,
+                            vis_span,
+                            span: this.lower_span(use_tree.span),
+                        };
+                        hir::OwnerNode::Item(this.arena.alloc(item))
+                    });
+                }
+
+                <span class="kw">let </span>res = <span class="self">self</span>.expect_full_res_from_use(id).next().unwrap_or(Res::Err);
+                <span class="kw">let </span>res = <span class="self">self</span>.lower_res(res);
+                <span class="kw">let </span>path = <span class="self">self</span>.lower_path_extra(res, <span class="kw-2">&amp;</span>prefix, ParamMode::Explicit);
+                hir::ItemKind::Use(path, hir::UseKind::ListStem)
+            }
+        }
+    }
+
+    <span class="kw">fn </span>lower_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::ForeignItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>hir_id = <a class="self" href="#647">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#647">i</a>.id);
+        <span class="kw">let </span>def_id = <a href="#648">hir_id</a>.expect_owner();
+        <a class="self" href="#647">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#648">hir_id</a>, <span class="kw-2">&amp;</span><a href="#647">i</a>.attrs);
+        <span class="kw">let </span>item = <a href="../../rustc_hir/hir/struct.ForeignItem.html">hir::ForeignItem</a> {
+            <a href="#649">def_id</a>,
+            ident: <a class="self" href="#647">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#647">i</a>.ident),
+            kind: <span class="kw">match </span><a href="#647">i</a>.kind {
+                ForeignItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { <span class="kw-2">ref </span>sig, <span class="kw-2">ref </span>generics, .. }) =&gt; {
+                    <span class="kw">let </span>fdec = <span class="kw-2">&amp;</span><a href="#655">sig</a>.decl;
+                    <span class="kw">let </span><span class="kw-2">mut </span>itctx = <a href="lib.rs.html#246">ImplTraitContext::Universal</a>;
+                    <span class="kw">let </span>(generics, (fn_dec, fn_args)) =
+                        <a class="self" href="#647">self</a>.<a href="#1313">lower_generics</a>(<a href="#655">generics</a>, <a href="#647">i</a>.id, <span class="kw-2">&amp;mut </span><a href="#657">itctx</a>, |this| {
+                            (
+                                <span class="comment">// Disallow `impl Trait` in foreign items.
+                                </span><a href="#659">this</a>.<a href="lib.rs.html#1662">lower_fn_decl</a>(
+                                    <a href="#656">fdec</a>,
+                                    <span class="prelude-val">None</span>,
+                                    <a href="#655">sig</a>.span,
+                                    <a href="lib.rs.html#319">FnDeclKind::ExternFn</a>,
+                                    <span class="prelude-val">None</span>,
+                                ),
+                                <a href="#659">this</a>.<a href="lib.rs.html#1639">lower_fn_params_to_names</a>(<a href="#656">fdec</a>),
+                            )
+                        });
+
+                    hir::ForeignItemKind::Fn(<a href="#658">fn_dec</a>, <a href="#658">fn_args</a>, <a href="#658">generics</a>)
+                }
+                ForeignItemKind::Static(<span class="kw-2">ref </span>t, m, <span class="kw">_</span>) =&gt; {
+                    <span class="kw">let </span>ty =
+                        <a class="self" href="#647">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#675">t</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>));
+                    hir::ForeignItemKind::Static(<a href="#676">ty</a>, <a href="#675">m</a>)
+                }
+                ForeignItemKind::TyAlias(..) =&gt; hir::ForeignItemKind::Type,
+                ForeignItemKind::MacCall(<span class="kw">_</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;macro shouldn&#39;t exist here&quot;</span>),
+            },
+            vis_span: <a class="self" href="#647">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#647">i</a>.vis.span),
+            span: <a class="self" href="#647">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#647">i</a>.span),
+        };
+        <a class="self" href="#647">self</a>.arena.alloc(<a href="#651">item</a>)
+    }
+
+    <span class="kw">fn </span>lower_foreign_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.ForeignItem.html">ForeignItem</a>) -&gt; <a href="../../rustc_hir/hir/struct.ForeignItemRef.html">hir::ForeignItemRef</a> {
+        <a href="../../rustc_hir/hir/struct.ForeignItemRef.html">hir::ForeignItemRef</a> {
+            id: <a href="../../rustc_hir/hir/struct.ForeignItemId.html">hir::ForeignItemId</a> { def_id: <a class="self" href="#689">self</a>.<a href="lib.rs.html#522">local_def_id</a>(<a href="#689">i</a>.id) },
+            ident: <a class="self" href="#689">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#689">i</a>.ident),
+            span: <a class="self" href="#689">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#689">i</a>.span),
+        }
+    }
+
+    <span class="kw">fn </span>lower_variant(<span class="kw-2">&amp;mut </span><span class="self">self</span>, v: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Variant.html">Variant</a>) -&gt; hir::Variant&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>id = <a class="self" href="#697">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#697">v</a>.id);
+        <a class="self" href="#697">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#698">id</a>, <span class="kw-2">&amp;</span><a href="#697">v</a>.attrs);
+        <a href="../../rustc_hir/hir/struct.Variant.html">hir::Variant</a> {
+            <a href="#698">id</a>,
+            data: <a class="self" href="#697">self</a>.<a href="#709-713">lower_variant_data</a>(<a href="#698">id</a>, <span class="kw-2">&amp;</span><a href="#697">v</a>.data),
+            disr_expr: <a href="#697">v</a>.disr_expr.as_ref().map(|e| <a class="self" href="#697">self</a>.<a href="lib.rs.html#2332">lower_anon_const</a>(<a href="#703">e</a>)),
+            ident: <a class="self" href="#697">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#697">v</a>.ident),
+            span: <a class="self" href="#697">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#697">v</a>.span),
+        }
+    }
+
+    <span class="kw">fn </span>lower_variant_data(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        parent_id: <a href="../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+        vdata: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/enum.VariantData.html">VariantData</a>,
+    ) -&gt; hir::VariantData&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#712">vdata</a> {
+            VariantData::Struct(<span class="kw-2">ref </span>fields, recovered) =&gt; hir::VariantData::Struct(
+                <a class="self" href="#710">self</a>.arena
+                    .alloc_from_iter(<a href="#715">fields</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|f| <a class="self" href="#710">self</a>.<a href="#738">lower_field_def</a>(<a href="#717">f</a>))),
+                <a href="#715">recovered</a>,
+            ),
+            VariantData::Tuple(<span class="kw-2">ref </span>fields, id) =&gt; {
+                <span class="kw">let </span>ctor_id = <a class="self" href="#710">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#720">id</a>);
+                <a class="self" href="#710">self</a>.<a href="lib.rs.html#919">alias_attrs</a>(<a href="#721">ctor_id</a>, <a href="#711">parent_id</a>);
+                hir::VariantData::Tuple(
+                    <a class="self" href="#710">self</a>.arena.alloc_from_iter(
+                        <a href="#720">fields</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|f| <a class="self" href="#710">self</a>.<a href="#738">lower_field_def</a>(<a href="#725">f</a>)),
+                    ),
+                    <a href="#721">ctor_id</a>,
+                )
+            }
+            VariantData::Unit(id) =&gt; {
+                <span class="kw">let </span>ctor_id = <a class="self" href="#710">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#730">id</a>);
+                <a class="self" href="#710">self</a>.<a href="lib.rs.html#919">alias_attrs</a>(<a href="#731">ctor_id</a>, <a href="#711">parent_id</a>);
+                hir::VariantData::Unit(<a href="#731">ctor_id</a>)
+            }
+        }
+    }
+
+    <span class="kw">fn </span>lower_field_def(<span class="kw-2">&amp;mut </span><span class="self">self</span>, (index, f): (<a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.FieldDef.html">FieldDef</a>)) -&gt; hir::FieldDef&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>ty = <span class="kw">if let </span>TyKind::Path(<span class="kw-2">ref </span>qself, <span class="kw-2">ref </span>path) = <a href="#738">f</a>.ty.kind {
+            <span class="kw">let </span>t = <a class="self" href="#738">self</a>.<a href="lib.rs.html#1189-1196">lower_path_ty</a>(
+                <span class="kw-2">&amp;</span><a href="#738">f</a>.ty,
+                <a href="#739">qself</a>,
+                <a href="#739">path</a>,
+                <a href="lib.rs.html#461">ParamMode::ExplicitNamed</a>, <span class="comment">// no `&#39;_` in declarations (Issue #61124)
+                </span><span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#266">ImplTraitPosition::Path</a>),
+            );
+            <a class="self" href="#738">self</a>.arena.alloc(<a href="#740">t</a>)
+        } <span class="kw">else </span>{
+            <a class="self" href="#738">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<span class="kw-2">&amp;</span><a href="#738">f</a>.ty, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>))
+        };
+        <span class="kw">let </span>hir_id = <a class="self" href="#738">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#738">f</a>.id);
+        <a class="self" href="#738">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#751">hir_id</a>, <span class="kw-2">&amp;</span><a href="#738">f</a>.attrs);
+        <a href="../../rustc_hir/hir/struct.FieldDef.html">hir::FieldDef</a> {
+            span: <a class="self" href="#738">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#738">f</a>.span),
+            <a href="#751">hir_id</a>,
+            ident: <span class="kw">match </span><a href="#738">f</a>.ident {
+                <span class="prelude-val">Some</span>(ident) =&gt; <a class="self" href="#738">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#757">ident</a>),
+                <span class="comment">// FIXME(jseyfried): positional field hygiene.
+                </span><span class="prelude-val">None </span>=&gt; Ident::new(sym::integer(<a href="#738">index</a>), <a class="self" href="#738">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#738">f</a>.span)),
+            },
+            vis_span: <a class="self" href="#738">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#738">f</a>.vis.span),
+            <a href="#739">ty</a>,
+        }
+    }
+
+    <span class="kw">fn </span>lower_trait_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::TraitItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>hir_id = <a class="self" href="#766">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#766">i</a>.id);
+        <span class="kw">let </span>trait_item_def_id = <a href="#767">hir_id</a>.expect_owner();
+
+        <span class="kw">let </span>(generics, kind, has_default) = <span class="kw">match </span><a href="#766">i</a>.kind {
+            AssocItemKind::Const(<span class="kw">_</span>, <span class="kw-2">ref </span>ty, <span class="kw-2">ref </span>default) =&gt; {
+                <span class="kw">let </span>ty = <a class="self" href="#766">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#771">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>));
+                <span class="kw">let </span>body = <a href="#771">default</a>.as_ref().map(|x| <a class="self" href="#766">self</a>.<a href="#1033">lower_const_body</a>(<a href="#766">i</a>.span, <span class="prelude-val">Some</span>(<a href="#773">x</a>)));
+                (hir::Generics::empty(), hir::TraitItemKind::Const(<a href="#772">ty</a>, <a href="#773">body</a>), <a href="#773">body</a>.is_some())
+            }
+            AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { <span class="kw-2">ref </span>sig, <span class="kw-2">ref </span>generics, body: <span class="prelude-val">None</span>, .. }) =&gt; {
+                <span class="kw">let </span>asyncness = <a href="#776">sig</a>.header.asyncness;
+                <span class="kw">let </span>names = <a class="self" href="#766">self</a>.<a href="lib.rs.html#1639">lower_fn_params_to_names</a>(<span class="kw-2">&amp;</span><a href="#776">sig</a>.decl);
+                <span class="kw">let </span>(generics, sig) = <a class="self" href="#766">self</a>.<a href="#1242-1249">lower_method_sig</a>(
+                    <a href="#776">generics</a>,
+                    <a href="#776">sig</a>,
+                    <a href="#766">i</a>.id,
+                    <a href="lib.rs.html#322">FnDeclKind::Trait</a>,
+                    <a href="#777">asyncness</a>.opt_return_id(),
+                );
+                (<a href="#779">generics</a>, hir::TraitItemKind::Fn(<a href="#779">sig</a>, hir::TraitFn::Required(<a href="#778">names</a>)), <span class="bool-val">false</span>)
+            }
+            AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { <span class="kw-2">ref </span>sig, <span class="kw-2">ref </span>generics, body: <span class="prelude-val">Some</span>(<span class="kw-2">ref </span>body), .. }) =&gt; {
+                <span class="kw">let </span>asyncness = <a href="#788">sig</a>.header.asyncness;
+                <span class="kw">let </span>body_id =
+                    <a class="self" href="#766">self</a>.<a href="#1045-1051">lower_maybe_async_body</a>(<a href="#766">i</a>.span, <span class="kw-2">&amp;</span><a href="#788">sig</a>.decl, <a href="#789">asyncness</a>, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#788">body</a>));
+                <span class="kw">let </span>(generics, sig) = <a class="self" href="#766">self</a>.<a href="#1242-1249">lower_method_sig</a>(
+                    <a href="#788">generics</a>,
+                    <a href="#788">sig</a>,
+                    <a href="#766">i</a>.id,
+                    <a href="lib.rs.html#322">FnDeclKind::Trait</a>,
+                    <a href="#789">asyncness</a>.opt_return_id(),
+                );
+                (<a href="#792">generics</a>, hir::TraitItemKind::Fn(<a href="#792">sig</a>, hir::TraitFn::Provided(<a href="#790">body_id</a>)), <span class="bool-val">true</span>)
+            }
+            AssocItemKind::TyAlias(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.TyAlias.html">TyAlias</a> {
+                <span class="kw-2">ref </span>generics,
+                where_clauses,
+                <span class="kw-2">ref </span>bounds,
+                <span class="kw-2">ref </span>ty,
+                ..
+            }) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>generics = <a href="#802">generics</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <a href="#36-40">add_ty_alias_where_clause</a>(<span class="kw-2">&amp;mut </span><a href="#808">generics</a>, <a href="#803">where_clauses</a>, <span class="bool-val">false</span>);
+                <span class="kw">let </span>(generics, kind) = <a class="self" href="#766">self</a>.<a href="#1313">lower_generics</a>(
+                    <span class="kw-2">&amp;</span><a href="#808">generics</a>,
+                    <a href="#766">i</a>.id,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| {
+                        <span class="kw">let </span>ty = <a href="#805">ty</a>.as_ref().map(|x| {
+                            <a href="#814">this</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#815">x</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>))
+                        });
+                        hir::TraitItemKind::Type(
+                            <a href="#814">this</a>.<a href="lib.rs.html#2243">lower_param_bounds</a>(
+                                <a href="#804">bounds</a>,
+                                <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                            ),
+                            <a href="#815">ty</a>,
+                        )
+                    },
+                );
+                (<a href="#810">generics</a>, <a href="#810">kind</a>, <a href="#805">ty</a>.is_some())
+            }
+            AssocItemKind::MacCall(..) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;macro item shouldn&#39;t exist at this point&quot;</span>),
+        };
+
+        <a class="self" href="#766">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#767">hir_id</a>, <span class="kw-2">&amp;</span><a href="#766">i</a>.attrs);
+        <span class="kw">let </span>item = <a href="../../rustc_hir/hir/struct.TraitItem.html">hir::TraitItem</a> {
+            def_id: <a href="#768">trait_item_def_id</a>,
+            ident: <a class="self" href="#766">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#766">i</a>.ident),
+            <a href="#770">generics</a>,
+            <a href="#770">kind</a>,
+            span: <a class="self" href="#766">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#766">i</a>.span),
+            defaultness: <a href="../../rustc_hir/hir/enum.Defaultness.html">hir::Defaultness::Default</a> { has_value: <a href="#770">has_default</a> },
+        };
+        <a class="self" href="#766">self</a>.arena.alloc(<a href="#833">item</a>)
+    }
+
+    <span class="kw">fn </span>lower_trait_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>) -&gt; <a href="../../rustc_hir/hir/struct.TraitItemRef.html">hir::TraitItemRef</a> {
+        <span class="kw">let </span>kind = <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#844">i</a>.kind {
+            AssocItemKind::Const(..) =&gt; hir::AssocItemKind::Const,
+            AssocItemKind::TyAlias(..) =&gt; hir::AssocItemKind::Type,
+            AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { sig, .. }) =&gt; {
+                <a href="../../rustc_hir/hir/enum.AssocItemKind.html">hir::AssocItemKind::Fn</a> { has_self: <a href="#848">sig</a>.decl.has_self() }
+            }
+            AssocItemKind::MacCall(..) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>(),
+        };
+        <span class="kw">let </span>id = <a href="../../rustc_hir/hir/struct.TraitItemId.html">hir::TraitItemId</a> { def_id: <a class="self" href="#844">self</a>.<a href="lib.rs.html#522">local_def_id</a>(<a href="#844">i</a>.id) };
+        <a href="../../rustc_hir/hir/struct.TraitItemRef.html">hir::TraitItemRef</a> {
+            <a href="#853">id</a>,
+            ident: <a class="self" href="#844">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#844">i</a>.ident),
+            span: <a class="self" href="#844">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#844">i</a>.span),
+            <a href="#845">kind</a>,
+        }
+    }
+
+    <span class="doccomment">/// Construct `ExprKind::Err` for the given `span`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>expr_err(<span class="kw-2">&amp;mut </span><span class="self">self</span>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; hir::Expr&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <a class="self" href="#863">self</a>.<a href="expr.rs.html#1836-1841">expr</a>(<a href="#863">span</a>, hir::ExprKind::Err, AttrVec::new())
+    }
+
+    <span class="kw">fn </span>lower_impl_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::ImplItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="comment">// Since `default impl` is not yet implemented, this is always true in impls.
+        </span><span class="kw">let </span>has_value = <span class="bool-val">true</span>;
+        <span class="kw">let </span>(defaultness, <span class="kw">_</span>) = <a class="self" href="#867">self</a>.<a href="#948-952">lower_defaultness</a>(<a href="#867">i</a>.kind.defaultness(), <a href="#869">has_value</a>);
+
+        <span class="kw">let </span>(generics, kind) = <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#867">i</a>.kind {
+            AssocItemKind::Const(<span class="kw">_</span>, ty, expr) =&gt; {
+                <span class="kw">let </span>ty = <a class="self" href="#867">self</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#873">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>));
+                (
+                    hir::Generics::empty(),
+                    hir::ImplItemKind::Const(<a href="#874">ty</a>, <a class="self" href="#867">self</a>.<a href="#1033">lower_const_body</a>(<a href="#867">i</a>.span, <a href="#873">expr</a>.as_deref())),
+                )
+            }
+            AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { sig, generics, body, .. }) =&gt; {
+                <a class="self" href="#867">self</a>.current_item = <span class="prelude-val">Some</span>(<a href="#867">i</a>.span);
+                <span class="kw">let </span>asyncness = <a href="#880">sig</a>.header.asyncness;
+                <span class="kw">let </span>body_id =
+                    <a class="self" href="#867">self</a>.<a href="#1045-1051">lower_maybe_async_body</a>(<a href="#867">i</a>.span, <span class="kw-2">&amp;</span><a href="#880">sig</a>.decl, <a href="#882">asyncness</a>, <a href="#880">body</a>.as_deref());
+                <span class="kw">let </span>(generics, sig) = <a class="self" href="#867">self</a>.<a href="#1242-1249">lower_method_sig</a>(
+                    <a href="#880">generics</a>,
+                    <a href="#880">sig</a>,
+                    <a href="#867">i</a>.id,
+                    <span class="kw">if </span><span class="self">self</span>.is_in_trait_impl { <a href="lib.rs.html#323">FnDeclKind::Impl</a> } <span class="kw">else </span>{ <a href="lib.rs.html#318">FnDeclKind::Inherent</a> },
+                    <a href="#882">asyncness</a>.opt_return_id(),
+                );
+
+                (<a href="#885">generics</a>, hir::ImplItemKind::Fn(<a href="#885">sig</a>, <a href="#883">body_id</a>))
+            }
+            AssocItemKind::TyAlias(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.TyAlias.html">TyAlias</a> { generics, where_clauses, ty, .. }) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>generics = <a href="#895">generics</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <a href="#36-40">add_ty_alias_where_clause</a>(<span class="kw-2">&amp;mut </span><a href="#896">generics</a>, <span class="kw-2">*</span><a href="#895">where_clauses</a>, <span class="bool-val">false</span>);
+                <a class="self" href="#867">self</a>.<a href="#1313">lower_generics</a>(
+                    <span class="kw-2">&amp;</span><a href="#896">generics</a>,
+                    <a href="#867">i</a>.id,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#272">ImplTraitPosition::Generic</a>),
+                    |this| <span class="kw">match </span><a href="#895">ty</a> {
+                        <span class="prelude-val">None </span>=&gt; {
+                            <span class="kw">let </span>ty = <a href="#902">this</a>.arena.alloc(<a href="#902">this</a>.<a href="lib.rs.html#1230">ty</a>(<a href="#867">i</a>.span, hir::TyKind::Err));
+                            hir::ImplItemKind::TyAlias(<a href="#904">ty</a>)
+                        }
+                        <span class="prelude-val">Some</span>(ty) =&gt; {
+                            <span class="kw">let </span>ty = <a href="#902">this</a>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#907">ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#258">ImplTraitContext::TypeAliasesOpaqueTy</a>);
+                            hir::ImplItemKind::TyAlias(<a href="#908">ty</a>)
+                        }
+                    },
+                )
+            }
+            AssocItemKind::MacCall(..) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;`TyMac` should have been expanded by now&quot;</span>),
+        };
+
+        <span class="kw">let </span>hir_id = <a class="self" href="#867">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#867">i</a>.id);
+        <a class="self" href="#867">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#917">hir_id</a>, <span class="kw-2">&amp;</span><a href="#867">i</a>.attrs);
+        <span class="kw">let </span>item = <a href="../../rustc_hir/hir/struct.ImplItem.html">hir::ImplItem</a> {
+            def_id: <a href="#917">hir_id</a>.expect_owner(),
+            ident: <a class="self" href="#867">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#867">i</a>.ident),
+            <a href="#872">generics</a>,
+            <a href="#872">kind</a>,
+            vis_span: <a class="self" href="#867">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#867">i</a>.vis.span),
+            span: <a class="self" href="#867">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#867">i</a>.span),
+            <a href="#870">defaultness</a>,
+        };
+        <a class="self" href="#867">self</a>.arena.alloc(<a href="#919">item</a>)
+    }
+
+    <span class="kw">fn </span>lower_impl_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/type.AssocItem.html">AssocItem</a>) -&gt; <a href="../../rustc_hir/hir/struct.ImplItemRef.html">hir::ImplItemRef</a> {
+        <a href="../../rustc_hir/hir/struct.ImplItemRef.html">hir::ImplItemRef</a> {
+            id: <a href="../../rustc_hir/hir/struct.ImplItemId.html">hir::ImplItemId</a> { def_id: <a class="self" href="#931">self</a>.<a href="lib.rs.html#522">local_def_id</a>(<a href="#931">i</a>.id) },
+            ident: <a class="self" href="#931">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#931">i</a>.ident),
+            span: <a class="self" href="#931">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#931">i</a>.span),
+            kind: <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#931">i</a>.kind {
+                AssocItemKind::Const(..) =&gt; hir::AssocItemKind::Const,
+                AssocItemKind::TyAlias(..) =&gt; hir::AssocItemKind::Type,
+                AssocItemKind::Fn(<span class="kw">box </span><a href="../../rustc_ast/ast/struct.Fn.html">Fn</a> { sig, .. }) =&gt; {
+                    <a href="../../rustc_hir/hir/enum.AssocItemKind.html">hir::AssocItemKind::Fn</a> { has_self: <a href="#939">sig</a>.decl.has_self() }
+                }
+                AssocItemKind::MacCall(..) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unimplemented.html">unimplemented!</a>(),
+            },
+            trait_item_def_id: <a class="self" href="#931">self</a>.resolver.<a href="lib.rs.html#162">get_partial_res</a>(<a href="#931">i</a>.id).map(|r| <a href="#944">r</a>.base_res().def_id()),
+        }
+    }
+
+    <span class="kw">fn </span>lower_defaultness(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        d: <a href="../../rustc_ast/ast/enum.Defaultness.html">Defaultness</a>,
+        has_value: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; (<a href="../../rustc_hir/hir/enum.Defaultness.html">hir::Defaultness</a>, <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;) {
+        <span class="kw">match </span><a href="#950">d</a> {
+            Defaultness::Default(sp) =&gt; {
+                (<a href="../../rustc_hir/hir/enum.Defaultness.html">hir::Defaultness::Default</a> { <a href="#951">has_value</a> }, <span class="prelude-val">Some</span>(<a class="self" href="#949">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#954">sp</a>)))
+            }
+            Defaultness::Final =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(has_value);
+                (hir::Defaultness::Final, <span class="prelude-val">None</span>)
+            }
+        }
+    }
+
+    <span class="kw">fn </span>record_body(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        params: <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>[hir::Param&lt;<span class="lifetime">&#39;hir</span>&gt;],
+        value: hir::Expr&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    ) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <span class="kw">let </span>body = <a href="../../rustc_hir/hir/struct.Body.html">hir::Body</a> {
+            generator_kind: <a class="self" href="#965">self</a>.generator_kind,
+            <a href="#966">params</a>,
+            value: <a class="self" href="#965">self</a>.arena.alloc(<a href="#967">value</a>),
+        };
+        <span class="kw">let </span>id = <a href="#969">body</a>.id();
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(id.hir_id.owner, <span class="self">self</span>.current_hir_id_owner);
+        <a class="self" href="#965">self</a>.bodies.push((<a href="#974">id</a>.hir_id.local_id, <a class="self" href="#965">self</a>.arena.alloc(<a href="#969">body</a>)));
+        <a href="#974">id</a>
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_body(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span><span class="self">Self</span>) -&gt; (<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>[hir::Param&lt;<span class="lifetime">&#39;hir</span>&gt;], hir::Expr&lt;<span class="lifetime">&#39;hir</span>&gt;),
+    ) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <span class="kw">let </span>prev_gen_kind = <a class="self" href="#981">self</a>.generator_kind.take();
+        <span class="kw">let </span>task_context = <a class="self" href="#981">self</a>.task_context.take();
+        <span class="kw">let </span>(parameters, result) = <a href="#982">f</a>(<a class="self" href="#981">self</a>);
+        <span class="kw">let </span>body_id = <a class="self" href="#981">self</a>.<a href="#964-968">record_body</a>(<a href="#986">parameters</a>, <a href="#986">result</a>);
+        <a class="self" href="#981">self</a>.task_context = <a href="#985">task_context</a>;
+        <a class="self" href="#981">self</a>.generator_kind = <a href="#984">prev_gen_kind</a>;
+        <a href="#987">body_id</a>
+    }
+
+    <span class="kw">fn </span>lower_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, param: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Param.html">Param</a>) -&gt; hir::Param&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">let </span>hir_id = <a class="self" href="#993">self</a>.<a href="lib.rs.html#692">lower_node_id</a>(<a href="#993">param</a>.id);
+        <a class="self" href="#993">self</a>.<a href="lib.rs.html#887">lower_attrs</a>(<a href="#994">hir_id</a>, <span class="kw-2">&amp;</span><a href="#993">param</a>.attrs);
+        <a href="../../rustc_hir/hir/struct.Param.html">hir::Param</a> {
+            <a href="#994">hir_id</a>,
+            pat: <a class="self" href="#993">self</a>.<a href="pat.rs.html#17">lower_pat</a>(<span class="kw-2">&amp;</span><a href="#993">param</a>.pat),
+            ty_span: <a class="self" href="#993">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#993">param</a>.ty.span),
+            span: <a class="self" href="#993">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#993">param</a>.span),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_fn_body(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        decl: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.FnDecl.html">FnDecl</a>,
+        body: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span><span class="self">Self</span>) -&gt; hir::Expr&lt;<span class="lifetime">&#39;hir</span>&gt;,
+    ) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <a class="self" href="#1005">self</a>.<a href="#980-983">lower_body</a>(|this| {
+            (
+                <a href="#1009">this</a>.arena.alloc_from_iter(<a href="#1006">decl</a>.inputs.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|x| <a href="#1009">this</a>.<a href="#993">lower_param</a>(<a href="#1011">x</a>))),
+                <a href="#1007">body</a>(<a href="#1009">this</a>),
+            )
+        })
+    }
+
+    <span class="kw">fn </span>lower_fn_body_block(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        decl: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.FnDecl.html">FnDecl</a>,
+        body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>&gt;,
+    ) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <a class="self" href="#1018">self</a>.<a href="#1004-1008">lower_fn_body</a>(<a href="#1020">decl</a>, |this| <a href="#1023">this</a>.<a href="#1026">lower_block_expr_opt</a>(<a href="#1019">span</a>, <a href="#1021">body</a>))
+    }
+
+    <span class="kw">fn </span>lower_block_expr_opt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, block: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>&gt;) -&gt; hir::Expr&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">match </span><a href="#1026">block</a> {
+            <span class="prelude-val">Some</span>(block) =&gt; <a class="self" href="#1026">self</a>.<a href="lib.rs.html#2307">lower_block_expr</a>(<a href="#1028">block</a>),
+            <span class="prelude-val">None </span>=&gt; <a class="self" href="#1026">self</a>.<a href="#863">expr_err</a>(<a href="#1026">span</a>),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_const_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, expr: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Expr.html">Expr</a>&gt;) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <a class="self" href="#1033">self</a>.<a href="#980-983">lower_body</a>(|this| {
+            (
+                <span class="kw-2">&amp;</span>[],
+                <span class="kw">match </span><a href="#1033">expr</a> {
+                    <span class="prelude-val">Some</span>(expr) =&gt; <a href="#1034">this</a>.<a href="expr.rs.html#31">lower_expr_mut</a>(<a href="#1038">expr</a>),
+                    <span class="prelude-val">None </span>=&gt; <a href="#1034">this</a>.<a href="#863">expr_err</a>(<a href="#1033">span</a>),
+                },
+            )
+        })
+    }
+
+    <span class="kw">fn </span>lower_maybe_async_body(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        decl: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.FnDecl.html">FnDecl</a>,
+        asyncness: <a href="../../rustc_ast/ast/enum.Async.html">Async</a>,
+        body: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Block.html">Block</a>&gt;,
+    ) -&gt; <a href="../../rustc_hir/hir/struct.BodyId.html">hir::BodyId</a> {
+        <span class="kw">let </span>closure_id = <span class="kw">match </span><a href="#1049">asyncness</a> {
+            <a href="../../rustc_ast/ast/enum.Async.html">Async::Yes</a> { closure_id, .. } =&gt; <a href="#1053">closure_id</a>,
+            Async::No =&gt; <span class="kw">return </span><a class="self" href="#1046">self</a>.<a href="#1017-1022">lower_fn_body_block</a>(<a href="#1047">span</a>, <a href="#1048">decl</a>, <a href="#1050">body</a>),
+        };
+
+        <a class="self" href="#1046">self</a>.<a href="#980-983">lower_body</a>(|this| {
+            <span class="kw">let </span><span class="kw-2">mut </span>parameters: Vec&lt;hir::Param&lt;<span class="lifetime">&#39;_</span>&gt;&gt; = Vec::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>statements: Vec&lt;hir::Stmt&lt;<span class="lifetime">&#39;_</span>&gt;&gt; = Vec::new();
+
+            <span class="comment">// Async function parameters are lowered into the closure body so that they are
+            // captured and so that the drop order matches the equivalent non-async functions.
+            //
+            // from:
+            //
+            //     async fn foo(&lt;pattern&gt;: &lt;ty&gt;, &lt;pattern&gt;: &lt;ty&gt;, &lt;pattern&gt;: &lt;ty&gt;) {
+            //         &lt;body&gt;
+            //     }
+            //
+            // into:
+            //
+            //     fn foo(__arg0: &lt;ty&gt;, __arg1: &lt;ty&gt;, __arg2: &lt;ty&gt;) {
+            //       async move {
+            //         let __arg2 = __arg2;
+            //         let &lt;pattern&gt; = __arg2;
+            //         let __arg1 = __arg1;
+            //         let &lt;pattern&gt; = __arg1;
+            //         let __arg0 = __arg0;
+            //         let &lt;pattern&gt; = __arg0;
+            //         drop-temps { &lt;body&gt; } // see comments later in fn for details
+            //       }
+            //     }
+            //
+            // If `&lt;pattern&gt;` is a simple ident, then it is lowered to a single
+            // `let &lt;pattern&gt; = &lt;pattern&gt;;` statement as an optimization.
+            //
+            // Note that the body is embedded in `drop-temps`; an
+            // equivalent desugaring would be `return { &lt;body&gt;
+            // };`. The key point is that we wish to drop all the
+            // let-bound variables and temporaries created in the body
+            // (and its tail expression!) before we drop the
+            // parameters (c.f. rust-lang/rust#64512).
+            </span><span class="kw">for </span>(index, parameter) <span class="kw">in </span>decl.inputs.iter().enumerate() {
+                <span class="kw">let </span>parameter = this.lower_param(parameter);
+                <span class="kw">let </span>span = parameter.pat.span;
+
+                <span class="comment">// Check if this is a binding pattern, if so, we can optimize and avoid adding a
+                // `let &lt;pat&gt; = __argN;` statement. In this case, we do not rename the parameter.
+                </span><span class="kw">let </span>(ident, is_simple_parameter) = <span class="kw">match </span>parameter.pat.kind {
+                    hir::PatKind::Binding(hir::BindingAnnotation(ByRef::No, <span class="kw">_</span>), <span class="kw">_</span>, ident, <span class="kw">_</span>) =&gt; {
+                        (ident, <span class="bool-val">true</span>)
+                    }
+                    <span class="comment">// For `ref mut` or wildcard arguments, we can&#39;t reuse the binding, but
+                    // we can keep the same name for the parameter.
+                    // This lets rustdoc render it correctly in documentation.
+                    </span>hir::PatKind::Binding(<span class="kw">_</span>, <span class="kw">_</span>, ident, <span class="kw">_</span>) =&gt; (ident, <span class="bool-val">false</span>),
+                    hir::PatKind::Wild =&gt; {
+                        (Ident::with_dummy_span(rustc_span::symbol::kw::Underscore), <span class="bool-val">false</span>)
+                    }
+                    <span class="kw">_ </span>=&gt; {
+                        <span class="comment">// Replace the ident for bindings that aren&#39;t simple.
+                        </span><span class="kw">let </span>name = <span class="macro">format!</span>(<span class="string">&quot;__arg{}&quot;</span>, index);
+                        <span class="kw">let </span>ident = Ident::from_str(<span class="kw-2">&amp;</span>name);
+
+                        (ident, <span class="bool-val">false</span>)
+                    }
+                };
+
+                <span class="kw">let </span>desugared_span = this.mark_span_with_reason(DesugaringKind::Async, span, <span class="prelude-val">None</span>);
+
+                <span class="comment">// Construct a parameter representing `__argN: &lt;ty&gt;` to replace the parameter of the
+                // async function.
+                //
+                // If this is the simple case, this parameter will end up being the same as the
+                // original parameter, but with a different pattern id.
+                </span><span class="kw">let </span>stmt_attrs = this.attrs.get(<span class="kw-2">&amp;</span>parameter.hir_id.local_id).copied();
+                <span class="kw">let </span>(new_parameter_pat, new_parameter_id) = this.pat_ident(desugared_span, ident);
+                <span class="kw">let </span>new_parameter = hir::Param {
+                    hir_id: parameter.hir_id,
+                    pat: new_parameter_pat,
+                    ty_span: this.lower_span(parameter.ty_span),
+                    span: this.lower_span(parameter.span),
+                };
+
+                <span class="kw">if </span>is_simple_parameter {
+                    <span class="comment">// If this is the simple case, then we only insert one statement that is
+                    // `let &lt;pat&gt; = &lt;pat&gt;;`. We re-use the original argument&#39;s pattern so that
+                    // `HirId`s are densely assigned.
+                    </span><span class="kw">let </span>expr = this.expr_ident(desugared_span, ident, new_parameter_id);
+                    <span class="kw">let </span>stmt = this.stmt_let_pat(
+                        stmt_attrs,
+                        desugared_span,
+                        <span class="prelude-val">Some</span>(expr),
+                        parameter.pat,
+                        hir::LocalSource::AsyncFn,
+                    );
+                    statements.push(stmt);
+                } <span class="kw">else </span>{
+                    <span class="comment">// If this is not the simple case, then we construct two statements:
+                    //
+                    // ```
+                    // let __argN = __argN;
+                    // let &lt;pat&gt; = __argN;
+                    // ```
+                    //
+                    // The first statement moves the parameter into the closure and thus ensures
+                    // that the drop order is correct.
+                    //
+                    // The second statement creates the bindings that the user wrote.
+
+                    // Construct the `let mut __argN = __argN;` statement. It must be a mut binding
+                    // because the user may have specified a `ref mut` binding in the next
+                    // statement.
+                    </span><span class="kw">let </span>(move_pat, move_id) = this.pat_ident_binding_mode(
+                        desugared_span,
+                        ident,
+                        hir::BindingAnnotation::MUT,
+                    );
+                    <span class="kw">let </span>move_expr = this.expr_ident(desugared_span, ident, new_parameter_id);
+                    <span class="kw">let </span>move_stmt = this.stmt_let_pat(
+                        <span class="prelude-val">None</span>,
+                        desugared_span,
+                        <span class="prelude-val">Some</span>(move_expr),
+                        move_pat,
+                        hir::LocalSource::AsyncFn,
+                    );
+
+                    <span class="comment">// Construct the `let &lt;pat&gt; = __argN;` statement. We re-use the original
+                    // parameter&#39;s pattern so that `HirId`s are densely assigned.
+                    </span><span class="kw">let </span>pattern_expr = this.expr_ident(desugared_span, ident, move_id);
+                    <span class="kw">let </span>pattern_stmt = this.stmt_let_pat(
+                        stmt_attrs,
+                        desugared_span,
+                        <span class="prelude-val">Some</span>(pattern_expr),
+                        parameter.pat,
+                        hir::LocalSource::AsyncFn,
+                    );
+
+                    statements.push(move_stmt);
+                    statements.push(pattern_stmt);
+                };
+
+                parameters.push(new_parameter);
+            }
+
+            <span class="kw">let </span>body_span = <a href="#1050">body</a>.map_or(<a href="#1047">span</a>, |b| <a href="#1196">b</a>.span);
+            <span class="kw">let </span>async_expr = <a href="#1057">this</a>.<a href="expr.rs.html#550-558">make_async_expr</a>(
+                CaptureBy::Value,
+                <a href="#1052">closure_id</a>,
+                <span class="prelude-val">None</span>,
+                <a href="#1196">body_span</a>,
+                hir::AsyncGeneratorKind::Fn,
+                |this| {
+                    <span class="comment">// Create a block from the user&#39;s function body:
+                    </span><span class="kw">let </span>user_body = <a href="#1203">this</a>.<a href="#1026">lower_block_expr_opt</a>(<a href="#1196">body_span</a>, <a href="#1050">body</a>);
+
+                    <span class="comment">// Transform into `drop-temps { &lt;user-body&gt; }`, an expression:
+                    </span><span class="kw">let </span>desugared_span =
+                        <a href="#1203">this</a>.<a href="lib.rs.html#771-776">mark_span_with_reason</a>(DesugaringKind::Async, <a href="#1205">user_body</a>.span, <span class="prelude-val">None</span>);
+                    <span class="kw">let </span>user_body = <a href="#1203">this</a>.<a href="expr.rs.html#1659-1664">expr_drop_temps</a>(
+                        <a href="#1208">desugared_span</a>,
+                        <a href="#1203">this</a>.arena.alloc(<a href="#1205">user_body</a>),
+                        AttrVec::new(),
+                    );
+
+                    <span class="comment">// As noted above, create the final block like
+                    //
+                    // ```
+                    // {
+                    //   let $param_pattern = $raw_param;
+                    //   ...
+                    //   drop-temps { &lt;user-body&gt; }
+                    // }
+                    // ```
+                    </span><span class="kw">let </span>body = <a href="#1203">this</a>.<a href="lib.rs.html#2398-2403">block_all</a>(
+                        <a href="#1208">desugared_span</a>,
+                        <a href="#1203">this</a>.arena.alloc_from_iter(<a href="#1059">statements</a>),
+                        <span class="prelude-val">Some</span>(<a href="#1210">user_body</a>),
+                    );
+
+                    <a href="#1203">this</a>.<a href="expr.rs.html#1828-1832">expr_block</a>(<a href="#1225">body</a>, AttrVec::new())
+                },
+            );
+
+            (
+                <a href="#1057">this</a>.arena.alloc_from_iter(<a href="#1058">parameters</a>),
+                <a href="#1057">this</a>.<a href="expr.rs.html#1836-1841">expr</a>(<a href="#1196">body_span</a>, <a href="#1197">async_expr</a>, AttrVec::new()),
+            )
+        })
+    }
+
+    <span class="kw">fn </span>lower_method_sig(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        generics: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Generics.html">Generics</a>,
+        sig: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.FnSig.html">FnSig</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        kind: <a href="lib.rs.html#316">FnDeclKind</a>,
+        is_async: <span class="prelude-ty">Option</span>&lt;(<a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>, <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>)&gt;,
+    ) -&gt; (<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Generics&lt;<span class="lifetime">&#39;hir</span>&gt;, hir::FnSig&lt;<span class="lifetime">&#39;hir</span>&gt;) {
+        <span class="kw">let </span>header = <a class="self" href="#1243">self</a>.<a href="#1258">lower_fn_header</a>(<a href="#1245">sig</a>.header);
+        <span class="kw">let </span><span class="kw-2">mut </span>itctx = <a href="lib.rs.html#246">ImplTraitContext::Universal</a>;
+        <span class="kw">let </span>(generics, decl) = <a class="self" href="#1243">self</a>.<a href="#1313">lower_generics</a>(<a href="#1244">generics</a>, <a href="#1246">id</a>, <span class="kw-2">&amp;mut </span><a href="#1251">itctx</a>, |this| {
+            <a href="#1252">this</a>.<a href="lib.rs.html#1662">lower_fn_decl</a>(<span class="kw-2">&amp;</span><a href="#1245">sig</a>.decl, <span class="prelude-val">Some</span>(<a href="#1246">id</a>), <a href="#1245">sig</a>.span, <a href="#1247">kind</a>, <a href="#1248">is_async</a>)
+        });
+        (<a href="#1252">generics</a>, <a href="../../rustc_hir/hir/struct.FnSig.html">hir::FnSig</a> { <a href="#1250">header</a>, <a href="#1252">decl</a>, span: <a class="self" href="#1243">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#1245">sig</a>.span) })
+    }
+
+    <span class="kw">fn </span>lower_fn_header(<span class="kw-2">&amp;mut </span><span class="self">self</span>, h: <a href="../../rustc_ast/ast/struct.FnHeader.html">FnHeader</a>) -&gt; <a href="../../rustc_hir/hir/struct.FnHeader.html">hir::FnHeader</a> {
+        <a href="../../rustc_hir/hir/struct.FnHeader.html">hir::FnHeader</a> {
+            unsafety: <a class="self" href="#1258">self</a>.<a href="#1304">lower_unsafety</a>(<a href="#1258">h</a>.unsafety),
+            asyncness: <a class="self" href="#1258">self</a>.<a href="#1290">lower_asyncness</a>(<a href="#1258">h</a>.asyncness),
+            constness: <a class="self" href="#1258">self</a>.<a href="#1297">lower_constness</a>(<a href="#1258">h</a>.constness),
+            abi: <a class="self" href="#1258">self</a>.<a href="#1274">lower_extern</a>(<a href="#1258">h</a>.ext),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_abi(<span class="kw-2">&amp;mut </span><span class="self">self</span>, abi: <a href="../../rustc_ast/ast/struct.StrLit.html">StrLit</a>) -&gt; <a href="../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a> {
+        abi::lookup(<a href="#1267">abi</a>.symbol_unescaped.as_str()).unwrap_or_else(|| {
+            <a class="self" href="#1267">self</a>.<a href="#1282">error_on_invalid_abi</a>(<a href="#1267">abi</a>);
+            abi::Abi::Rust
+        })
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_extern(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ext: <a href="../../rustc_ast/ast/enum.Extern.html">Extern</a>) -&gt; <a href="../../rustc_target/spec/abi/enum.Abi.html">abi::Abi</a> {
+        <span class="kw">match </span><a href="#1274">ext</a> {
+            Extern::None =&gt; abi::Abi::Rust,
+            Extern::Implicit(<span class="kw">_</span>) =&gt; abi::Abi::FALLBACK,
+            Extern::Explicit(abi, <span class="kw">_</span>) =&gt; <a class="self" href="#1274">self</a>.<a href="#1267">lower_abi</a>(<a href="#1278">abi</a>),
+        }
+    }
+
+    <span class="kw">fn </span>error_on_invalid_abi(<span class="kw-2">&amp;</span><span class="self">self</span>, abi: <a href="../../rustc_ast/ast/struct.StrLit.html">StrLit</a>) {
+        <a class="self" href="#1282">self</a>.tcx.sess.emit_err(<a href="errors.rs.html#34">InvalidAbi</a> {
+            span: <a href="#1282">abi</a>.span,
+            abi: <a href="#1282">abi</a>.symbol,
+            valid_abis: abi::all_names().join(<span class="string">&quot;, &quot;</span>),
+        });
+    }
+
+    <span class="kw">fn </span>lower_asyncness(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: <a href="../../rustc_ast/ast/enum.Async.html">Async</a>) -&gt; <a href="../../rustc_hir/hir/enum.IsAsync.html">hir::IsAsync</a> {
+        <span class="kw">match </span><a href="#1290">a</a> {
+            <a href="../../rustc_ast/ast/enum.Async.html">Async::Yes</a> { .. } =&gt; hir::IsAsync::Async,
+            Async::No =&gt; hir::IsAsync::NotAsync,
+        }
+    }
+
+    <span class="kw">fn </span>lower_constness(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: <a href="../../rustc_ast/ast/enum.Const.html">Const</a>) -&gt; <a href="../../rustc_hir/hir/enum.Constness.html">hir::Constness</a> {
+        <span class="kw">match </span><a href="#1297">c</a> {
+            Const::Yes(<span class="kw">_</span>) =&gt; hir::Constness::Const,
+            Const::No =&gt; hir::Constness::NotConst,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_unsafety(<span class="kw-2">&amp;mut </span><span class="self">self</span>, u: <a href="../../rustc_ast/ast/enum.Unsafe.html">Unsafe</a>) -&gt; <a href="../../rustc_hir/hir/enum.Unsafety.html">hir::Unsafety</a> {
+        <span class="kw">match </span><a href="#1304">u</a> {
+            Unsafe::Yes(<span class="kw">_</span>) =&gt; hir::Unsafety::Unsafe,
+            Unsafe::No =&gt; hir::Unsafety::Normal,
+        }
+    }
+
+    <span class="doccomment">/// Return the pair of the lowered `generics` as `hir::Generics` and the evaluation of `f` with
+    /// the carried impl trait definitions and bounds.
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>, f))]
+    </span><span class="kw">fn </span>lower_generics&lt;T&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        generics: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/struct.Generics.html">Generics</a>,
+        parent_node_id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        itctx: <span class="kw-2">&amp;</span><a href="lib.rs.html#240">ImplTraitContext</a>,
+        f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span><span class="self">Self</span>) -&gt; T,
+    ) -&gt; (<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Generics&lt;<span class="lifetime">&#39;hir</span>&gt;, T) {
+        <span class="macro">debug_assert!</span>(<span class="self">self</span>.impl_trait_defs.is_empty());
+        <span class="macro">debug_assert!</span>(<span class="self">self</span>.impl_trait_bounds.is_empty());
+
+        <span class="comment">// Error if `?Trait` bounds in where clauses don&#39;t refer directly to type parameters.
+        // Note: we used to clone these bounds directly onto the type parameter (and avoid lowering
+        // these into hir when we lower thee where clauses), but this makes it quite difficult to
+        // keep track of the Span info. Now, `add_implicitly_sized` in `AstConv` checks both param bounds and
+        // where clauses for `?Sized`.
+        </span><span class="kw">for </span>pred <span class="kw">in </span><span class="kw-2">&amp;</span>generics.where_clause.predicates {
+            <span class="kw">let </span>WherePredicate::BoundPredicate(<span class="kw-2">ref </span>bound_pred) = <span class="kw-2">*</span>pred <span class="kw">else </span>{
+                <span class="kw">continue</span>;
+            };
+            <span class="kw">let </span>compute_is_param = || {
+                <span class="comment">// Check if the where clause type is a plain type parameter.
+                </span><span class="kw">match </span><span class="self">self
+                    </span>.resolver
+                    .get_partial_res(bound_pred.bounded_ty.id)
+                    .map(|d| (d.base_res(), d.unresolved_segments()))
+                {
+                    <span class="prelude-val">Some</span>((Res::Def(DefKind::TyParam, def_id), <span class="number">0</span>))
+                        <span class="kw">if </span>bound_pred.bound_generic_params.is_empty() =&gt;
+                    {
+                        generics
+                            .params
+                            .iter()
+                            .any(|p| def_id == <span class="self">self</span>.local_def_id(p.id).to_def_id())
+                    }
+                    <span class="comment">// Either the `bounded_ty` is not a plain type parameter, or
+                    // it&#39;s not found in the generic type parameters list.
+                    </span><span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+                }
+            };
+            <span class="comment">// We only need to compute this once per `WherePredicate`, but don&#39;t
+            // need to compute this at all unless there is a Maybe bound.
+            </span><span class="kw">let </span><span class="kw-2">mut </span>is_param: <span class="prelude-ty">Option</span>&lt;bool&gt; = <span class="prelude-val">None</span>;
+            <span class="kw">for </span>bound <span class="kw">in </span><span class="kw-2">&amp;</span>bound_pred.bounds {
+                <span class="kw">if </span>!<span class="macro">matches!</span>(<span class="kw-2">*</span>bound, GenericBound::Trait(<span class="kw">_</span>, TraitBoundModifier::Maybe)) {
+                    <span class="kw">continue</span>;
+                }
+                <span class="kw">let </span>is_param = <span class="kw-2">*</span>is_param.get_or_insert_with(compute_is_param);
+                <span class="kw">if </span>!is_param {
+                    <span class="self">self</span>.tcx.sess.emit_err(MisplacedRelaxTraitBound { span: bound.span() });
+                }
+            }
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>predicates: SmallVec&lt;[hir::WherePredicate&lt;<span class="lifetime">&#39;hir</span>&gt;; <span class="number">4</span>]&gt; = SmallVec::new();
+        predicates.extend(generics.params.iter().filter_map(|param| {
+            <span class="self">self</span>.lower_generic_bound_predicate(
+                param.ident,
+                param.id,
+                <span class="kw-2">&amp;</span>param.kind,
+                <span class="kw-2">&amp;</span>param.bounds,
+                itctx,
+                PredicateOrigin::GenericParam,
+            )
+        }));
+        predicates.extend(
+            generics
+                .where_clause
+                .predicates
+                .iter()
+                .map(|predicate| <span class="self">self</span>.lower_where_predicate(predicate)),
+        );
+
+        <span class="kw">let </span><span class="kw-2">mut </span>params: SmallVec&lt;[hir::GenericParam&lt;<span class="lifetime">&#39;hir</span>&gt;; <span class="number">4</span>]&gt; =
+            <span class="self">self</span>.lower_generic_params_mut(<span class="kw-2">&amp;</span>generics.params).collect();
+
+        <span class="comment">// Introduce extra lifetimes if late resolution tells us to.
+        </span><span class="kw">let </span>extra_lifetimes = <span class="self">self</span>.resolver.take_extra_lifetime_params(parent_node_id);
+        params.extend(extra_lifetimes.into_iter().filter_map(|(ident, node_id, res)| {
+            <span class="self">self</span>.lifetime_res_to_generic_param(ident, node_id, res)
+        }));
+
+        <span class="kw">let </span>has_where_clause_predicates = !generics.where_clause.predicates.is_empty();
+        <span class="kw">let </span>where_clause_span = <span class="self">self</span>.lower_span(generics.where_clause.span);
+        <span class="kw">let </span>span = <span class="self">self</span>.lower_span(generics.span);
+        <span class="kw">let </span>res = f(<span class="self">self</span>);
+
+        <span class="kw">let </span>impl_trait_defs = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.impl_trait_defs);
+        params.extend(impl_trait_defs.into_iter());
+
+        <span class="kw">let </span>impl_trait_bounds = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.impl_trait_bounds);
+        predicates.extend(impl_trait_bounds.into_iter());
+
+        <span class="kw">let </span>lowered_generics = <span class="self">self</span>.arena.alloc(hir::Generics {
+            params: <span class="self">self</span>.arena.alloc_from_iter(params),
+            predicates: <span class="self">self</span>.arena.alloc_from_iter(predicates),
+            has_where_clause_predicates,
+            where_clause_span,
+            span,
+        });
+
+        (lowered_generics, res)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>lower_generic_bound_predicate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ident: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+        id: <a href="../../rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        kind: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/enum.GenericParamKind.html">GenericParamKind</a>,
+        bounds: <span class="kw-2">&amp;</span>[<a href="../../rustc_ast/ast/enum.GenericBound.html">GenericBound</a>],
+        itctx: <span class="kw-2">&amp;</span><a href="lib.rs.html#240">ImplTraitContext</a>,
+        origin: <a href="../../rustc_hir/hir/enum.PredicateOrigin.html">PredicateOrigin</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;hir::WherePredicate&lt;<span class="lifetime">&#39;hir</span>&gt;&gt; {
+        <span class="comment">// Do not create a clause if we do not have anything inside it.
+        </span><span class="kw">if </span>bounds.is_empty() {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="kw">let </span>bounds = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#2243">lower_param_bounds</a>(<a href="#1422">bounds</a>, <a href="#1423">itctx</a>);
+
+        <span class="kw">let </span>ident = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#1419">ident</a>);
+        <span class="kw">let </span>param_span = <a href="#1433">ident</a>.span;
+        <span class="kw">let </span>span = <a href="#1431">bounds</a>
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">fold</a>(<span class="prelude-val">Some</span>(<a href="#1434">param_span</a>.shrink_to_hi()), |span: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;, bound| {
+                <span class="kw">let </span>bound_span = <a href="#1437">bound</a>.span();
+                <span class="comment">// We include bounds that come from a `#[derive(_)]` but point at the user&#39;s code,
+                // as we use this method to get a span appropriate for suggestions.
+                </span><span class="kw">if </span>!bound_span.can_be_used_for_suggestions() {
+                    <span class="prelude-val">None
+                </span>} <span class="kw">else if let </span><span class="prelude-val">Some</span>(span) = <a href="#1437">span</a> {
+                    <span class="prelude-val">Some</span>(<a href="#1443">span</a>.to(<a href="#1438">bound_span</a>))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Some</span>(<a href="#1438">bound_span</a>)
+                }
+            })
+            .unwrap_or(<a href="#1434">param_span</a>.shrink_to_hi());
+        <span class="kw">match </span><a href="#1421">kind</a> {
+            <a href="../../rustc_ast/ast/enum.GenericParamKind.html">GenericParamKind::Const</a> { .. } =&gt; <span class="prelude-val">None</span>,
+            <a href="../../rustc_ast/ast/enum.GenericParamKind.html">GenericParamKind::Type</a> { .. } =&gt; {
+                <span class="kw">let </span>def_id = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#522">local_def_id</a>(<a href="#1420">id</a>).to_def_id();
+                <span class="kw">let </span>hir_id = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#726">next_id</a>();
+                <span class="kw">let </span>res = Res::Def(DefKind::TyParam, <a href="#1453">def_id</a>);
+                <span class="kw">let </span>ty_path = <a class="self" href="#1418">self</a>.arena.alloc(<a href="../../rustc_hir/hir/struct.Path.html">hir::Path</a> {
+                    span: <a href="#1434">param_span</a>,
+                    <a href="#1455">res</a>,
+                    segments: <span class="self"><a href="#1418">self</a>
+                        </span>.arena
+                        .alloc_from_iter([hir::PathSegment::new(<a href="#1433">ident</a>, <a href="#1454">hir_id</a>, <a href="#1455">res</a>)]),
+                });
+                <span class="kw">let </span>ty_id = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#726">next_id</a>();
+                <span class="kw">let </span>bounded_ty =
+                    <a class="self" href="#1418">self</a>.<a href="lib.rs.html#2515-2520">ty_path</a>(<a href="#1463">ty_id</a>, <a href="#1434">param_span</a>, hir::QPath::Resolved(<span class="prelude-val">None</span>, <a href="#1456">ty_path</a>));
+                <span class="prelude-val">Some</span>(hir::WherePredicate::BoundPredicate(<a href="../../rustc_hir/hir/struct.WhereBoundPredicate.html">hir::WhereBoundPredicate</a> {
+                    bounded_ty: <a class="self" href="#1418">self</a>.arena.alloc(<a href="#1464">bounded_ty</a>),
+                    <a href="#1431">bounds</a>,
+                    <a href="#1435">span</a>,
+                    bound_generic_params: <span class="kw-2">&amp;</span>[],
+                    <a href="#1424">origin</a>,
+                }))
+            }
+            GenericParamKind::Lifetime =&gt; {
+                <span class="kw">let </span>ident_span = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#1433">ident</a>.span);
+                <span class="kw">let </span>ident = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#793">lower_ident</a>(<a href="#1433">ident</a>);
+                <span class="kw">let </span>lt_id = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#495">next_node_id</a>();
+                <span class="kw">let </span>lifetime = <a class="self" href="#1418">self</a>.<a href="lib.rs.html#2139">new_named_lifetime</a>(<a href="#1420">id</a>, <a href="#1477">lt_id</a>, <a href="#1475">ident_span</a>, <a href="#1476">ident</a>);
+                <span class="prelude-val">Some</span>(hir::WherePredicate::RegionPredicate(<a href="../../rustc_hir/hir/struct.WhereRegionPredicate.html">hir::WhereRegionPredicate</a> {
+                    <a href="#1478">lifetime</a>,
+                    <a href="#1435">span</a>,
+                    <a href="#1431">bounds</a>,
+                    in_where_clause: <span class="bool-val">false</span>,
+                }))
+            }
+        }
+    }
+
+    <span class="kw">fn </span>lower_where_predicate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pred: <span class="kw-2">&amp;</span><a href="../../rustc_ast/ast/enum.WherePredicate.html">WherePredicate</a>) -&gt; hir::WherePredicate&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#1489">pred</a> {
+            WherePredicate::BoundPredicate(<a href="../../rustc_ast/ast/struct.WhereBoundPredicate.html">WhereBoundPredicate</a> {
+                <span class="kw-2">ref </span>bound_generic_params,
+                <span class="kw-2">ref </span>bounded_ty,
+                <span class="kw-2">ref </span>bounds,
+                span,
+            }) =&gt; hir::WherePredicate::BoundPredicate(<a href="../../rustc_hir/hir/struct.WhereBoundPredicate.html">hir::WhereBoundPredicate</a> {
+                bound_generic_params: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#2158">lower_generic_params</a>(<a href="#1492">bound_generic_params</a>),
+                bounded_ty: <span class="self"><a href="#1489">self</a>
+                    </span>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#1493">bounded_ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>)),
+                bounds: <a class="self" href="#1489">self</a>.arena.alloc_from_iter(<a href="#1494">bounds</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|bound| {
+                    <a class="self" href="#1489">self</a>.<a href="lib.rs.html#2081">lower_param_bound</a>(
+                        <a href="#1500">bound</a>,
+                        <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#271">ImplTraitPosition::Bound</a>),
+                    )
+                })),
+                span: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#1495">span</a>),
+                origin: PredicateOrigin::WhereClause,
+            }),
+            WherePredicate::RegionPredicate(<a href="../../rustc_ast/ast/struct.WhereRegionPredicate.html">WhereRegionPredicate</a> {
+                <span class="kw-2">ref </span>lifetime,
+                <span class="kw-2">ref </span>bounds,
+                span,
+            }) =&gt; hir::WherePredicate::RegionPredicate(<a href="../../rustc_hir/hir/struct.WhereRegionPredicate.html">hir::WhereRegionPredicate</a> {
+                span: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#1512">span</a>),
+                lifetime: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#2098">lower_lifetime</a>(<a href="#1510">lifetime</a>),
+                bounds: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#2243">lower_param_bounds</a>(
+                    <a href="#1511">bounds</a>,
+                    <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#271">ImplTraitPosition::Bound</a>),
+                ),
+                in_where_clause: <span class="bool-val">true</span>,
+            }),
+            WherePredicate::EqPredicate(<a href="../../rustc_ast/ast/struct.WhereEqPredicate.html">WhereEqPredicate</a> { <span class="kw-2">ref </span>lhs_ty, <span class="kw-2">ref </span>rhs_ty, span }) =&gt; {
+                hir::WherePredicate::EqPredicate(<a href="../../rustc_hir/hir/struct.WhereEqPredicate.html">hir::WhereEqPredicate</a> {
+                    lhs_ty: <span class="self"><a href="#1489">self</a>
+                        </span>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#1522">lhs_ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>)),
+                    rhs_ty: <span class="self"><a href="#1489">self</a>
+                        </span>.<a href="lib.rs.html#1184">lower_ty</a>(<a href="#1522">rhs_ty</a>, <span class="kw-2">&amp;</span><a href="lib.rs.html#260">ImplTraitContext::Disallowed</a>(<a href="lib.rs.html#268">ImplTraitPosition::Type</a>)),
+                    span: <a class="self" href="#1489">self</a>.<a href="lib.rs.html#784">lower_span</a>(<a href="#1522">span</a>),
+                })
+            }
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_ast_lowering" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

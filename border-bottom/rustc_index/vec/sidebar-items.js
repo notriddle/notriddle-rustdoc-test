@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["IndexVec",""]],"trait":[["Idx","Represents some newtyped `usize` wrapper."]]};

@@ -1,0 +1,1360 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/interpret/terminator.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>terminator.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/borrow/enum.Cow.html">std::borrow::Cow</a>;
+
+<span class="kw">use </span><a href="../../../rustc_ast/ast/struct.InlineAsmOptions.html">rustc_ast::ast::InlineAsmOptions</a>;
+<span class="kw">use </span>rustc_middle::ty::layout::{<a href="../../../rustc_middle/ty/layout/trait.FnAbiOf.html">FnAbiOf</a>, <a href="../../../rustc_middle/ty/layout/trait.LayoutOf.html">LayoutOf</a>};
+<span class="kw">use </span><a href="../../../rustc_middle/ty/instance/struct.Instance.html">rustc_middle::ty::Instance</a>;
+<span class="kw">use </span>rustc_middle::{
+    <a href="../../../rustc_middle/mir/index.html">mir</a>,
+    ty::{<a class="self" href="../../../rustc_middle/ty/index.html">self</a>, <a href="../../../rustc_middle/ty/struct.Ty.html">Ty</a>},
+};
+<span class="kw">use </span><a href="../../../rustc_target/abi/index.html">rustc_target::abi</a>;
+<span class="kw">use </span>rustc_target::abi::call::{<a href="../../../rustc_target/abi/call/struct.ArgAbi.html">ArgAbi</a>, <a href="../../../rustc_target/abi/call/attr_impl/struct.ArgAttribute.html">ArgAttribute</a>, <a href="../../../rustc_target/abi/call/struct.ArgAttributes.html">ArgAttributes</a>, <a href="../../../rustc_target/abi/call/struct.FnAbi.html">FnAbi</a>, <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode</a>};
+<span class="kw">use </span><a href="../../../rustc_target/spec/abi/enum.Abi.html">rustc_target::spec::abi::Abi</a>;
+
+<span class="kw">use super</span>::{
+    <a href="memory.rs.html#71">FnVal</a>, <a href="operand.rs.html#88">ImmTy</a>, <a href="operand.rs.html#26">Immediate</a>, <a href="eval_context.rs.html#28">InterpCx</a>, <a href="../../../rustc_const_eval/interpret/type.InterpResult.html">InterpResult</a>, <a href="place.rs.html#56">MPlaceTy</a>, <a href="machine.rs.html#84">Machine</a>, <a href="memory.rs.html#27">MemoryKind</a>, <a href="operand.rs.html#151">OpTy</a>, <a href="operand.rs.html#145">Operand</a>,
+    <a href="place.rs.html#77">PlaceTy</a>, <a href="../../../rustc_const_eval/interpret/enum.Scalar.html">Scalar</a>, <a href="eval_context.rs.html#153">StackPopCleanup</a>, <a href="eval_context.rs.html#143">StackPopUnwind</a>,
+};
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, M: Machine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;&gt; InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>eval_terminator(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        terminator: <span class="kw-2">&amp;</span>mir::Terminator&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">use </span><a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">rustc_middle::mir::TerminatorKind</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><a href="#22">terminator</a>.kind {
+            Return =&gt; {
+                <span class="self">self</span>.pop_stack_frame(<span class="comment">/* unwinding */ </span><span class="bool-val">false</span>)<span class="question-mark">?
+            </span>}
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">Goto</a> { target } =&gt; <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#722">go_to_block</a>(<a href="#30">target</a>),
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">SwitchInt</a> { <span class="kw-2">ref </span>discr, <span class="kw-2">ref </span>targets, switch_ty } =&gt; {
+                <span class="kw">let </span>discr = <span class="self">self</span>.read_immediate(<span class="kw-2">&amp;</span><span class="self">self</span>.eval_operand(discr, <span class="prelude-val">None</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;SwitchInt({:?})&quot;</span>, <span class="kw-2">*</span>discr);
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(discr.layout.ty, switch_ty);
+
+                <span class="comment">// Branch to the `otherwise` case by default, if no match is found.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!targets.iter().is_empty());
+                <span class="kw">let </span><span class="kw-2">mut </span>target_block = <a href="#32">targets</a>.otherwise();
+
+                <span class="kw">for </span>(const_int, target) <span class="kw">in </span>targets.iter() {
+                    <span class="comment">// Compare using MIR BinOp::Eq, to also support pointer values.
+                    // (Avoiding `self.binary_op` as that does some redundant layout computation.)
+                    </span><span class="kw">let </span>res = <span class="self">self
+                        </span>.overflowing_binary_op(
+                            mir::BinOp::Eq,
+                            <span class="kw-2">&amp;</span>discr,
+                            <span class="kw-2">&amp;</span>ImmTy::from_uint(const_int, discr.layout),
+                        )<span class="question-mark">?
+                        </span>.<span class="number">0</span>;
+                    <span class="kw">if </span>res.to_bool()<span class="question-mark">? </span>{
+                        target_block = target;
+                        <span class="kw">break</span>;
+                    }
+                }
+
+                <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#722">go_to_block</a>(<a href="#39">target_block</a>);
+            }
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">Call</a> {
+                <span class="kw-2">ref </span>func,
+                <span class="kw-2">ref </span>args,
+                destination,
+                target,
+                <span class="kw-2">ref </span>cleanup,
+                from_hir_call: <span class="kw">_</span>,
+                fn_span: <span class="kw">_</span>,
+            } =&gt; {
+                <span class="kw">let </span>old_stack = <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#434">frame_idx</a>();
+                <span class="kw">let </span>old_loc = <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#441">frame</a>().loc;
+                <span class="kw">let </span>func = <span class="self">self</span>.eval_operand(func, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>args = <span class="self">self</span>.eval_operands(args)<span class="question-mark">?</span>;
+
+                <span class="kw">let </span>fn_sig_binder = <a href="#71">func</a>.layout.ty.fn_sig(<span class="kw-2">*</span><a class="self" href="#21">self</a>.tcx);
+                <span class="kw">let </span>fn_sig =
+                    <a class="self" href="#21">self</a>.tcx.normalize_erasing_late_bound_regions(<a class="self" href="#21">self</a>.param_env, <a href="#74">fn_sig_binder</a>);
+                <span class="kw">let </span>extra_args = <span class="kw-2">&amp;</span><a href="#72">args</a>[<a href="#75">fn_sig</a>.inputs().len()..];
+                <span class="kw">let </span>extra_args = <a class="self" href="#21">self</a>.tcx.mk_type_list(<a href="#77">extra_args</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|arg| <a href="#78">arg</a>.layout.ty));
+
+                <span class="kw">let </span>(fn_val, fn_abi, with_caller_location) = <span class="kw">match </span><span class="kw-2">*</span><a href="#71">func</a>.layout.ty.kind() {
+                    ty::FnPtr(_sig) =&gt; {
+                        <span class="kw">let </span>fn_ptr = <span class="self">self</span>.read_pointer(<span class="kw-2">&amp;</span>func)<span class="question-mark">?</span>;
+                        <span class="kw">let </span>fn_val = <span class="self">self</span>.get_ptr_fn(fn_ptr)<span class="question-mark">?</span>;
+                        (<a href="#83">fn_val</a>, <span class="self">self</span>.fn_abi_of_fn_ptr(fn_sig_binder, extra_args)<span class="question-mark">?</span>, <span class="bool-val">false</span>)
+                    }
+                    ty::FnDef(def_id, substs) =&gt; {
+                        <span class="kw">let </span>instance =
+                            <span class="self">self</span>.resolve(ty::WithOptConstParam::unknown(def_id), substs)<span class="question-mark">?</span>;
+                        (
+                            <a href="memory.rs.html#72">FnVal::Instance</a>(<a href="#87">instance</a>),
+                            <span class="self">self</span>.fn_abi_of_instance(instance, extra_args)<span class="question-mark">?</span>,
+                            <a href="#87">instance</a>.def.requires_caller_location(<span class="kw-2">*</span><a class="self" href="#21">self</a>.tcx),
+                        )
+                    }
+                    <span class="kw">_ </span>=&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                        terminator.source_info.span,
+                        <span class="string">&quot;invalid callee of type {:?}&quot;</span>,
+                        func.layout.ty
+                    ),
+                };
+
+                <span class="kw">let </span>destination = <span class="self">self</span>.eval_place(destination)<span class="question-mark">?</span>;
+                <span class="self">self</span>.eval_fn_call(
+                    fn_val,
+                    (fn_sig.abi, fn_abi),
+                    <span class="kw-2">&amp;</span>args,
+                    with_caller_location,
+                    <span class="kw-2">&amp;</span>destination,
+                    target,
+                    <span class="kw">match </span>(cleanup, fn_abi.can_unwind) {
+                        (<span class="prelude-val">Some</span>(cleanup), <span class="bool-val">true</span>) =&gt; StackPopUnwind::Cleanup(<span class="kw-2">*</span>cleanup),
+                        (<span class="prelude-val">None</span>, <span class="bool-val">true</span>) =&gt; StackPopUnwind::Skip,
+                        (<span class="kw">_</span>, <span class="bool-val">false</span>) =&gt; StackPopUnwind::NotAllowed,
+                    },
+                )<span class="question-mark">?</span>;
+                <span class="comment">// Sanity-check that `eval_fn_call` either pushed a new frame or
+                // did a jump to another block.
+                </span><span class="kw">if </span><span class="self">self</span>.frame_idx() == old_stack &amp;&amp; <span class="self">self</span>.frame().loc == old_loc {
+                    <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(terminator.source_info.span, <span class="string">&quot;evaluating this call made no progress&quot;</span>);
+                }
+            }
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">Drop</a> { place, target, unwind } =&gt; {
+                <span class="kw">let </span>place = <span class="self">self</span>.eval_place(place)<span class="question-mark">?</span>;
+                <span class="kw">let </span>ty = <a href="#124">place</a>.layout.ty;
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;TerminatorKind::drop: {:?}, type {}&quot;</span>, place, ty);
+
+                <span class="kw">let </span>instance = Instance::resolve_drop_in_place(<span class="kw-2">*</span><a class="self" href="#21">self</a>.tcx, <a href="#125">ty</a>);
+                <span class="self">self</span>.drop_in_place(<span class="kw-2">&amp;</span>place, instance, target, unwind)<span class="question-mark">?</span>;
+            }
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">Assert</a> { <span class="kw-2">ref </span>cond, expected, <span class="kw-2">ref </span>msg, target, cleanup } =&gt; {
+                <span class="kw">let </span>cond_val = <span class="self">self</span>.read_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>.eval_operand(cond, <span class="prelude-val">None</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>.to_bool()<span class="question-mark">?</span>;
+                <span class="kw">if </span>expected == cond_val {
+                    <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#722">go_to_block</a>(<a href="#132">target</a>);
+                } <span class="kw">else </span>{
+                    M::assert_panic(<span class="self">self</span>, msg, cleanup)<span class="question-mark">?</span>;
+                }
+            }
+
+            Abort =&gt; {
+                M::abort(<span class="self">self</span>, <span class="string">&quot;the program aborted execution&quot;</span>.to_owned())<span class="question-mark">?</span>;
+            }
+
+            <span class="comment">// When we encounter Resume, we&#39;ve finished unwinding
+            // cleanup for the current stack frame. We pop it in order
+            // to continue unwinding the next frame
+            </span>Resume =&gt; {
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;unwinding: resuming from cleanup&quot;</span>);
+                <span class="comment">// By definition, a Resume terminator means
+                // that we&#39;re unwinding
+                </span><span class="self">self</span>.pop_stack_frame(<span class="comment">/* unwinding */ </span><span class="bool-val">true</span>)<span class="question-mark">?</span>;
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+            }
+
+            <span class="comment">// It is UB to ever encounter this.
+            </span>Unreachable =&gt; <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub.html">throw_ub!</a>(Unreachable),
+
+            <span class="comment">// These should never occur for MIR we actually run.
+            </span><a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">DropAndReplace</a> { .. }
+            | <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">FalseEdge</a> { .. }
+            | <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">FalseUnwind</a> { .. }
+            | <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">Yield</a> { .. }
+            | GeneratorDrop =&gt; <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                terminator.source_info.span,
+                <span class="string">&quot;{:#?} should have been eliminated by MIR pass&quot;</span>,
+                terminator.kind
+            ),
+
+            <a href="../../../rustc_middle/mir/syntax/enum.TerminatorKind.html">InlineAsm</a> { template, <span class="kw-2">ref </span>operands, options, destination, .. } =&gt; {
+                M::eval_inline_asm(<span class="self">self</span>, template, operands, options)<span class="question-mark">?</span>;
+                <span class="kw">if </span>options.contains(InlineAsmOptions::NORETURN) {
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;returned from noreturn inline assembly&quot;</span>);
+                }
+                <a class="self" href="#21">self</a>.<a href="eval_context.rs.html#722">go_to_block</a>(
+                    <a href="#170">destination</a>
+                        .expect(<span class="string">&quot;InlineAsm terminators without noreturn must have a destination&quot;</span>),
+                )
+            }
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>check_argument_compat(
+        caller_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        callee_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// Heuristic for type comparison.
+        </span><span class="kw">let </span>layout_compat = || {
+            <span class="kw">if </span>caller_abi.layout.ty == callee_abi.layout.ty {
+                <span class="comment">// No question
+                </span><span class="kw">return </span><span class="bool-val">true</span>;
+            }
+            <span class="kw">if </span>caller_abi.layout.is_unsized() || callee_abi.layout.is_unsized() {
+                <span class="comment">// No, no, no. We require the types to *exactly* match for unsized arguments. If
+                // these are somehow unsized &quot;in a different way&quot; (say, `dyn Trait` vs `[i32]`),
+                // then who knows what happens.
+                </span><span class="kw">return </span><span class="bool-val">false</span>;
+            }
+            <span class="kw">if </span>caller_abi.layout.size != callee_abi.layout.size
+                || caller_abi.layout.align.abi != callee_abi.layout.align.abi
+            {
+                <span class="comment">// This cannot go well...
+                </span><span class="kw">return </span><span class="bool-val">false</span>;
+            }
+            <span class="comment">// The rest *should* be okay, but we are extra conservative.
+            </span><span class="kw">match </span>(<a href="#186">caller_abi</a>.layout.abi, <a href="#187">callee_abi</a>.layout.abi) {
+                <span class="comment">// Different valid ranges are okay (once we enforce validity,
+                // that will take care to make it UB to leave the range, just
+                // like for transmute).
+                </span>(abi::Abi::Scalar(caller), abi::Abi::Scalar(callee)) =&gt; {
+                    <a href="#212">caller</a>.primitive() == <a href="#212">callee</a>.primitive()
+                }
+                (
+                    abi::Abi::ScalarPair(caller1, caller2),
+                    abi::Abi::ScalarPair(callee1, callee2),
+                ) =&gt; {
+                    <a href="#216">caller1</a>.primitive() == <a href="#217">callee1</a>.primitive()
+                        &amp;&amp; <a href="#216">caller2</a>.primitive() == <a href="#217">callee2</a>.primitive()
+                }
+                <span class="comment">// Be conservative
+                </span><span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+            }
+        };
+        <span class="comment">// When comparing the PassMode, we have to be smart about comparing the attributes.
+        </span><span class="kw">let </span>arg_attr_compat = |a1: <span class="kw-2">&amp;</span><a href="../../../rustc_target/abi/call/struct.ArgAttributes.html">ArgAttributes</a>, a2: <span class="kw-2">&amp;</span><a href="../../../rustc_target/abi/call/struct.ArgAttributes.html">ArgAttributes</a>| {
+            <span class="comment">// There&#39;s only one regular attribute that matters for the call ABI: InReg.
+            // Everything else is things like noalias, dereferenceable, nonnull, ...
+            // (This also applies to pointee_size, pointee_align.)
+            </span><span class="kw">if </span>a1.regular.contains(ArgAttribute::InReg) != a2.regular.contains(ArgAttribute::InReg)
+            {
+                <span class="kw">return </span><span class="bool-val">false</span>;
+            }
+            <span class="comment">// We also compare the sign extension mode -- this could let the callee make assumptions
+            // about bits that conceptually were not even passed.
+            </span><span class="kw">if </span>a1.arg_ext != a2.arg_ext {
+                <span class="kw">return </span><span class="bool-val">false</span>;
+            }
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        };
+        <span class="kw">let </span>mode_compat = || <span class="kw">match </span>(<span class="kw-2">&amp;</span><a href="#186">caller_abi</a>.mode, <span class="kw-2">&amp;</span><a href="#187">callee_abi</a>.mode) {
+            (PassMode::Ignore, PassMode::Ignore) =&gt; <span class="bool-val">true</span>,
+            (PassMode::Direct(a1), PassMode::Direct(a2)) =&gt; <a href="#227">arg_attr_compat</a>(<a href="#244">a1</a>, <a href="#244">a2</a>),
+            (PassMode::Pair(a1, b1), PassMode::Pair(a2, b2)) =&gt; {
+                <a href="#227">arg_attr_compat</a>(<a href="#245">a1</a>, <a href="#245">a2</a>) &amp;&amp; <a href="#227">arg_attr_compat</a>(<a href="#245">b1</a>, <a href="#245">b2</a>)
+            }
+            (PassMode::Cast(c1, pad1), PassMode::Cast(c2, pad2)) =&gt; <a href="#248">c1</a> == <a href="#248">c2</a> &amp;&amp; <a href="#248">pad1</a> == <a href="#248">pad2</a>,
+            (
+                <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode::Indirect</a> { attrs: a1, extra_attrs: <span class="prelude-val">None</span>, on_stack: s1 },
+                <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode::Indirect</a> { attrs: a2, extra_attrs: <span class="prelude-val">None</span>, on_stack: s2 },
+            ) =&gt; <a href="#227">arg_attr_compat</a>(<a href="#250">a1</a>, <a href="#251">a2</a>) &amp;&amp; <a href="#250">s1</a> == <a href="#251">s2</a>,
+            (
+                <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode::Indirect</a> { attrs: a1, extra_attrs: <span class="prelude-val">Some</span>(e1), on_stack: s1 },
+                <a href="../../../rustc_target/abi/call/enum.PassMode.html">PassMode::Indirect</a> { attrs: a2, extra_attrs: <span class="prelude-val">Some</span>(e2), on_stack: s2 },
+            ) =&gt; <a href="#227">arg_attr_compat</a>(<a href="#254">a1</a>, <a href="#255">a2</a>) &amp;&amp; <a href="#227">arg_attr_compat</a>(<a href="#254">e1</a>, <a href="#255">e2</a>) &amp;&amp; <a href="#254">s1</a> == <a href="#255">s2</a>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        };
+
+        <span class="kw">if </span>layout_compat() &amp;&amp; mode_compat() {
+            <span class="kw">return </span><span class="bool-val">true</span>;
+        }
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(
+            <span class="string">&quot;check_argument_compat: incompatible ABIs:\ncaller: {:?}\ncallee: {:?}&quot;</span>,
+            caller_abi,
+            callee_abi
+        );
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="doccomment">/// Initialize a single callee argument, checking the types for compatibility.
+    </span><span class="kw">fn </span>pass_argument&lt;<span class="lifetime">&#39;x</span>, <span class="lifetime">&#39;y</span>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        caller_args: <span class="kw-2">&amp;mut </span><span class="kw">impl </span>Iterator&lt;
+            Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;x </span>OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;y </span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;),
+        &gt;,
+        callee_abi: <span class="kw-2">&amp;</span>ArgAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+        callee_arg: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;
+    <span class="kw">where
+        </span><span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;x</span>,
+        <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;y</span>,
+    {
+        <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(callee_abi.mode, PassMode::Ignore) {
+            <span class="comment">// This one is skipped.
+            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+        <span class="comment">// Find next caller arg.
+        </span><span class="kw">let </span>(caller_arg, caller_abi) = caller_args.next().ok_or_else(|| {
+            <span class="macro">err_ub_format!</span>(<span class="string">&quot;calling a function with fewer arguments than it requires&quot;</span>)
+        })<span class="question-mark">?</span>;
+        <span class="comment">// Now, check
+        </span><span class="kw">if </span>!<span class="self">Self</span>::check_argument_compat(caller_abi, callee_abi) {
+            <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                <span class="string">&quot;calling a function with argument of type {:?} passing data of type {:?}&quot;</span>,
+                callee_arg.layout.ty,
+                caller_arg.layout.ty
+            )
+        }
+        <span class="comment">// Special handling for unsized parameters.
+        </span><span class="kw">if </span>caller_arg.layout.is_unsized() {
+            <span class="comment">// `check_argument_compat` ensures that both have the same type, so we know they will use the metadata the same way.
+            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(caller_arg.layout.ty, callee_arg.layout.ty);
+            <span class="comment">// We have to properly pre-allocate the memory for the callee.
+            // So let&#39;s tear down some wrappers.
+            // This all has to be in memory, there are no immediate unsized values.
+            </span><span class="kw">let </span>src = <a href="#289">caller_arg</a>.<a href="place.rs.html#266">assert_mem_place</a>();
+            <span class="comment">// The destination cannot be one of these &quot;spread args&quot;.
+            </span><span class="kw">let </span>(dest_frame, dest_local) = <a href="#278">callee_arg</a>.<a href="place.rs.html#163">assert_local</a>();
+            <span class="comment">// We are just initializing things, so there can&#39;t be anything here yet.
+            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="macro">matches!</span>(
+                <span class="kw-2">*</span><span class="self">self</span>.local_to_op(<span class="kw-2">&amp;</span><span class="self">self</span>.stack()[dest_frame], dest_local, <span class="prelude-val">None</span>)<span class="question-mark">?</span>,
+                Operand::Immediate(Immediate::Uninit)
+            ));
+            <span class="comment">// Allocate enough memory to hold `src`.
+            </span><span class="kw">let </span><span class="prelude-val">Some</span>((size, align)) = <span class="self">self</span>.size_and_align_of_mplace(<span class="kw-2">&amp;</span>src)<span class="question-mark">? </span><span class="kw">else </span>{
+                <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(<span class="self">self</span>.cur_span(), <span class="string">&quot;unsized fn arg with `extern` type tail should not be allowed&quot;</span>)
+            };
+            <span class="kw">let </span>ptr = <span class="self">self</span>.allocate_ptr(size, align, MemoryKind::Stack)<span class="question-mark">?</span>;
+            <span class="kw">let </span>dest_place =
+                MPlaceTy::from_aligned_ptr_with_meta(<a href="#319">ptr</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <a href="#278">callee_arg</a>.layout, <a href="#307">src</a>.meta);
+            <span class="comment">// Update the local to be that new place.
+            </span><span class="kw-2">*</span>M::access_local_mut(<span class="self">self</span>, dest_frame, dest_local)<span class="question-mark">? </span>= <a href="operand.rs.html#147">Operand::Indirect</a>(<span class="kw-2">*</span><a href="#320">dest_place</a>);
+        }
+        <span class="comment">// We allow some transmutes here.
+        // FIXME: Depending on the PassMode, this should reset some padding to uninitialized. (This
+        // is true for all `copy_op`, but there are a lot of special cases for argument passing
+        // specifically.)
+        </span><a class="self" href="#273">self</a>.<a href="place.rs.html#599-604">copy_op</a>(<span class="kw-2">&amp;</span><a href="#289">caller_arg</a>, <a href="#278">callee_arg</a>, <span class="comment">/*allow_transmute*/ </span><span class="bool-val">true</span>)
+    }
+
+    <span class="doccomment">/// Call this function -- pushing the stack frame and initializing the arguments.
+    ///
+    /// `caller_fn_abi` is used to determine if all the arguments are passed the proper way.
+    /// However, we also need `caller_abi` to determine if we need to do untupling of arguments.
+    ///
+    /// `with_caller_location` indicates whether the caller passed a caller location. Miri
+    /// implements caller locations without argument passing, but to match `FnAbi` we need to know
+    /// when those arguments are present.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>eval_fn_call(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        fn_val: FnVal&lt;<span class="lifetime">&#39;tcx</span>, M::ExtraFnVal&gt;,
+        (caller_abi, caller_fn_abi): (<a href="../../../rustc_target/spec/abi/enum.Abi.html">Abi</a>, <span class="kw-2">&amp;</span>FnAbi&lt;<span class="lifetime">&#39;tcx</span>, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;),
+        args: <span class="kw-2">&amp;</span>[OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;],
+        with_caller_location: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        destination: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        target: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_middle/mir/struct.BasicBlock.html">mir::BasicBlock</a>&gt;,
+        <span class="kw-2">mut </span>unwind: <a href="eval_context.rs.html#143">StackPopUnwind</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;eval_fn_call: {:#?}&quot;</span>, fn_val);
+
+        <span class="kw">let </span>instance = <span class="kw">match </span><a href="#342">fn_val</a> {
+            <a href="memory.rs.html#72">FnVal::Instance</a>(instance) =&gt; <a href="#353">instance</a>,
+            <a href="memory.rs.html#73">FnVal::Other</a>(extra) =&gt; {
+                <span class="kw">return </span>M::call_extra_fn(
+                    <a class="self" href="#341">self</a>,
+                    <a href="#354">extra</a>,
+                    <a href="#343">caller_abi</a>,
+                    <a href="#344">args</a>,
+                    <a href="#346">destination</a>,
+                    <a href="#347">target</a>,
+                    <a href="#348">unwind</a>,
+                );
+            }
+        };
+
+        <span class="kw">match </span><a href="#352">instance</a>.def {
+            ty::InstanceDef::Intrinsic(def_id) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.tcx.is_intrinsic(def_id));
+                <span class="comment">// caller_fn_abi is not relevant here, we interpret the arguments directly for each intrinsic.
+                </span>M::call_intrinsic(<a class="self" href="#341">self</a>, <a href="#352">instance</a>, <a href="#344">args</a>, <a href="#346">destination</a>, <a href="#347">target</a>, <a href="#348">unwind</a>)
+            }
+            ty::InstanceDef::VTableShim(..)
+            | ty::InstanceDef::ReifyShim(..)
+            | <a href="../../../rustc_middle/ty/instance/enum.InstanceDef.html">ty::InstanceDef::ClosureOnceShim</a> { .. }
+            | ty::InstanceDef::FnPtrShim(..)
+            | ty::InstanceDef::DropGlue(..)
+            | ty::InstanceDef::CloneShim(..)
+            | ty::InstanceDef::Item(<span class="kw">_</span>) =&gt; {
+                <span class="comment">// We need MIR for this fn
+                </span><span class="kw">let </span><span class="prelude-val">Some</span>((body, instance)) =
+                    M::find_mir_or_eval_fn(<span class="self">self</span>, instance, caller_abi, args, destination, target, unwind)<span class="question-mark">? </span><span class="kw">else </span>{
+                        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+                    };
+
+                <span class="comment">// Compute callee information using the `instance` returned by
+                // `find_mir_or_eval_fn`.
+                // FIXME: for variadic support, do we have to somehow determine callee&#39;s extra_args?
+                </span><span class="kw">let </span>callee_fn_abi = <span class="self">self</span>.fn_abi_of_instance(instance, ty::List::empty())<span class="question-mark">?</span>;
+
+                <span class="kw">if </span>callee_fn_abi.c_variadic || caller_fn_abi.c_variadic {
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_unsup_format.html">throw_unsup_format!</a>(<span class="string">&quot;calling a c-variadic function is not supported&quot;</span>);
+                }
+
+                <span class="kw">if </span>M::enforce_abi(<span class="self">self</span>) {
+                    <span class="kw">if </span>caller_fn_abi.conv != callee_fn_abi.conv {
+                        <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                            <span class="string">&quot;calling a function with calling convention {:?} using calling convention {:?}&quot;</span>,
+                            callee_fn_abi.conv,
+                            caller_fn_abi.conv
+                        )
+                    }
+                }
+
+                <span class="kw">if </span>!<span class="macro">matches!</span>(unwind, StackPopUnwind::NotAllowed) &amp;&amp; !callee_fn_abi.can_unwind {
+                    <span class="comment">// The callee cannot unwind.
+                    </span><a href="#348">unwind</a> = <a href="eval_context.rs.html#149">StackPopUnwind::NotAllowed</a>;
+                }
+
+                <span class="self">self</span>.push_stack_frame(
+                    instance,
+                    body,
+                    destination,
+                    StackPopCleanup::Goto { ret: target, unwind },
+                )<span class="question-mark">?</span>;
+
+                <span class="comment">// If an error is raised here, pop the frame again to get an accurate backtrace.
+                // To this end, we wrap it all in a `try` block.
+                </span><span class="kw">let </span>res: InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; = <span class="kw">try </span>{
+                    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(
+                        <span class="string">&quot;caller ABI: {:?}, args: {:#?}&quot;</span>,
+                        caller_abi,
+                        args.iter()
+                            .map(|arg| (arg.layout.ty, <span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, <span class="kw-2">**</span>arg)))
+                            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+                    );
+                    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(
+                        <span class="string">&quot;spread_arg: {:?}, locals: {:#?}&quot;</span>,
+                        body.spread_arg,
+                        body.args_iter()
+                            .map(|local| (
+                                local,
+                                <span class="self">self</span>.layout_of_local(<span class="self">self</span>.frame(), local, <span class="prelude-val">None</span>).unwrap().ty
+                            ))
+                            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+                    );
+
+                    <span class="comment">// In principle, we have two iterators: Where the arguments come from, and where
+                    // they go to.
+
+                    // For where they come from: If the ABI is RustCall, we untuple the
+                    // last incoming argument.  These two iterators do not have the same type,
+                    // so to keep the code paths uniform we accept an allocation
+                    // (for RustCall ABI only).
+                    </span><span class="kw">let </span>caller_args: Cow&lt;<span class="lifetime">&#39;_</span>, [OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;]&gt; =
+                        <span class="kw">if </span>caller_abi == Abi::RustCall &amp;&amp; !args.is_empty() {
+                            <span class="comment">// Untuple
+                            </span><span class="kw">let </span>(untuple_arg, args) = <a href="#344">args</a>.split_last().unwrap();
+                            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;eval_fn_call: Will pass last argument by untupling&quot;</span>);
+                            Cow::from(
+                                args.iter()
+                                    .map(|a| <span class="prelude-val">Ok</span>(a.clone()))
+                                    .chain(
+                                        (<span class="number">0</span>..untuple_arg.layout.fields.count())
+                                            .map(|i| <span class="self">self</span>.operand_field(untuple_arg, i)),
+                                    )
+                                    .collect::&lt;InterpResult&lt;<span class="lifetime">&#39;_</span>, Vec&lt;OpTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;&gt;&gt;&gt;(
+                                    )<span class="question-mark">?</span>,
+                            )
+                        } <span class="kw">else </span>{
+                            <span class="comment">// Plain arg passing
+                            </span>Cow::from(<a href="#344">args</a>)
+                        };
+                    <span class="comment">// If `with_caller_location` is set we pretend there is an extra argument (that
+                    // we will not pass).
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        caller_args.len() + <span class="kw">if </span>with_caller_location { <span class="number">1 </span>} <span class="kw">else </span>{ <span class="number">0 </span>},
+                        caller_fn_abi.args.len(),
+                        <span class="string">&quot;mismatch between caller ABI and caller arguments&quot;</span>,
+                    );
+                    <span class="kw">let </span><span class="kw-2">mut </span>caller_args = <a href="#445">caller_args</a>
+                        .iter()
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">zip</a>(<a href="#343">caller_fn_abi</a>.args.iter())
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|arg_and_abi| !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(arg_and_abi.<span class="number">1</span>.mode, PassMode::Ignore));
+
+                    <span class="comment">// Now we have to spread them out across the callee&#39;s locals,
+                    // taking into account the `spread_arg`.  If we could write
+                    // this is a single iterator (that handles `spread_arg`), then
+                    // `pass_argument` would be the loop body. It takes care to
+                    // not advance `caller_iter` for ZSTs.
+                    </span><span class="kw">let </span><span class="kw-2">mut </span>callee_args_abis = <a href="#389">callee_fn_abi</a>.args.iter();
+                    <span class="kw">for </span>local <span class="kw">in </span>body.args_iter() {
+                        <span class="kw">let </span>dest = <span class="self">self</span>.eval_place(mir::Place::from(local))<span class="question-mark">?</span>;
+                        <span class="kw">if </span><span class="prelude-val">Some</span>(local) == body.spread_arg {
+                            <span class="comment">// Must be a tuple
+                            </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..dest.layout.fields.count() {
+                                <span class="kw">let </span>dest = <span class="self">self</span>.place_field(<span class="kw-2">&amp;</span>dest, i)<span class="question-mark">?</span>;
+                                <span class="kw">let </span>callee_abi = callee_args_abis.next().unwrap();
+                                <span class="self">self</span>.pass_argument(<span class="kw-2">&amp;mut </span>caller_args, callee_abi, <span class="kw-2">&amp;</span>dest)<span class="question-mark">?</span>;
+                            }
+                        } <span class="kw">else </span>{
+                            <span class="comment">// Normal argument
+                            </span><span class="kw">let </span>callee_abi = callee_args_abis.next().unwrap();
+                            <span class="self">self</span>.pass_argument(<span class="kw-2">&amp;mut </span>caller_args, callee_abi, <span class="kw-2">&amp;</span>dest)<span class="question-mark">?</span>;
+                        }
+                    }
+                    <span class="comment">// If the callee needs a caller location, pretend we consume one more argument from the ABI.
+                    </span><span class="kw">if </span>instance.def.requires_caller_location(<span class="kw-2">*</span><span class="self">self</span>.tcx) {
+                        <a href="#481">callee_args_abis</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">next</a>().unwrap();
+                    }
+                    <span class="comment">// Now we should have no more caller args or callee arg ABIs
+                    </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(
+                        callee_args_abis.next().is_none(),
+                        <span class="string">&quot;mismatch between callee ABI and callee body arguments&quot;
+                    </span>);
+                    <span class="kw">if </span>caller_args.next().is_some() {
+                        <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;calling a function with more arguments than it expected&quot;</span>)
+                    }
+                    <span class="comment">// Don&#39;t forget to check the return type!
+                    </span><span class="kw">if </span>!<span class="self">Self</span>::check_argument_compat(<span class="kw-2">&amp;</span>caller_fn_abi.ret, <span class="kw-2">&amp;</span>callee_fn_abi.ret) {
+                        <span class="macro">throw_ub_format!</span>(
+                            <span class="string">&quot;calling a function with return type {:?} passing \
+                                    return place of type {:?}&quot;</span>,
+                            callee_fn_abi.ret.layout.ty,
+                            caller_fn_abi.ret.layout.ty,
+                        )
+                    }
+                };
+                <span class="kw">match </span><a href="#419">res</a> {
+                    <span class="prelude-val">Err</span>(err) =&gt; {
+                        <a class="self" href="#341">self</a>.<a href="eval_context.rs.html#427-429">stack_mut</a>().pop();
+                        <span class="prelude-val">Err</span>(<a href="#520">err</a>)
+                    }
+                    <span class="prelude-val">Ok</span>(()) =&gt; <span class="prelude-val">Ok</span>(()),
+                }
+            }
+            <span class="comment">// cannot use the shim here, because that will only result in infinite recursion
+            </span>ty::InstanceDef::Virtual(def_id, idx) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>args = <a href="#344">args</a>.to_vec();
+                <span class="comment">// We have to implement all &quot;object safe receivers&quot;. So we have to go search for a
+                // pointer or `dyn Trait` type, but it could be wrapped in newtypes. So recursively
+                // unwrap those newtypes until we are there.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>receiver = <a href="#529">args</a>[<span class="number">0</span>].<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+                <span class="kw">let </span>receiver_place = <span class="kw">loop </span>{
+                    <span class="kw">match </span><a href="#533">receiver</a>.layout.ty.kind() {
+                        ty::Ref(..) | ty::RawPtr(..) =&gt; <span class="kw">break </span><span class="self">self</span>.deref_operand(<span class="kw-2">&amp;</span>receiver)<span class="question-mark">?</span>,
+                        ty::Dynamic(..) =&gt; <span class="kw">break </span><a href="#533">receiver</a>.<a href="place.rs.html#266">assert_mem_place</a>(), <span class="comment">// no immediate unsized values
+                        </span><span class="kw">_ </span>=&gt; {
+                            <span class="comment">// Not there yet, search for the only non-ZST field.
+                            </span><span class="kw">let </span><span class="kw-2">mut </span>non_zst_field = <span class="prelude-val">None</span>;
+                            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..receiver.layout.fields.count() {
+                                <span class="kw">let </span>field = <span class="self">self</span>.operand_field(<span class="kw-2">&amp;</span>receiver, i)<span class="question-mark">?</span>;
+                                <span class="kw">let </span>zst =
+                                    field.layout.is_zst() &amp;&amp; field.layout.align.abi.bytes() == <span class="number">1</span>;
+                                <span class="kw">if </span>!zst {
+                                    <span class="macro">assert!</span>(
+                                        non_zst_field.is_none(),
+                                        <span class="string">&quot;multiple non-ZST fields in dyn receiver type {}&quot;</span>,
+                                        receiver.layout.ty
+                                    );
+                                    non_zst_field = <span class="prelude-val">Some</span>(field);
+                                }
+                            }
+                            <a href="#533">receiver</a> = <a href="#540">non_zst_field</a>.unwrap_or_else(|| {
+                                <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(
+                                    <span class="string">&quot;no non-ZST fields in dyn receiver type {}&quot;</span>,
+                                    receiver.layout.ty
+                                )
+                            });
+                        }
+                    }
+                };
+                <span class="comment">// Obtain the underlying trait we are working on.
+                </span><span class="kw">let </span>receiver_tail = <span class="self"><a href="#341">self</a>
+                    </span>.tcx
+                    .struct_tail_erasing_lifetimes(<a href="#534">receiver_place</a>.layout.ty, <a class="self" href="#341">self</a>.param_env);
+                <span class="kw">let </span>ty::Dynamic(data, ..) = <a href="#564">receiver_tail</a>.kind() <span class="kw">else </span>{
+                    <a class="macro" href="../../../rustc_middle/rustc_middle/macro.span_bug.html">span_bug!</a>(<span class="self">self</span>.cur_span(), <span class="string">&quot;dynamic call on non-`dyn` type {}&quot;</span>, receiver_tail)
+                };
+
+                <span class="comment">// Get the required information from the vtable.
+                </span><span class="kw">let </span>vptr = receiver_place.meta.unwrap_meta().to_pointer(<span class="self">self</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(dyn_ty, dyn_trait) = <span class="self">self</span>.get_ptr_vtable(vptr)<span class="question-mark">?</span>;
+                <span class="kw">if </span>dyn_trait != data.principal() {
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(
+                        <span class="string">&quot;`dyn` call on a pointer whose vtable does not match its type&quot;
+                    </span>);
+                }
+
+                <span class="comment">// Now determine the actual method to call. We can do that in two different ways and
+                // compare them to ensure everything fits.
+                </span><span class="kw">let </span><span class="prelude-val">Some</span>(ty::VtblEntry::Method(fn_inst)) = <span class="self">self</span>.get_vtable_entries(vptr)<span class="question-mark">?</span>.get(<a href="#528">idx</a>).copied() <span class="kw">else </span>{
+                    <a class="macro" href="../../../rustc_const_eval/interpret/macro.throw_ub_format.html">throw_ub_format!</a>(<span class="string">&quot;`dyn` call trying to call something that is not a method&quot;</span>)
+                };
+                <span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.cfg.html">cfg!</a>(debug_assertions) {
+                    <span class="kw">let </span>tcx = <span class="kw-2">*</span><a class="self" href="#341">self</a>.tcx;
+
+                    <span class="kw">let </span>trait_def_id = <a href="#586">tcx</a>.trait_of_item(<a href="#528">def_id</a>).unwrap();
+                    <span class="kw">let </span>virtual_trait_ref =
+                        ty::TraitRef::from_method(<a href="#586">tcx</a>, <a href="#588">trait_def_id</a>, <a href="#352">instance</a>.substs);
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(
+                        receiver_tail,
+                        virtual_trait_ref.self_ty(),
+                        <span class="string">&quot;mismatch in underlying dyn trait computation within Miri and MIR building&quot;</span>,
+                    );
+                    <span class="kw">let </span>existential_trait_ref =
+                        ty::ExistentialTraitRef::erase_self_ty(<a href="#586">tcx</a>, <a href="#589">virtual_trait_ref</a>);
+                    <span class="kw">let </span>concrete_trait_ref = <a href="#596">existential_trait_ref</a>.with_self_ty(<a href="#586">tcx</a>, <a href="#573">dyn_ty</a>);
+
+                    <span class="kw">let </span>concrete_method = Instance::resolve_for_vtable(
+                        <a href="#586">tcx</a>,
+                        <a class="self" href="#341">self</a>.param_env,
+                        <a href="#528">def_id</a>,
+                        <a href="#352">instance</a>.substs.rebase_onto(<a href="#586">tcx</a>, <a href="#588">trait_def_id</a>, <a href="#598">concrete_trait_ref</a>.substs),
+                    )
+                    .unwrap();
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(fn_inst, concrete_method);
+                }
+
+                <span class="comment">// `*mut receiver_place.layout.ty` is almost the layout that we
+                // want for args[0]: We have to project to field 0 because we want
+                // a thin pointer.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(receiver_place.layout.is_unsized());
+                <span class="kw">let </span>receiver_ptr_ty = <a class="self" href="#341">self</a>.tcx.mk_mut_ptr(<a href="#534">receiver_place</a>.layout.ty);
+                <span class="kw">let </span>this_receiver_ptr = <span class="self">self</span>.layout_of(receiver_ptr_ty)<span class="question-mark">?</span>.field(<a class="self" href="#341">self</a>, <span class="number">0</span>);
+                <span class="comment">// Adjust receiver argument.
+                </span><a href="#529">args</a>[<span class="number">0</span>] = OpTy::from(ImmTy::from_immediate(
+                    Scalar::from_maybe_pointer(<a href="#534">receiver_place</a>.ptr, <a class="self" href="#341">self</a>).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+                    <a href="#615">this_receiver_ptr</a>,
+                ));
+                <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;Patched receiver operand to {:#?}&quot;</span>, args[<span class="number">0</span>]);
+                <span class="comment">// recurse with concrete function
+                </span><a class="self" href="#341">self</a>.<a href="#340-349">eval_fn_call</a>(
+                    <a href="memory.rs.html#72">FnVal::Instance</a>(<a href="#582">fn_inst</a>),
+                    (<a href="#343">caller_abi</a>, <a href="#343">caller_fn_abi</a>),
+                    <span class="kw-2">&amp;</span><a href="#529">args</a>,
+                    <a href="#345">with_caller_location</a>,
+                    <a href="#346">destination</a>,
+                    <a href="#347">target</a>,
+                    <a href="#348">unwind</a>,
+                )
+            }
+        }
+    }
+
+    <span class="kw">fn </span>drop_in_place(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        instance: ty::Instance&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        target: <a href="../../../rustc_middle/mir/struct.BasicBlock.html">mir::BasicBlock</a>,
+        unwind: <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_middle/mir/struct.BasicBlock.html">mir::BasicBlock</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;drop_in_place: {:?},\n  {:?}, {:?}&quot;</span>, <span class="kw-2">*</span>place, place.layout.ty, instance);
+        <span class="comment">// We take the address of the object.  This may well be unaligned, which is fine
+        // for us here.  However, unaligned accesses will probably make the actual drop
+        // implementation fail -- a problem shared by rustc.
+        </span><span class="kw">let </span>place = <span class="self">self</span>.force_allocation(place)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(instance, place) = <span class="kw">match </span><a href="#647">place</a>.layout.ty.kind() {
+            ty::Dynamic(..) =&gt; {
+                <span class="comment">// Dropping a trait object. Need to find actual drop fn.
+                </span><span class="kw">let </span>place = <span class="self">self</span>.unpack_dyn_trait(<span class="kw-2">&amp;</span>place)<span class="question-mark">?</span>;
+                <span class="kw">let </span>instance = ty::Instance::resolve_drop_in_place(<span class="kw-2">*</span><a class="self" href="#637">self</a>.tcx, <a href="#652">place</a>.layout.ty);
+                (<a href="#653">instance</a>, <a href="#652">place</a>)
+            }
+            <span class="kw">_ </span>=&gt; (<a href="#639">instance</a>, <a href="#647">place</a>),
+        };
+        <span class="kw">let </span>fn_abi = <span class="self">self</span>.fn_abi_of_instance(instance, ty::List::empty())<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>arg = ImmTy::from_immediate(
+            <a href="#649">place</a>.<a href="place.rs.html#138">to_ref</a>(<a class="self" href="#637">self</a>),
+            <span class="self">self</span>.layout_of(<span class="self">self</span>.tcx.mk_mut_ptr(place.layout.ty))<span class="question-mark">?</span>,
+        );
+        <span class="kw">let </span>ret = MPlaceTy::fake_alloc_zst(<span class="self">self</span>.layout_of(<span class="self">self</span>.tcx.types.unit)<span class="question-mark">?</span>);
+
+        <a class="self" href="#637">self</a>.<a href="#340-349">eval_fn_call</a>(
+            <a href="memory.rs.html#72">FnVal::Instance</a>(<a href="#649">instance</a>),
+            (Abi::Rust, <a href="#658">fn_abi</a>),
+            <span class="kw-2">&amp;</span>[<a href="#660">arg</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()],
+            <span class="bool-val">false</span>,
+            <span class="kw-2">&amp;</span><a href="#664">ret</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(),
+            <span class="prelude-val">Some</span>(<a href="#640">target</a>),
+            <span class="kw">match </span><a href="#641">unwind</a> {
+                <span class="prelude-val">Some</span>(cleanup) =&gt; <a href="eval_context.rs.html#145">StackPopUnwind::Cleanup</a>(<a href="#674">cleanup</a>),
+                <span class="prelude-val">None </span>=&gt; <a href="eval_context.rs.html#147">StackPopUnwind::Skip</a>,
+            },
+        )
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

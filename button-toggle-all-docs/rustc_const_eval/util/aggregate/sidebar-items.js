@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["expand_aggregate","Expand `lhs = Rvalue::Aggregate(kind, operands)` into assignments to the fields."]]};

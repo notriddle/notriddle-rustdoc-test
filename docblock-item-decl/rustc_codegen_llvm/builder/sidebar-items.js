@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["EMPTY_C_STR",""],["UNNAMED","Empty string, to be used where LLVM expects an instruction name, indicating that the instruction is to be left unnamed (i.e. numbered, in textual IR)."]],"macro":[["builder_methods_for_value_instructions",""]],"struct":[["Builder",""]]};

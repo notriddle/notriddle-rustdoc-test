@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["borrowed_locals","The set of locals that are borrowed at some point in the MIR body."]],"struct":[["MaybeBorrowedLocals","A dataflow analysis that tracks whether a pointer or reference could possibly exist that points to a given local."],["TransferFunction","A `Visitor` that defines the transfer function for `MaybeBorrowedLocals`."]]};

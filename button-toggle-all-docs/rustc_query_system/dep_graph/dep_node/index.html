@@ -1,0 +1,48 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="This module defines the `DepNode` type which the compiler uses to represent nodes in the dependency graph. A `DepNode` consists of a `DepKind` (which specifies the kind of thing it represents, like a piece of HIR, MIR, etc) and a `Fingerprint`, a 128 bit hash value the exact meaning of which depends on the node’s `DepKind`. Together, the kind and the fingerprint fully identify a dependency node, even across multiple compilation sessions. In other words, the value of the fingerprint does not depend on anything that is specific to a given compilation session, like an unpredictable interning key (e.g., NodeId, DefId, Symbol) or the numeric value of a pointer. The concept behind this could be compared to how git commit hashes uniquely identify a given commit and has a few advantages:"><meta name="keywords" content="rust, rustlang, rust-lang, dep_node"><title>rustc_query_system::dep_graph::dep_node - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_query_system/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module dep_node</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_query_system/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../../index.html">rustc_query_system</a>::<wbr><a href="../index.html">dep_graph</a>::<wbr><a class="mod" href="#">dep_node</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../../src/rustc_query_system/dep_graph/dep_node.rs.html#1-176">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>This module defines the <code>DepNode</code> type which the compiler uses to represent
+nodes in the dependency graph. A <code>DepNode</code> consists of a <code>DepKind</code> (which
+specifies the kind of thing it represents, like a piece of HIR, MIR, etc)
+and a <code>Fingerprint</code>, a 128 bit hash value the exact meaning of which
+depends on the node’s <code>DepKind</code>. Together, the kind and the fingerprint
+fully identify a dependency node, even across multiple compilation sessions.
+In other words, the value of the fingerprint does not depend on anything
+that is specific to a given compilation session, like an unpredictable
+interning key (e.g., NodeId, DefId, Symbol) or the numeric value of a
+pointer. The concept behind this could be compared to how git commit hashes
+uniquely identify a given commit and has a few advantages:</p>
+<ul>
+<li>A <code>DepNode</code> can simply be serialized to disk and loaded in another session
+without the need to do any “rebasing (like we have to do for Spans and
+NodeIds) or “retracing” like we had to do for <code>DefId</code> in earlier
+implementations of the dependency graph.</li>
+<li>A <code>Fingerprint</code> is just a bunch of bits, which allows <code>DepNode</code> to
+implement <code>Copy</code>, <code>Sync</code>, <code>Send</code>, <code>Freeze</code>, etc.</li>
+<li>Since we just have a bit pattern, <code>DepNode</code> can be mapped from disk into
+memory without any post-processing (e.g., “abomination-style” pointer
+reconstruction).</li>
+<li>Because a <code>DepNode</code> is self-contained, we can instantiate <code>DepNodes</code> that
+refer to things that do not exist anymore. In previous implementations
+<code>DepNode</code> contained a <code>DefId</code>. A <code>DepNode</code> referring to something that
+had been removed between the previous and the current compilation session
+could not be instantiated because the current compilation session
+contained no <code>DefId</code> for thing that had been removed.</li>
+</ul>
+<p><code>DepNode</code> definition happens in <code>rustc_middle</code> with the <code>define_dep_nodes!()</code> macro.
+This macro defines the <code>DepKind</code> enum and a corresponding <code>DepConstructor</code> enum. The
+<code>DepConstructor</code> enum links a <code>DepKind</code> to the parameters that are needed at runtime in order
+to construct a valid <code>DepNode</code> fingerprint.</p>
+<p>Because the macro sees what parameters a given <code>DepKind</code> requires, it can
+“infer” some properties for each kind of <code>DepNode</code>:</p>
+<ul>
+<li>Whether a <code>DepNode</code> of a given kind has any parameters at all. Some
+<code>DepNode</code>s could represent global concepts with only one value.</li>
+<li>Whether it is possible, in principle, to reconstruct a query key from a
+given <code>DepNode</code>. Many <code>DepKind</code>s only require a single <code>DefId</code> parameter,
+in which case it is possible to map the node’s fingerprint back to the
+<code>DefId</code> it was computed from. In other cases, too much information gets
+lost during fingerprint computation.</li>
+</ul>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.DepNode.html" title="rustc_query_system::dep_graph::dep_node::DepNode struct">DepNode</a></div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.WorkProductId.html" title="rustc_query_system::dep_graph::dep_node::WorkProductId struct">WorkProductId</a></div><div class="item-right docblock-short">A “work product” corresponds to a <code>.o</code> (or other) file that we
+save in between runs. These IDs do not have a <code>DefId</code> but rather
+some independent path or string that persists between runs without
+the need to be mapped or unmapped. (This ensures we can serialize
+them even in the absence of a tcx.)</div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="trait" href="trait.DepNodeParams.html" title="rustc_query_system::dep_graph::dep_node::DepNodeParams trait">DepNodeParams</a></div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_query_system" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["def_id_to_path",""],["inherits_doc_hidden",""]],"struct":[["Module","This module is used to store stuff from Rust’s AST in a more convenient manner (and with prettier names) before cleaning."],["RustdocVisitor",""]]};

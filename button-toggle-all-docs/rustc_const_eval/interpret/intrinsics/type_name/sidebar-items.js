@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["alloc_type_name","Directly returns an `Allocation` containing an absolute path representation of the given type."]],"struct":[["AbsolutePathPrinter",""]]};

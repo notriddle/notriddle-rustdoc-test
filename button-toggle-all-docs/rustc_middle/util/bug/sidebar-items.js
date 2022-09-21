@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["bug_fmt",""],["opt_span_bug_fmt",""],["provide",""],["span_bug_fmt",""],["trigger_delay_span_bug","A query to trigger a `delay_span_bug`. Clearly, if one has a `tcx` one can already trigger a `delay_span_bug`, so what is the point of this? It exists to help us test `delay_span_bug`’s interactions with the query system and incremental."]]};

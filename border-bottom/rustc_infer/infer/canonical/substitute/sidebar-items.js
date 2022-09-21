@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["substitute_value","Substitute the values from `var_values` into `value`. `var_values` must be values for the set of canonical variables that appear in `value`."]],"trait":[["CanonicalExt",""]]};

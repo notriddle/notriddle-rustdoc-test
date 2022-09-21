@@ -1,0 +1,1118 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/mir/interpret/error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_middle/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+</pre><pre class="rust"><code><span class="kw">use super</span>::{<a href="mod.rs.html#183">AllocId</a>, <a href="allocation.rs.html#169">AllocRange</a>, <a href="value.rs.html#20">ConstAlloc</a>, <a href="pointer.rs.html#173">Pointer</a>, <a href="value.rs.html#113">Scalar</a>};
+
+<span class="kw">use </span><a href="value.rs.html#31"><span class="kw">crate</span>::mir::interpret::ConstValue</a>;
+<span class="kw">use </span><span class="kw">crate</span>::ty::{<a href="../../ty/mod.rs.html#111">layout</a>, <a href="../../ty/query.rs.html#69">query::TyCtxtAt</a>, <a href="../../ty/context.rs.html#1827">tls</a>, <a href="../../ty/mod.rs.html#484">Ty</a>, <a href="../../ty/consts/valtree.rs.html#20">ValTree</a>};
+
+<span class="kw">use </span><a href="../../../../rustc_data_structures/sync/struct.Lock.html">rustc_data_structures::sync::Lock</a>;
+<span class="kw">use </span>rustc_errors::{<a href="../../../../rustc_lint_defs/macro.pluralize.html">pluralize</a>, <a href="../../../../rustc_errors/macro.struct_span_err.html">struct_span_err</a>, <a href="../../../../rustc_errors/diagnostic_builder/struct.DiagnosticBuilder.html">DiagnosticBuilder</a>, <a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>};
+<span class="kw">use </span><a href="../../../../rustc_macros/derive.HashStable.html">rustc_macros::HashStable</a>;
+<span class="kw">use </span><a href="../../../../rustc_session/session/enum.CtfeBacktrace.html">rustc_session::CtfeBacktrace</a>;
+<span class="kw">use </span><a href="../../../../rustc_span/def_id/struct.DefId.html">rustc_span::def_id::DefId</a>;
+<span class="kw">use </span>rustc_target::abi::{<a href="../../../../rustc_target/abi/call/index.html">call</a>, <a href="../../../../rustc_target/abi/struct.Align.html">Align</a>, <a href="../../../../rustc_target/abi/struct.Size.html">Size</a>};
+<span class="kw">use </span>std::{<a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">any::Any</a>, <a href="https://doc.rust-lang.org/nightly/std/backtrace/struct.Backtrace.html">backtrace::Backtrace</a>, <a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">fmt</a>};
+
+<span class="attribute">#[derive(Debug, Copy, Clone, PartialEq, Eq, HashStable, TyEncodable, TyDecodable)]
+</span><span class="kw">pub enum </span>ErrorHandled {
+    <span class="doccomment">/// Already reported an error for this evaluation, and the compilation is
+    /// *guaranteed* to fail. Warnings/lints *must not* produce `Reported`.
+    </span>Reported(<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>),
+    <span class="doccomment">/// Already emitted a lint for this evaluation.
+    </span>Linted,
+    <span class="doccomment">/// Don&#39;t emit an error, the evaluation failed because the MIR was generic
+    /// and the substs didn&#39;t fully monomorphize it.
+    </span>TooGeneric,
+}
+
+<span class="kw">impl </span>From&lt;<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; <span class="kw">for </span><a href="#15">ErrorHandled</a> {
+    <span class="kw">fn </span>from(err: <a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>) -&gt; <a href="#15">ErrorHandled</a> {
+        <a href="#18">ErrorHandled::Reported</a>(<a href="#27">err</a>)
+    }
+}
+
+<a class="macro" href="../../macros.rs.html#85-90">TrivialTypeTraversalAndLiftImpls! </a>{
+    <a href="#15">ErrorHandled</a>,
+}
+
+<span class="kw">pub type </span>EvalToAllocationRawResult&lt;<span class="lifetime">&#39;tcx</span>&gt; = <span class="prelude-ty">Result</span>&lt;ConstAlloc&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="#15">ErrorHandled</a>&gt;;
+<span class="kw">pub type </span>EvalToConstValueResult&lt;<span class="lifetime">&#39;tcx</span>&gt; = <span class="prelude-ty">Result</span>&lt;ConstValue&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="#15">ErrorHandled</a>&gt;;
+<span class="kw">pub type </span>EvalToValTreeResult&lt;<span class="lifetime">&#39;tcx</span>&gt; = <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ValTree&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;, <a href="#15">ErrorHandled</a>&gt;;
+
+<span class="kw">pub fn </span>struct_error&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxtAt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    msg: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) -&gt; DiagnosticBuilder&lt;<span class="lifetime">&#39;tcx</span>, <a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+    <a class="macro" href="../../../../rustc_errors/macro.struct_span_err.html">struct_span_err!</a>(tcx.sess, tcx.span, E0080, <span class="string">&quot;{}&quot;</span>, msg)
+}
+
+<span class="attribute">#[cfg(all(target_arch = <span class="string">&quot;x86_64&quot;</span>, target_pointer_width = <span class="string">&quot;64&quot;</span>))]
+</span><a class="macro" href="../../../../rustc_index/macro.static_assert_size.html">static_assert_size!</a>(InterpErrorInfo&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="number">8</span>);
+
+<span class="doccomment">/// Packages the kind of error we got from the const code interpreter
+/// up with a Rust-level backtrace of where the error occurred.
+/// These should always be constructed by calling `.into()` on
+/// an `InterpError`. In `rustc_mir::interpret`, we have `throw_err_*`
+/// macros for this.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>InterpErrorInfo&lt;<span class="lifetime">&#39;tcx</span>&gt;(Box&lt;InterpErrorInfoInner&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;);
+
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">struct </span>InterpErrorInfoInner&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    kind: InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    backtrace: <span class="prelude-ty">Option</span>&lt;Box&lt;<a href="https://doc.rust-lang.org/nightly/std/backtrace/struct.Backtrace.html">Backtrace</a>&gt;&gt;,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span>InterpErrorInfo&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#65">f</a>, <span class="string">&quot;{}&quot;</span>, <span class="self">self</span>.<span class="number">0</span>.kind)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; InterpErrorInfo&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>print_backtrace(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(backtrace) = <a class="self" href="#71">self</a>.<span class="number">0</span>.backtrace.as_ref() {
+            <a href="#88">print_backtrace</a>(<a href="#72">backtrace</a>);
+        }
+    }
+
+    <span class="kw">pub fn </span>into_kind(<span class="self">self</span>) -&gt; InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span><a href="#56">InterpErrorInfo</a>(<span class="kw">box </span><a href="#59">InterpErrorInfoInner</a> { kind, .. }) = <a class="self" href="#77">self</a>;
+        <a href="#78">kind</a>
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>kind(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#83">self</a>.<span class="number">0</span>.kind
+    }
+}
+
+<span class="kw">fn </span>print_backtrace(backtrace: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/backtrace/struct.Backtrace.html">Backtrace</a>) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.eprintln.html">eprintln!</a>(<span class="string">&quot;\n\nAn error occurred in miri:\n{}&quot;</span>, backtrace);
+}
+
+<span class="kw">impl </span>From&lt;<a href="#15">ErrorHandled</a>&gt; <span class="kw">for </span>InterpErrorInfo&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>from(err: <a href="#15">ErrorHandled</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span><a href="#93">err</a> {
+            <a href="#18">ErrorHandled::Reported</a>(<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a> { .. }) | <a href="#20">ErrorHandled::Linted</a> =&gt; {
+                <a class="macro" href="mod.rs.html#18-24">err_inval!</a>(ReferencedConstant)
+            }
+            <a href="#23">ErrorHandled::TooGeneric</a> =&gt; <a class="macro" href="mod.rs.html#18-24">err_inval!</a>(TooGeneric),
+        }
+        .<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+}
+
+<span class="kw">impl </span>From&lt;<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; <span class="kw">for </span>InterpErrorInfo&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>from(err: <a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>) -&gt; <span class="self">Self </span>{
+        <a href="#503">InterpError::InvalidProgram</a>(<a href="#145">InvalidProgramInfo::AlreadyReported</a>(<a href="#105">err</a>)).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; From&lt;InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>InterpErrorInfo&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>from(kind: InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>capture_backtrace = <a href="../../ty/context.rs.html#1991-1993">tls::with_opt</a>(|tcx| {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(tcx) = <a href="#112">tcx</a> {
+                <span class="kw-2">*</span>Lock::borrow(<span class="kw-2">&amp;</span><a href="#113">tcx</a>.sess.ctfe_backtrace)
+            } <span class="kw">else </span>{
+                CtfeBacktrace::Disabled
+            }
+        });
+
+        <span class="kw">let </span>backtrace = <span class="kw">match </span><a href="#112">capture_backtrace</a> {
+            CtfeBacktrace::Disabled =&gt; <span class="prelude-val">None</span>,
+            CtfeBacktrace::Capture =&gt; <span class="prelude-val">Some</span>(Box::new(Backtrace::force_capture())),
+            CtfeBacktrace::Immediate =&gt; {
+                <span class="comment">// Print it now.
+                </span><span class="kw">let </span>backtrace = Backtrace::force_capture();
+                <a href="#88">print_backtrace</a>(<span class="kw-2">&amp;</span><a href="#125">backtrace</a>);
+                <span class="prelude-val">None
+            </span>}
+        };
+
+        <a href="#56">InterpErrorInfo</a>(Box::new(<a href="#59">InterpErrorInfoInner</a> { <a href="#111">kind</a>, <a href="#120">backtrace</a> }))
+    }
+}
+
+<span class="doccomment">/// Error information for when the program we executed turned out not to actually be a valid
+/// program. This cannot happen in stand-alone Miri, but it can happen during CTFE/ConstProp
+/// where we work on generic code or execution does not have all information available.
+</span><span class="kw">pub enum </span>InvalidProgramInfo&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Resolution can fail if we are in a too generic context.
+    </span>TooGeneric,
+    <span class="doccomment">/// Cannot compute this constant because it depends on another one
+    /// which already produced an error.
+    </span>ReferencedConstant,
+    <span class="doccomment">/// Abort in case errors are already reported.
+    </span>AlreadyReported(<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>),
+    <span class="doccomment">/// An error occurred during layout computation.
+    </span>Layout(layout::LayoutError&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+    <span class="doccomment">/// An error occurred during FnAbi computation: the passed --target lacks FFI support
+    /// (which unfortunately typeck does not reject).
+    /// Not using `FnAbiError` as that contains a nested `LayoutError`.
+    </span>FnAbiAdjustForForeignAbi(<a href="../../../../rustc_target/abi/call/enum.AdjustForForeignAbiError.html">call::AdjustForForeignAbiError</a>),
+    <span class="doccomment">/// SizeOf of unsized type was requested.
+    </span>SizeOfUnsizedType(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span>InvalidProgramInfo&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="#138">InvalidProgramInfo</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="self"><a href="#157">self</a> </span>{
+            <a href="#140">TooGeneric</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;encountered overly generic constant&quot;</span>),
+            <a href="#143">ReferencedConstant</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;referenced constant has errors&quot;</span>),
+            <a href="#145">AlreadyReported</a>(<a href="../../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a> { .. }) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;encountered constants with type errors, stopping evaluation&quot;</span>)
+            }
+            <a href="#147">Layout</a>(<span class="kw-2">ref </span>err) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;{err}&quot;</span>),
+            <a href="#151">FnAbiAdjustForForeignAbi</a>(<span class="kw-2">ref </span>err) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;{err}&quot;</span>),
+            <a href="#153">SizeOfUnsizedType</a>(ty) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#157">f</a>, <span class="string">&quot;size_of called on unsized type `{ty}`&quot;</span>),
+        }
+    }
+}
+
+<span class="doccomment">/// Details of why a pointer had to be in-bounds.
+</span><span class="attribute">#[derive(Debug, Copy, Clone, TyEncodable, TyDecodable, HashStable)]
+</span><span class="kw">pub enum </span>CheckInAllocMsg {
+    <span class="doccomment">/// We are dereferencing a pointer (i.e., creating a place).
+    </span>DerefTest,
+    <span class="doccomment">/// We are access memory.
+    </span>MemoryAccessTest,
+    <span class="doccomment">/// We are doing pointer arithmetic.
+    </span>PointerArithmeticTest,
+    <span class="doccomment">/// We are doing pointer offset_from.
+    </span>OffsetFromTest,
+    <span class="doccomment">/// None of the above -- generic/unspecific inbounds test.
+    </span>InboundsTest,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span><a href="#174">CheckInAllocMsg</a> {
+    <span class="doccomment">/// When this is printed as an error the context looks like this:
+    /// &quot;{msg}{pointer} is a dangling pointer&quot;.
+    </span><span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+            <a href="#190">f</a>,
+            <span class="string">&quot;{}&quot;</span>,
+            <span class="kw">match </span><span class="kw-2">*</span><span class="self">self </span>{
+                CheckInAllocMsg::DerefTest =&gt; <span class="string">&quot;dereferencing pointer failed: &quot;</span>,
+                CheckInAllocMsg::MemoryAccessTest =&gt; <span class="string">&quot;memory access failed: &quot;</span>,
+                CheckInAllocMsg::PointerArithmeticTest =&gt; <span class="string">&quot;out-of-bounds pointer arithmetic: &quot;</span>,
+                CheckInAllocMsg::OffsetFromTest =&gt; <span class="string">&quot;out-of-bounds offset_from: &quot;</span>,
+                CheckInAllocMsg::InboundsTest =&gt; <span class="string">&quot;out-of-bounds pointer use: &quot;</span>,
+            }
+        )
+    }
+}
+
+<span class="doccomment">/// Details of an access to uninitialized bytes where it is not allowed.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>UninitBytesAccess {
+    <span class="doccomment">/// Range of the original memory access.
+    </span><span class="kw">pub </span>access: <a href="allocation.rs.html#169">AllocRange</a>,
+    <span class="doccomment">/// Range of the uninit memory that was encountered. (Might not be maximal.)
+    </span><span class="kw">pub </span>uninit: <a href="allocation.rs.html#169">AllocRange</a>,
+}
+
+<span class="doccomment">/// Information about a size mismatch.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>ScalarSizeMismatch {
+    <span class="kw">pub </span>target_size: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    <span class="kw">pub </span>data_size: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+}
+
+<span class="doccomment">/// Error information for when the program caused Undefined Behavior.
+</span><span class="kw">pub enum </span>UndefinedBehaviorInfo {
+    <span class="doccomment">/// Free-form case. Only for errors that are never caught!
+    </span>Ub(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+    <span class="doccomment">/// Unreachable code was executed.
+    </span>Unreachable,
+    <span class="doccomment">/// A slice/array index projection went out-of-bounds.
+    </span>BoundsCheckFailed {
+        len: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+        index: <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>,
+    },
+    <span class="doccomment">/// Something was divided by 0 (x / 0).
+    </span>DivisionByZero,
+    <span class="doccomment">/// Something was &quot;remainded&quot; by 0 (x % 0).
+    </span>RemainderByZero,
+    <span class="doccomment">/// Signed division overflowed (INT_MIN / -1).
+    </span>DivisionOverflow,
+    <span class="doccomment">/// Signed remainder overflowed (INT_MIN % -1).
+    </span>RemainderOverflow,
+    <span class="doccomment">/// Overflowing inbounds pointer arithmetic.
+    </span>PointerArithOverflow,
+    <span class="doccomment">/// Invalid metadata in a wide pointer (using `str` to avoid allocations).
+    </span>InvalidMeta(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>),
+    <span class="doccomment">/// Reading a C string that does not end within its allocation.
+    </span>UnterminatedCString(<a href="pointer.rs.html#173">Pointer</a>),
+    <span class="doccomment">/// Dereferencing a dangling pointer after it got freed.
+    </span>PointerUseAfterFree(<a href="mod.rs.html#183">AllocId</a>),
+    <span class="doccomment">/// Used a pointer outside the bounds it is valid for.
+    /// (If `ptr_size &gt; 0`, determines the size of the memory range that was expected to be in-bounds.)
+    </span>PointerOutOfBounds {
+        alloc_id: <a href="mod.rs.html#183">AllocId</a>,
+        alloc_size: <a href="../../../../rustc_target/abi/struct.Size.html">Size</a>,
+        ptr_offset: <a href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>,
+        ptr_size: <a href="../../../../rustc_target/abi/struct.Size.html">Size</a>,
+        msg: <a href="#174">CheckInAllocMsg</a>,
+    },
+    <span class="doccomment">/// Using an integer as a pointer in the wrong way.
+    </span>DanglingIntPointer(<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>, <a href="#174">CheckInAllocMsg</a>),
+    <span class="doccomment">/// Used a pointer with bad alignment.
+    </span>AlignmentCheckFailed {
+        required: <a href="../../../../rustc_target/abi/struct.Align.html">Align</a>,
+        has: <a href="../../../../rustc_target/abi/struct.Align.html">Align</a>,
+    },
+    <span class="doccomment">/// Writing to read-only memory.
+    </span>WriteToReadOnly(<a href="mod.rs.html#183">AllocId</a>),
+    <span class="comment">// Trying to access the data behind a function pointer.
+    </span>DerefFunctionPointer(<a href="mod.rs.html#183">AllocId</a>),
+    <span class="comment">// Trying to access the data behind a vtable pointer.
+    </span>DerefVTablePointer(<a href="mod.rs.html#183">AllocId</a>),
+    <span class="doccomment">/// The value validity check found a problem.
+    /// Should only be thrown by `validity.rs` and always point out which part of the value
+    /// is the problem.
+    </span>ValidationFailure {
+        <span class="doccomment">/// The &quot;path&quot; to the value in question, e.g. `.0[5].field` for a struct
+        /// field in the 6th element of an array that is the first element of a tuple.
+        </span>path: <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+        msg: <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>,
+    },
+    <span class="doccomment">/// Using a non-boolean `u8` as bool.
+    </span>InvalidBool(<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>),
+    <span class="doccomment">/// Using a non-character `u32` as character.
+    </span>InvalidChar(<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>),
+    <span class="doccomment">/// The tag of an enum does not encode an actual discriminant.
+    </span>InvalidTag(<a href="value.rs.html#113">Scalar</a>),
+    <span class="doccomment">/// Using a pointer-not-to-a-function as function pointer.
+    </span>InvalidFunctionPointer(<a href="pointer.rs.html#173">Pointer</a>),
+    <span class="doccomment">/// Using a pointer-not-to-a-vtable as vtable pointer.
+    </span>InvalidVTablePointer(<a href="pointer.rs.html#173">Pointer</a>),
+    <span class="doccomment">/// Using a string that is not valid UTF-8,
+    </span>InvalidStr(<a href="https://doc.rust-lang.org/nightly/core/str/error/struct.Utf8Error.html">std::str::Utf8Error</a>),
+    <span class="doccomment">/// Using uninitialized data where it is not allowed.
+    </span>InvalidUninitBytes(<span class="prelude-ty">Option</span>&lt;(<a href="mod.rs.html#183">AllocId</a>, <a href="#207">UninitBytesAccess</a>)&gt;),
+    <span class="doccomment">/// Working with a local that is not currently live.
+    </span>DeadLocal,
+    <span class="doccomment">/// Data size is not equal to target size.
+    </span>ScalarSizeMismatch(<a href="#216">ScalarSizeMismatch</a>),
+    <span class="doccomment">/// A discriminant of an uninhabited enum variant is written.
+    </span>UninhabitedEnumVariantWritten,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span><a href="#222">UndefinedBehaviorInfo</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="#222">UndefinedBehaviorInfo</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="self"><a href="#302">self</a> </span>{
+            <a href="#224">Ub</a>(msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#226">Unreachable</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;entering unreachable code&quot;</span>),
+            <a href="#228">BoundsCheckFailed</a> { <span class="kw-2">ref </span>len, <span class="kw-2">ref </span>index } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;indexing out of bounds: the len is {len} but the index is {index}&quot;</span>)
+            }
+            <a href="#233">DivisionByZero</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;dividing by zero&quot;</span>),
+            <a href="#235">RemainderByZero</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;calculating the remainder with a divisor of zero&quot;</span>),
+            <a href="#237">DivisionOverflow</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;overflow in signed division (dividing MIN by -1)&quot;</span>),
+            <a href="#239">RemainderOverflow</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;overflow in signed remainder (dividing MIN by -1)&quot;</span>),
+            <a href="#241">PointerArithOverflow</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;overflowing in-bounds pointer arithmetic&quot;</span>),
+            <a href="#243">InvalidMeta</a>(msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;invalid metadata in wide pointer: {msg}&quot;</span>),
+            <a href="#245">UnterminatedCString</a>(p) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;reading a null-terminated string starting at {p:?} with no null found before end of allocation&quot;</span>,
+            ),
+            <a href="#247">PointerUseAfterFree</a>(a) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;pointer to {a:?} was dereferenced after this allocation got freed&quot;</span>)
+            }
+            <a href="#250">PointerOutOfBounds</a> { alloc_id, alloc_size, ptr_offset, ptr_size: Size::ZERO, msg } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                    <a href="#302">f</a>,
+                    <span class="string">&quot;{msg}{alloc_id:?} has size {alloc_size}, so pointer at offset {ptr_offset} is out-of-bounds&quot;</span>,
+                    alloc_size = alloc_size.bytes(),
+                )
+            }
+            <a href="#250">PointerOutOfBounds</a> { alloc_id, alloc_size, ptr_offset, ptr_size, msg } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;{msg}{alloc_id:?} has size {alloc_size}, so pointer to {ptr_size} byte{ptr_size_p} starting at offset {ptr_offset} is out-of-bounds&quot;</span>,
+                alloc_size = alloc_size.bytes(),
+                ptr_size = ptr_size.bytes(),
+                ptr_size_p = <span class="macro">pluralize!</span>(ptr_size.bytes()),
+            ),
+            <a href="#258">DanglingIntPointer</a>(i, msg) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                    <a href="#302">f</a>,
+                    <span class="string">&quot;{msg}{pointer} is a dangling pointer (it has no provenance)&quot;</span>,
+                    pointer = Pointer::&lt;<span class="prelude-ty">Option</span>&lt;AllocId&gt;&gt;::from_addr(<span class="kw-2">*</span>i),
+                )
+            }
+            <a href="#260">AlignmentCheckFailed</a> { required, has } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;accessing memory with alignment {has}, but alignment {required} is required&quot;</span>,
+                has = has.bytes(),
+                required = required.bytes()
+            ),
+            <a href="#265">WriteToReadOnly</a>(a) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;writing to {a:?} which is read-only&quot;</span>),
+            <a href="#267">DerefFunctionPointer</a>(a) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;accessing {a:?} which contains a function&quot;</span>),
+            <a href="#269">DerefVTablePointer</a>(a) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;accessing {a:?} which contains a vtable&quot;</span>),
+            <a href="#273">ValidationFailure</a> { path: <span class="prelude-val">None</span>, msg } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;constructing invalid value: {msg}&quot;</span>)
+            }
+            <a href="#273">ValidationFailure</a> { path: <span class="prelude-val">Some</span>(path), msg } =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;constructing invalid value at {path}: {msg}&quot;</span>)
+            }
+            <a href="#280">InvalidBool</a>(b) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;interpreting an invalid 8-bit value as a bool: 0x{b:02x}&quot;</span>)
+            }
+            <a href="#282">InvalidChar</a>(c) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;interpreting an invalid 32-bit value as a char: 0x{c:08x}&quot;</span>)
+            }
+            <a href="#284">InvalidTag</a>(val) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;enum value has invalid tag: {val:x}&quot;</span>),
+            <a href="#286">InvalidFunctionPointer</a>(p) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;using {p:?} as function pointer but it does not point to a function&quot;</span>)
+            }
+            <a href="#288">InvalidVTablePointer</a>(p) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;using {p:?} as vtable pointer but it does not point to a vtable&quot;</span>)
+            }
+            <a href="#290">InvalidStr</a>(err) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;this string is not valid UTF-8: {err}&quot;</span>),
+            <a href="#292">InvalidUninitBytes</a>(<span class="prelude-val">Some</span>((alloc, info))) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;reading memory at {alloc:?}{access:?}, \
+                 but memory is uninitialized at {uninit:?}, \
+                 and this operation requires initialized memory&quot;</span>,
+                access = info.access,
+                uninit = info.uninit,
+            ),
+            <a href="#292">InvalidUninitBytes</a>(<span class="prelude-val">None</span>) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;using uninitialized data, but this operation requires initialized memory&quot;
+            </span>),
+            <a href="#294">DeadLocal</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;accessing a dead local variable&quot;</span>),
+            <a href="#296">ScalarSizeMismatch</a>(<a href="#216"><span class="self">self</span>::ScalarSizeMismatch</a> { target_size, data_size }) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(
+                <a href="#302">f</a>,
+                <span class="string">&quot;scalar size mismatch: expected {target_size} bytes but got {data_size} bytes instead&quot;</span>,
+            ),
+            <a href="#298">UninhabitedEnumVariantWritten</a> =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#302">f</a>, <span class="string">&quot;writing discriminant of an uninhabited enum&quot;</span>)
+            }
+        }
+    }
+}
+
+<span class="doccomment">/// Error information for when the program did something that might (or might not) be correct
+/// to do according to the Rust spec, but due to limitations in the interpreter, the
+/// operation could not be carried out. These limitations can differ between CTFE and the
+/// Miri engine, e.g., CTFE does not support dereferencing pointers at integral addresses.
+</span><span class="kw">pub enum </span>UnsupportedOpInfo {
+    <span class="doccomment">/// Free-form case. Only for errors that are never caught!
+    </span>Unsupported(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+    <span class="doccomment">/// Overwriting parts of a pointer; the resulting state cannot be represented in our
+    /// `Allocation` data structure. See &lt;https://github.com/rust-lang/miri/issues/2181&gt;.
+    </span>PartialPointerOverwrite(Pointer&lt;<a href="mod.rs.html#183">AllocId</a>&gt;),
+    <span class="doccomment">/// Attempting to `copy` parts of a pointer to somewhere else; the resulting state cannot be
+    /// represented in our `Allocation` data structure. See
+    /// &lt;https://github.com/rust-lang/miri/issues/2181&gt;.
+    </span>PartialPointerCopy(Pointer&lt;<a href="mod.rs.html#183">AllocId</a>&gt;),
+    <span class="comment">//
+    // The variants below are only reachable from CTFE/const prop, miri will never emit them.
+    //
+    </span><span class="doccomment">/// Encountered a pointer where we needed raw bytes.
+    </span>ReadPointerAsBytes,
+    <span class="doccomment">/// Accessing thread local statics
+    </span>ThreadLocalStatic(<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>),
+    <span class="doccomment">/// Accessing an unsupported extern static.
+    </span>ReadExternStatic(<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>),
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span><a href="#401">UnsupportedOpInfo</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="#401">UnsupportedOpInfo</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="self"><a href="#423">self</a> </span>{
+            <a href="#403">Unsupported</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#406">PartialPointerOverwrite</a>(ptr) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;unable to overwrite parts of a pointer in memory at {ptr:?}&quot;</span>)
+            }
+            <a href="#410">PartialPointerCopy</a>(ptr) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;unable to copy parts of a pointer from memory at {ptr:?}&quot;</span>)
+            }
+            <a href="#415">ReadPointerAsBytes</a> =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;unable to turn pointer into raw bytes&quot;</span>),
+            <a href="#417">ThreadLocalStatic</a>(did) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;cannot access thread local static ({did:?})&quot;</span>),
+            <a href="#419">ReadExternStatic</a>(did) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#423">f</a>, <span class="string">&quot;cannot read from extern static ({did:?})&quot;</span>),
+        }
+    }
+}
+
+<span class="doccomment">/// Error information for when the program exhausted the resources granted to it
+/// by the interpreter.
+</span><span class="kw">pub enum </span>ResourceExhaustionInfo {
+    <span class="doccomment">/// The stack grew too big.
+    </span>StackFrameLimitReached,
+    <span class="doccomment">/// The program ran for too long.
+    ///
+    /// The exact limit is set by the `const_eval_limit` attribute.
+    </span>StepLimitReached,
+    <span class="doccomment">/// There is not enough memory to perform an allocation.
+    </span>MemoryExhausted,
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span><a href="#442">ResourceExhaustionInfo</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="#442">ResourceExhaustionInfo</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="self"><a href="#454">self</a> </span>{
+            <a href="#444">StackFrameLimitReached</a> =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#454">f</a>, <span class="string">&quot;reached the configured maximum number of stack frames&quot;</span>)
+            }
+            <a href="#448">StepLimitReached</a> =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#454">f</a>, <span class="string">&quot;exceeded interpreter step limit (see `#[const_eval_limit]`)&quot;</span>)
+            }
+            <a href="#450">MemoryExhausted</a> =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#454">f</a>, <span class="string">&quot;tried to allocate more memory than available to compiler&quot;</span>)
+            }
+        }
+    }
+}
+
+<span class="doccomment">/// A trait to work around not having trait object upcasting.
+</span><span class="kw">pub trait </span>AsAny: <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a> {
+    <span class="kw">fn </span>as_any(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>;
+}
+<span class="kw">impl</span>&lt;T: <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt; <a href="#471">AsAny</a> <span class="kw">for </span>T {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>as_any(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="kw">dyn </span><a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a> {
+        <span class="self"><a href="#476">self</a>
+    </span>}
+}
+
+<span class="doccomment">/// A trait for machine-specific errors (or other &quot;machine stop&quot; conditions).
+</span><span class="kw">pub trait </span>MachineStopType: <a href="#471">AsAny</a> + <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html">Send</a> {
+    <span class="doccomment">/// If `true`, emit a hard error instead of going through the `CONST_ERR` lint
+    </span><span class="kw">fn </span>is_hard_err(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="bool-val">false
+    </span>}
+}
+
+<span class="kw">impl dyn </span><a href="#482">MachineStopType</a> {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">pub fn </span>downcast_ref&lt;T: <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html">Any</a>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>T&gt; {
+        <a class="self" href="#491">self</a>.<a href="#472">as_any</a>().downcast_ref()
+    }
+}
+
+<span class="kw">pub enum </span>InterpError&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The program caused undefined behavior.
+    </span>UndefinedBehavior(<a href="#222">UndefinedBehaviorInfo</a>),
+    <span class="doccomment">/// The program did something the interpreter does not support (some of these *might* be UB
+    /// but the interpreter is not sure).
+    </span>Unsupported(<a href="#401">UnsupportedOpInfo</a>),
+    <span class="doccomment">/// The program was invalid (ill-typed, bad MIR, not sufficiently monomorphized, ...).
+    </span>InvalidProgram(InvalidProgramInfo&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+    <span class="doccomment">/// The program exhausted the interpreter&#39;s resources (stack/heap too big,
+    /// execution takes too long, ...).
+    </span>ResourceExhaustion(<a href="#442">ResourceExhaustionInfo</a>),
+    <span class="doccomment">/// Stop execution for a machine-controlled reason. This is never raised by
+    /// the core engine itself.
+    </span>MachineStop(Box&lt;<span class="kw">dyn </span><a href="#482">MachineStopType</a>&gt;),
+}
+
+<span class="kw">pub type </span>InterpResult&lt;<span class="lifetime">&#39;tcx</span>, T = ()&gt; = <span class="prelude-ty">Result</span>&lt;T, InterpErrorInfo&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display</a> <span class="kw">for </span>InterpError&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">use </span><a href="#496">InterpError</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#515">self</a> </span>{
+            <a href="#501">Unsupported</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#515">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#503">InvalidProgram</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#515">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#498">UndefinedBehavior</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#515">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#506">ResourceExhaustion</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#515">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+            <a href="#509">MachineStop</a>(<span class="kw-2">ref </span>msg) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#515">f</a>, <span class="string">&quot;{msg}&quot;</span>),
+        }
+    }
+}
+
+<span class="comment">// Forward `Debug` to `Display`, so it does not look awful.
+</span><span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>InterpError&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">fmt::Display::fmt</a>(<a class="self" href="#529">self</a>, <a href="#529">f</a>)
+    }
+}
+
+<span class="kw">impl </span>InterpError&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="doccomment">/// Some errors do string formatting even if the error is never printed.
+    /// To avoid performance issues, there are places where we want to be sure to never raise these formatting errors,
+    /// so this method lets us detect them and `bug!` on unexpected errors.
+    </span><span class="kw">pub fn </span>formatted_string(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+            <span class="self">self</span>,
+            InterpError::Unsupported(UnsupportedOpInfo::Unsupported(<span class="kw">_</span>))
+                | InterpError::UndefinedBehavior(UndefinedBehaviorInfo::ValidationFailure { .. })
+                | InterpError::UndefinedBehavior(UndefinedBehaviorInfo::Ub(<span class="kw">_</span>))
+        )
+    }
+
+    <span class="doccomment">/// Should this error be reported as a hard error, preventing compilation, or a soft error,
+    /// causing a deny-by-default lint?
+    </span><span class="kw">pub fn </span>is_hard_err(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">use </span><a href="#496">InterpError</a>::<span class="kw-2">*</span>;
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#549">self</a> </span>{
+            <a href="#509">MachineStop</a>(<span class="kw-2">ref </span>err) =&gt; <a href="#552">err</a>.<a href="#484">is_hard_err</a>(),
+            <a href="#498">UndefinedBehavior</a>(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            <a href="#506">ResourceExhaustion</a>(<a href="#450">ResourceExhaustionInfo::MemoryExhausted</a>) =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

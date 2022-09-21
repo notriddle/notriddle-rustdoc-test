@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["load_call_locations",""],["run",""]],"struct":[["CallData",""],["CallLocation",""],["FindCalls","Visitor for traversing a crate and finding instances of function calls."],["ScrapeExamplesOptions",""],["SyntaxRange",""]],"type":[["AllCallLocations",""],["FnCallLocations",""]]};

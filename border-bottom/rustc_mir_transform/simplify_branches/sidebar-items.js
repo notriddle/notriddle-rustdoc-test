@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["SimplifyConstCondition","A pass that replaces a branch with a goto when its condition is known."]]};

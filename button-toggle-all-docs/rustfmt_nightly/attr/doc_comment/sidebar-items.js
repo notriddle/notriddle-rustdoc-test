@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["DocCommentFormatter","Formats a string as a doc comment using the given [`CommentStyle`]."]]};

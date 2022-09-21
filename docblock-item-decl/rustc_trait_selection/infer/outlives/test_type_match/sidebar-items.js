@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["extract_verify_if_eq","Given a “verify-if-eq” type test like:"]]};

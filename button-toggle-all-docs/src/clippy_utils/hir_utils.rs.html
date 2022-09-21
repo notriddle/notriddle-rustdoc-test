@@ -1,0 +1,2082 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/clippy/clippy_utils/src/hir_utils.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>hir_utils.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../clippy_utils/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../clippy_utils/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../clippy_utils/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="consts.rs.html#214-218"><span class="kw">crate</span>::consts::constant_simple</a>;
+<span class="kw">use </span><a href="macros.rs.html#106"><span class="kw">crate</span>::macros::macro_backtrace</a>;
+<span class="kw">use </span><a href="source.rs.html#213"><span class="kw">crate</span>::source::snippet_opt</a>;
+<span class="kw">use </span><a href="../../rustc_ast/ast/enum.InlineAsmTemplatePiece.html">rustc_ast::ast::InlineAsmTemplatePiece</a>;
+<span class="kw">use </span>rustc_data_structures::fx::FxHasher;
+<span class="kw">use </span><a href="../../rustc_hir/def/enum.Res.html">rustc_hir::def::Res</a>;
+<span class="kw">use </span><a href="../../rustc_hir/hir_id/type.HirIdMap.html">rustc_hir::HirIdMap</a>;
+<span class="kw">use </span>rustc_hir::{
+    <a href="../../rustc_hir/hir/enum.ArrayLen.html">ArrayLen</a>, <a href="../../rustc_hir/hir/enum.BinOpKind.html">BinOpKind</a>, BindingAnnotation, <a href="../../rustc_hir/hir/struct.Block.html">Block</a>, <a href="../../rustc_hir/hir/struct.BodyId.html">BodyId</a>, <a href="../../rustc_hir/hir/struct.Closure.html">Closure</a>, <a href="../../rustc_hir/hir/struct.Expr.html">Expr</a>, <a href="../../rustc_hir/hir/struct.ExprField.html">ExprField</a>, <a href="../../rustc_hir/hir/enum.ExprKind.html">ExprKind</a>, <a href="../../rustc_hir/hir/enum.FnRetTy.html">FnRetTy</a>, <a href="../../rustc_hir/hir/enum.GenericArg.html">GenericArg</a>,
+    <a href="../../rustc_hir/hir/struct.GenericArgs.html">GenericArgs</a>, <a href="../../rustc_hir/hir/enum.Guard.html">Guard</a>, <a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>, <a href="../../rustc_hir/hir/enum.InlineAsmOperand.html">InlineAsmOperand</a>, <a href="../../rustc_hir/hir/struct.Let.html">Let</a>, <a href="../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a>, <a href="../../rustc_hir/hir/enum.LifetimeName.html">LifetimeName</a>, <a href="../../rustc_hir/hir/enum.ParamName.html">ParamName</a>, <a href="../../rustc_hir/hir/struct.Pat.html">Pat</a>, <a href="../../rustc_hir/hir/struct.PatField.html">PatField</a>, <a href="../../rustc_hir/hir/enum.PatKind.html">PatKind</a>, <a href="../../rustc_hir/hir/struct.Path.html">Path</a>,
+    <a href="../../rustc_hir/hir/struct.PathSegment.html">PathSegment</a>, <a href="../../rustc_hir/hir/enum.QPath.html">QPath</a>, <a href="../../rustc_hir/hir/struct.Stmt.html">Stmt</a>, <a href="../../rustc_hir/hir/enum.StmtKind.html">StmtKind</a>, <a href="../../rustc_hir/hir/struct.Ty.html">Ty</a>, <a href="../../rustc_hir/hir/enum.TyKind.html">TyKind</a>, <a href="../../rustc_hir/hir/struct.TypeBinding.html">TypeBinding</a>,
+};
+<span class="kw">use </span>rustc_lexer::{<a href="../../rustc_lexer/fn.tokenize.html">tokenize</a>, <a href="../../rustc_lexer/enum.TokenKind.html">TokenKind</a>};
+<span class="kw">use </span><a href="../../rustc_lint/context/struct.LateContext.html">rustc_lint::LateContext</a>;
+<span class="kw">use </span><a href="../../rustc_middle/ty/context/struct.TypeckResults.html">rustc_middle::ty::TypeckResults</a>;
+<span class="kw">use </span>rustc_span::{<a href="../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>std::hash::{<a href="https://doc.rust-lang.org/nightly/core/hash/macros/derive.Hash.html">Hash</a>, <a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hasher.html">Hasher</a>};
+
+<span class="doccomment">/// Callback that is called when two expressions are not equal in the sense of `SpanlessEq`, but
+/// other conditions would make them equal.
+</span><span class="kw">type </span>SpanlessEqCallback&lt;<span class="lifetime">&#39;a</span>&gt; = <span class="kw">dyn </span>FnMut(<span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> + <span class="lifetime">&#39;a</span>;
+
+<span class="doccomment">/// Type used to check whether two ast are the same. This is different from the
+/// operator `==` on ast types as this operator would compare true equality with
+/// ID and span.
+///
+/// Note that some expressions kinds are not considered but could be added.
+</span><span class="kw">pub struct </span>SpanlessEq&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Context used to evaluate constant expressions.
+    </span>cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    maybe_typeck_results: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt;,
+    allow_side_effects: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    expr_fallback: <span class="prelude-ty">Option</span>&lt;Box&lt;SpanlessEqCallback&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; SpanlessEq&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#37">cx</a>,
+            maybe_typeck_results: <a href="#37">cx</a>.maybe_typeck_results().map(|x| (<a href="#40">x</a>, <a href="#40">x</a>)),
+            allow_side_effects: <span class="bool-val">true</span>,
+            expr_fallback: <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Consider expressions containing potential side effects as not equal.
+    </span><span class="attribute">#[must_use]
+    </span><span class="kw">pub fn </span>deny_side_effects(<span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            allow_side_effects: <span class="bool-val">false</span>,
+            ..<span class="self"><a href="#48">self</a>
+        </span>}
+    }
+
+    <span class="attribute">#[must_use]
+    </span><span class="kw">pub fn </span>expr_fallback(<span class="self">self</span>, expr_fallback: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> + <span class="lifetime">&#39;a</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            expr_fallback: <span class="prelude-val">Some</span>(Box::new(<a href="#56">expr_fallback</a>)),
+            ..<span class="self"><a href="#56">self</a>
+        </span>}
+    }
+
+    <span class="doccomment">/// Use this method to wrap comparisons that may involve inter-expression context.
+    /// See `self.locals`.
+    </span><span class="kw">pub fn </span>inter_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; HirEqInterExpr&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#93">HirEqInterExpr</a> {
+            inner: <a class="self" href="#65">self</a>,
+            locals: HirIdMap::default(),
+        }
+    }
+
+    <span class="kw">pub fn </span>eq_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Block&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Block&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#72">self</a>.<a href="#65">inter_expr</a>().<a href="#129">eq_block</a>(<a href="#72">left</a>, <a href="#72">right</a>)
+    }
+
+    <span class="kw">pub fn </span>eq_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#76">self</a>.<a href="#65">inter_expr</a>().<a href="#212">eq_expr</a>(<a href="#76">left</a>, <a href="#76">right</a>)
+    }
+
+    <span class="kw">pub fn </span>eq_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Path&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Path&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#80">self</a>.<a href="#65">inter_expr</a>().<a href="#399">eq_path</a>(<a href="#80">left</a>, <a href="#80">right</a>)
+    }
+
+    <span class="kw">pub fn </span>eq_path_segment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#84">self</a>.<a href="#65">inter_expr</a>().<a href="#425">eq_path_segment</a>(<a href="#84">left</a>, <a href="#84">right</a>)
+    }
+
+    <span class="kw">pub fn </span>eq_path_segments(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>[PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;], right: <span class="kw-2">&amp;</span>[PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;]) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#88">self</a>.<a href="#65">inter_expr</a>().<a href="#421">eq_path_segments</a>(<a href="#88">left</a>, <a href="#88">right</a>)
+    }
+}
+
+<span class="kw">pub struct </span>HirEqInterExpr&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>SpanlessEq&lt;<span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="comment">// When binding are declared, the binding ID in the left expression is mapped to the one on the
+    // right. For example, when comparing `{ let x = 1; x + 2 }` and `{ let y = 1; y + 2 }`,
+    // these blocks are considered equal since `x` is mapped to `y`.
+    </span><span class="kw">pub </span>locals: HirIdMap&lt;<a href="../../rustc_hir/hir_id/struct.HirId.html">HirId</a>&gt;,
+}
+
+<span class="kw">impl </span>HirEqInterExpr&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">pub fn </span>eq_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Stmt&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Stmt&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span><a href="#103">left</a>.kind, <span class="kw-2">&amp;</span><a href="#103">right</a>.kind) {
+            (<span class="kw-2">&amp;</span>StmtKind::Local(l), <span class="kw-2">&amp;</span>StmtKind::Local(r)) =&gt; {
+                <span class="comment">// This additional check ensures that the type of the locals are equivalent even if the init
+                // expression or type have some inferred parts.
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>((typeck_lhs, typeck_rhs)) = <a class="self" href="#103">self</a>.inner.maybe_typeck_results {
+                    <span class="kw">let </span>l_ty = <a href="#108">typeck_lhs</a>.pat_ty(<a href="#105">l</a>.pat);
+                    <span class="kw">let </span>r_ty = <a href="#108">typeck_rhs</a>.pat_ty(<a href="#105">r</a>.pat);
+                    <span class="kw">if </span>l_ty != r_ty {
+                        <span class="kw">return </span><span class="bool-val">false</span>;
+                    }
+                }
+
+                <span class="comment">// eq_pat adds the HirIds to the locals map. We therefor call it last to make sure that
+                // these only get added if the init and type is equal.
+                </span><a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#105">l</a>.init, <span class="kw-2">&amp;</span><a href="#105">r</a>.init, |l, r| <a class="self" href="#103">self</a>.<a href="#212">eq_expr</a>(<a href="#118">l</a>, <a href="#118">r</a>))
+                    &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#105">l</a>.ty, <span class="kw-2">&amp;</span><a href="#105">r</a>.ty, |l, r| <a class="self" href="#103">self</a>.<a href="#431">eq_ty</a>(<a href="#119">l</a>, <a href="#119">r</a>))
+                    &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#105">l</a>.els, <span class="kw-2">&amp;</span><a href="#105">r</a>.els, |l, r| <a class="self" href="#103">self</a>.<a href="#129">eq_block</a>(<a href="#120">l</a>, <a href="#120">r</a>))
+                    &amp;&amp; <a class="self" href="#103">self</a>.<a href="#352">eq_pat</a>(<a href="#105">l</a>.pat, <a href="#105">r</a>.pat)
+            },
+            (<span class="kw-2">&amp;</span>StmtKind::Expr(l), <span class="kw-2">&amp;</span>StmtKind::Expr(r)) | (<span class="kw-2">&amp;</span>StmtKind::Semi(l), <span class="kw-2">&amp;</span>StmtKind::Semi(r)) =&gt; <a class="self" href="#103">self</a>.<a href="#212">eq_expr</a>(<a href="#123">l</a>, <a href="#123">r</a>),
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="doccomment">/// Checks whether two blocks are the same.
+    </span><span class="kw">fn </span>eq_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Block&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Block&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#129">left</a>.stmts, <a href="#129">left</a>.expr, <a href="#129">right</a>.stmts, <a href="#129">right</a>.expr) {
+            ([], <span class="prelude-val">None</span>, [], <span class="prelude-val">None</span>) =&gt; {
+                <span class="comment">// For empty blocks, check to see if the tokens are equal. This will catch the case where a macro
+                // expanded to nothing, or the cfg attribute was used.
+                </span><span class="kw">let </span>(left, right) = <span class="kw">match </span>(
+                    <a href="source.rs.html#213">snippet_opt</a>(<a class="self" href="#129">self</a>.inner.cx, <a href="#129">left</a>.span),
+                    <a href="source.rs.html#213">snippet_opt</a>(<a class="self" href="#129">self</a>.inner.cx, <a href="#129">right</a>.span),
+                ) {
+                    (<span class="prelude-val">Some</span>(left), <span class="prelude-val">Some</span>(right)) =&gt; (<a href="#138">left</a>, <a href="#138">right</a>),
+                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="bool-val">true</span>,
+                };
+                <span class="kw">let </span><span class="kw-2">mut </span>left_pos = <span class="number">0</span>;
+                <span class="kw">let </span>left = <a href="../../rustc_lexer/fn.tokenize.html">tokenize</a>(<span class="kw-2">&amp;</span><a href="#134">left</a>)
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|t| {
+                        <span class="kw">let </span>end = <a href="#141">left_pos</a> + <a href="#143">t</a>.len <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+                        <span class="kw">let </span>s = <span class="kw-2">&amp;</span><a href="#134">left</a>[<a href="#141">left_pos</a>..<a href="#144">end</a>];
+                        <a href="#141">left_pos</a> = <a href="#144">end</a>;
+                        (<a href="#143">t</a>, <a href="#145">s</a>)
+                    })
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|(t, <span class="kw">_</span>)| {
+                        !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                            t.kind,
+                            TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } | TokenKind::Whitespace
+                        )
+                    })
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(<span class="kw">_</span>, s)| <a href="#155">s</a>);
+                <span class="kw">let </span><span class="kw-2">mut </span>right_pos = <span class="number">0</span>;
+                <span class="kw">let </span>right = <a href="../../rustc_lexer/fn.tokenize.html">tokenize</a>(<span class="kw-2">&amp;</span><a href="#134">right</a>)
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|t| {
+                        <span class="kw">let </span>end = <a href="#156">right_pos</a> + <a href="#158">t</a>.len <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+                        <span class="kw">let </span>s = <span class="kw-2">&amp;</span><a href="#134">right</a>[<a href="#156">right_pos</a>..<a href="#159">end</a>];
+                        <a href="#156">right_pos</a> = <a href="#159">end</a>;
+                        (<a href="#158">t</a>, <a href="#160">s</a>)
+                    })
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|(t, <span class="kw">_</span>)| {
+                        !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                            t.kind,
+                            TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } | TokenKind::Whitespace
+                        )
+                    })
+                    .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(<span class="kw">_</span>, s)| <a href="#170">s</a>);
+                <a href="#142">left</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">eq</a>(<a href="#157">right</a>)
+            },
+            <span class="kw">_ </span>=&gt; {
+                <a href="#530">over</a>(<a href="#129">left</a>.stmts, <a href="#129">right</a>.stmts, |l, r| <a class="self" href="#129">self</a>.<a href="#103">eq_stmt</a>(<a href="#174">l</a>, <a href="#174">r</a>))
+                    &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#129">left</a>.expr, <span class="kw-2">&amp;</span><a href="#129">right</a>.expr, |l, r| <a class="self" href="#129">self</a>.<a href="#212">eq_expr</a>(<a href="#175">l</a>, <a href="#175">r</a>))
+            },
+        }
+    }
+
+    <span class="kw">fn </span>should_ignore(<span class="kw-2">&amp;mut </span><span class="self">self</span>, expr: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="macros.rs.html#106">macro_backtrace</a>(<a href="#180">expr</a>.span).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">last</a>().map_or(<span class="bool-val">false</span>, |macro_call| {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                <span class="kw-2">&amp;</span><span class="self">self</span>.inner.cx.tcx.get_diagnostic_name(macro_call.def_id),
+                <span class="prelude-val">Some</span>(sym::todo_macro | sym::unimplemented_macro)
+            )
+        })
+    }
+
+    <span class="kw">pub fn </span>eq_array_length(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <a href="../../rustc_hir/hir/enum.ArrayLen.html">ArrayLen</a>, right: <a href="../../rustc_hir/hir/enum.ArrayLen.html">ArrayLen</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#189">left</a>, <a href="#189">right</a>) {
+            (ArrayLen::Infer(..), ArrayLen::Infer(..)) =&gt; <span class="bool-val">true</span>,
+            (ArrayLen::Body(l_ct), ArrayLen::Body(r_ct)) =&gt; <a class="self" href="#189">self</a>.<a href="#197">eq_body</a>(<a href="#192">l_ct</a>.body, <a href="#192">r_ct</a>.body),
+            (<span class="kw">_</span>, <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>eq_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <a href="../../rustc_hir/hir/struct.BodyId.html">BodyId</a>, right: <a href="../../rustc_hir/hir/struct.BodyId.html">BodyId</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// swap out TypeckResults when hashing a body
+        </span><span class="kw">let </span>old_maybe_typeck_results = <a class="self" href="#197">self</a>.inner.maybe_typeck_results.replace((
+            <a class="self" href="#197">self</a>.inner.cx.tcx.typeck_body(<a href="#197">left</a>),
+            <a class="self" href="#197">self</a>.inner.cx.tcx.typeck_body(<a href="#197">right</a>),
+        ));
+        <span class="kw">let </span>res = <a class="self" href="#197">self</a>.<a href="#212">eq_expr</a>(
+            <a class="self" href="#197">self</a>.inner.cx.tcx.hir().body(<a href="#197">left</a>).value,
+            <a class="self" href="#197">self</a>.inner.cx.tcx.hir().body(<a href="#197">right</a>).value,
+        );
+        <a class="self" href="#197">self</a>.inner.maybe_typeck_results = <a href="#199">old_maybe_typeck_results</a>;
+        <a href="#203">res</a>
+    }
+
+    <span class="attribute">#[expect(clippy::similar_names)]
+    </span><span class="kw">pub fn </span>eq_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">if </span>!<span class="self">self</span>.inner.allow_side_effects &amp;&amp; left.span.ctxt() != right.span.ctxt() {
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((typeck_lhs, typeck_rhs)) = <a class="self" href="#212">self</a>.inner.maybe_typeck_results {
+            <span class="kw">if let </span>(<span class="prelude-val">Some</span>(l), <span class="prelude-val">Some</span>(r)) = (
+                <a href="consts.rs.html#214-218">constant_simple</a>(<a class="self" href="#212">self</a>.inner.cx, <a href="#217">typeck_lhs</a>, <a href="#212">left</a>),
+                <a href="consts.rs.html#214-218">constant_simple</a>(<a class="self" href="#212">self</a>.inner.cx, <a href="#217">typeck_rhs</a>, <a href="#212">right</a>),
+            ) {
+                <span class="kw">if </span>l == r {
+                    <span class="kw">return </span><span class="bool-val">true</span>;
+                }
+            }
+        }
+
+        <span class="kw">let </span>is_eq = <span class="kw">match </span>(
+            <a href="#454">reduce_exprkind</a>(<a class="self" href="#212">self</a>.inner.cx, <span class="kw-2">&amp;</span><a href="#212">left</a>.kind),
+            <a href="#454">reduce_exprkind</a>(<a class="self" href="#212">self</a>.inner.cx, <span class="kw-2">&amp;</span><a href="#212">right</a>.kind),
+        ) {
+            (<span class="kw-2">&amp;</span>ExprKind::AddrOf(lb, l_mut, le), <span class="kw-2">&amp;</span>ExprKind::AddrOf(rb, r_mut, re)) =&gt; {
+                <a href="#232">lb</a> == <a href="#232">rb</a> &amp;&amp; <a href="#232">l_mut</a> == <a href="#232">r_mut</a> &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#232">le</a>, <a href="#232">re</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Continue(li), <span class="kw-2">&amp;</span>ExprKind::Continue(ri)) =&gt; {
+                <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#235">li</a>.label, <span class="kw-2">&amp;</span><a href="#235">ri</a>.label, |l, r| <a href="#236">l</a>.ident.name == <a href="#236">r</a>.ident.name)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Assign(ll, lr, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ExprKind::Assign(rl, rr, <span class="kw">_</span>)) =&gt; {
+                <a class="self" href="#212">self</a>.inner.allow_side_effects &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#238">ll</a>, <a href="#238">rl</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#238">lr</a>, <a href="#238">rr</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::AssignOp(<span class="kw-2">ref </span>lo, ll, lr), <span class="kw-2">&amp;</span>ExprKind::AssignOp(<span class="kw-2">ref </span>ro, rl, rr)) =&gt; {
+                <a class="self" href="#212">self</a>.inner.allow_side_effects &amp;&amp; <a href="#241">lo</a>.node == <a href="#241">ro</a>.node &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#241">ll</a>, <a href="#241">rl</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#241">lr</a>, <a href="#241">rr</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Block(l, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ExprKind::Block(r, <span class="kw">_</span>)) =&gt; <a class="self" href="#212">self</a>.<a href="#129">eq_block</a>(<a href="#244">l</a>, <a href="#244">r</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::Binary(l_op, ll, lr), <span class="kw-2">&amp;</span>ExprKind::Binary(r_op, rl, rr)) =&gt; {
+                <a href="#245">l_op</a>.node == <a href="#245">r_op</a>.node &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#245">ll</a>, <a href="#245">rl</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#245">lr</a>, <a href="#245">rr</a>)
+                    || <a href="#498-502">swap_binop</a>(<a href="#245">l_op</a>.node, <a href="#245">ll</a>, <a href="#245">lr</a>).map_or(<span class="bool-val">false</span>, |(l_op, ll, lr)| {
+                        <a href="#247">l_op</a> == <a href="#245">r_op</a>.node &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#247">ll</a>, <a href="#245">rl</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#247">lr</a>, <a href="#245">rr</a>)
+                    })
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Break(li, <span class="kw-2">ref </span>le), <span class="kw-2">&amp;</span>ExprKind::Break(ri, <span class="kw-2">ref </span>re)) =&gt; {
+                <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#251">li</a>.label, <span class="kw-2">&amp;</span><a href="#251">ri</a>.label, |l, r| <a href="#252">l</a>.ident.name == <a href="#252">r</a>.ident.name)
+                    &amp;&amp; <a href="#524">both</a>(<a href="#251">le</a>, <a href="#251">re</a>, |l, r| <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#253">l</a>, <a href="#253">r</a>))
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Box(l), <span class="kw-2">&amp;</span>ExprKind::Box(r)) =&gt; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#255">l</a>, <a href="#255">r</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::Call(l_fun, l_args), <span class="kw-2">&amp;</span>ExprKind::Call(r_fun, r_args)) =&gt; {
+                <a class="self" href="#212">self</a>.inner.allow_side_effects &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#256">l_fun</a>, <a href="#256">r_fun</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#314">eq_exprs</a>(<a href="#256">l_args</a>, <a href="#256">r_args</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Cast(lx, lt), <span class="kw-2">&amp;</span>ExprKind::Cast(rx, rt)) | (<span class="kw-2">&amp;</span>ExprKind::Type(lx, lt), <span class="kw-2">&amp;</span>ExprKind::Type(rx, rt)) =&gt; {
+                <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#259">lx</a>, <a href="#259">rx</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#431">eq_ty</a>(<a href="#259">lt</a>, <a href="#259">rt</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Field(l_f_exp, <span class="kw-2">ref </span>l_f_ident), <span class="kw-2">&amp;</span>ExprKind::Field(r_f_exp, <span class="kw-2">ref </span>r_f_ident)) =&gt; {
+                <a href="#262">l_f_ident</a>.name == <a href="#262">r_f_ident</a>.name &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#262">l_f_exp</a>, <a href="#262">r_f_exp</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Index(la, li), <span class="kw-2">&amp;</span>ExprKind::Index(ra, ri)) =&gt; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#265">la</a>, <a href="#265">ra</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#265">li</a>, <a href="#265">ri</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::If(lc, lt, <span class="kw-2">ref </span>le), <span class="kw-2">&amp;</span>ExprKind::If(rc, rt, <span class="kw-2">ref </span>re)) =&gt; {
+                <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#266">lc</a>, <a href="#266">rc</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#266">lt</a>, <a href="#266">rt</a>) &amp;&amp; <a href="#524">both</a>(<a href="#266">le</a>, <a href="#266">re</a>, |l, r| <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#267">l</a>, <a href="#267">r</a>))
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Let(l), <span class="kw-2">&amp;</span>ExprKind::Let(r)) =&gt; {
+                <a class="self" href="#212">self</a>.<a href="#352">eq_pat</a>(<a href="#269">l</a>.pat, <a href="#269">r</a>.pat) &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#269">l</a>.ty, <span class="kw-2">&amp;</span><a href="#269">r</a>.ty, |l, r| <a class="self" href="#212">self</a>.<a href="#431">eq_ty</a>(<a href="#270">l</a>, <a href="#270">r</a>)) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#269">l</a>.init, <a href="#269">r</a>.init)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Lit(<span class="kw-2">ref </span>l), <span class="kw-2">&amp;</span>ExprKind::Lit(<span class="kw-2">ref </span>r)) =&gt; <a href="#272">l</a>.node == <a href="#272">r</a>.node,
+            (<span class="kw-2">&amp;</span>ExprKind::Loop(lb, <span class="kw-2">ref </span>ll, <span class="kw-2">ref </span>lls, <span class="kw">_</span>), <span class="kw-2">&amp;</span>ExprKind::Loop(rb, <span class="kw-2">ref </span>rl, <span class="kw-2">ref </span>rls, <span class="kw">_</span>)) =&gt; {
+                <a href="#273">lls</a> == <a href="#273">rls</a> &amp;&amp; <a class="self" href="#212">self</a>.<a href="#129">eq_block</a>(<a href="#273">lb</a>, <a href="#273">rb</a>) &amp;&amp; <a href="#524">both</a>(<a href="#273">ll</a>, <a href="#273">rl</a>, |l, r| <a href="#274">l</a>.ident.name == <a href="#274">r</a>.ident.name)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Match(le, la, <span class="kw-2">ref </span>ls), <span class="kw-2">&amp;</span>ExprKind::Match(re, ra, <span class="kw-2">ref </span>rs)) =&gt; {
+                <a href="#276">ls</a> == <a href="#276">rs</a>
+                    &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#276">le</a>, <a href="#276">re</a>)
+                    &amp;&amp; <a href="#530">over</a>(<a href="#276">la</a>, <a href="#276">ra</a>, |l, r| {
+                        <a class="self" href="#212">self</a>.<a href="#352">eq_pat</a>(<a href="#279">l</a>.pat, <a href="#279">r</a>.pat)
+                            &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#279">l</a>.guard, <span class="kw-2">&amp;</span><a href="#279">r</a>.guard, |l, r| <a class="self" href="#212">self</a>.<a href="#322">eq_guard</a>(<a href="#281">l</a>, <a href="#281">r</a>))
+                            &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#279">l</a>.body, <a href="#279">r</a>.body)
+                    })
+            },
+            (
+                <span class="kw-2">&amp;</span>ExprKind::MethodCall(l_path, l_receiver, l_args, <span class="kw">_</span>),
+                <span class="kw-2">&amp;</span>ExprKind::MethodCall(r_path, r_receiver, r_args, <span class="kw">_</span>),
+            ) =&gt; {
+                <a class="self" href="#212">self</a>.inner.allow_side_effects
+                    &amp;&amp; <a class="self" href="#212">self</a>.<a href="#425">eq_path_segment</a>(<a href="#286">l_path</a>, <a href="#287">r_path</a>)
+                    &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#286">l_receiver</a>, <a href="#287">r_receiver</a>)
+                    &amp;&amp; <a class="self" href="#212">self</a>.<a href="#314">eq_exprs</a>(<a href="#286">l_args</a>, <a href="#287">r_args</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Repeat(le, ll), <span class="kw-2">&amp;</span>ExprKind::Repeat(re, rl)) =&gt; {
+                <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#294">le</a>, <a href="#294">re</a>) &amp;&amp; <a class="self" href="#212">self</a>.<a href="#189">eq_array_length</a>(<a href="#294">ll</a>, <a href="#294">rl</a>)
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Ret(<span class="kw-2">ref </span>l), <span class="kw-2">&amp;</span>ExprKind::Ret(<span class="kw-2">ref </span>r)) =&gt; <a href="#524">both</a>(<a href="#297">l</a>, <a href="#297">r</a>, |l, r| <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#297">l</a>, <a href="#297">r</a>)),
+            (<span class="kw-2">&amp;</span>ExprKind::Path(<span class="kw-2">ref </span>l), <span class="kw-2">&amp;</span>ExprKind::Path(<span class="kw-2">ref </span>r)) =&gt; <a class="self" href="#212">self</a>.<a href="#386">eq_qpath</a>(<a href="#298">l</a>, <a href="#298">r</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::Struct(l_path, lf, <span class="kw-2">ref </span>lo), <span class="kw-2">&amp;</span>ExprKind::Struct(r_path, rf, <span class="kw-2">ref </span>ro)) =&gt; {
+                <a class="self" href="#212">self</a>.<a href="#386">eq_qpath</a>(<a href="#299">l_path</a>, <a href="#299">r_path</a>)
+                    &amp;&amp; <a href="#524">both</a>(<a href="#299">lo</a>, <a href="#299">ro</a>, |l, r| <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#301">l</a>, <a href="#301">r</a>))
+                    &amp;&amp; <a href="#530">over</a>(<a href="#299">lf</a>, <a href="#299">rf</a>, |l, r| <a class="self" href="#212">self</a>.<a href="#318">eq_expr_field</a>(<a href="#302">l</a>, <a href="#302">r</a>))
+            },
+            (<span class="kw-2">&amp;</span>ExprKind::Tup(l_tup), <span class="kw-2">&amp;</span>ExprKind::Tup(r_tup)) =&gt; <a class="self" href="#212">self</a>.<a href="#314">eq_exprs</a>(<a href="#304">l_tup</a>, <a href="#304">r_tup</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::Unary(l_op, le), <span class="kw-2">&amp;</span>ExprKind::Unary(r_op, re)) =&gt; <a href="#305">l_op</a> == <a href="#305">r_op</a> &amp;&amp; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#305">le</a>, <a href="#305">re</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::Array(l), <span class="kw-2">&amp;</span>ExprKind::Array(r)) =&gt; <a class="self" href="#212">self</a>.<a href="#314">eq_exprs</a>(<a href="#306">l</a>, <a href="#306">r</a>),
+            (<span class="kw-2">&amp;</span>ExprKind::DropTemps(le), <span class="kw-2">&amp;</span>ExprKind::DropTemps(re)) =&gt; <a class="self" href="#212">self</a>.<a href="#212">eq_expr</a>(<a href="#307">le</a>, <a href="#307">re</a>),
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        };
+        (<a href="#228">is_eq</a> &amp;&amp; (!<a class="self" href="#212">self</a>.<a href="#180">should_ignore</a>(<a href="#212">left</a>) || !<a class="self" href="#212">self</a>.<a href="#180">should_ignore</a>(<a href="#212">right</a>)))
+            || <a class="self" href="#212">self</a>.inner.expr_fallback.as_mut().map_or(<span class="bool-val">false</span>, |f| <a href="#311">f</a>(<a href="#212">left</a>, <a href="#212">right</a>))
+    }
+
+    <span class="kw">fn </span>eq_exprs(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>[Expr&lt;<span class="lifetime">&#39;_</span>&gt;], right: <span class="kw-2">&amp;</span>[Expr&lt;<span class="lifetime">&#39;_</span>&gt;]) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#530">over</a>(<a href="#314">left</a>, <a href="#314">right</a>, |l, r| <a class="self" href="#314">self</a>.<a href="#212">eq_expr</a>(<a href="#315">l</a>, <a href="#315">r</a>))
+    }
+
+    <span class="kw">fn </span>eq_expr_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>ExprField&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>ExprField&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#318">left</a>.ident.name == <a href="#318">right</a>.ident.name &amp;&amp; <a class="self" href="#318">self</a>.<a href="#212">eq_expr</a>(<a href="#318">left</a>.expr, <a href="#318">right</a>.expr)
+    }
+
+    <span class="kw">fn </span>eq_guard(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Guard&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Guard&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#322">left</a>, <a href="#322">right</a>) {
+            (Guard::If(l), Guard::If(r)) =&gt; <a class="self" href="#322">self</a>.<a href="#212">eq_expr</a>(<a href="#324">l</a>, <a href="#324">r</a>),
+            (Guard::IfLet(l), Guard::IfLet(r)) =&gt; {
+                <a class="self" href="#322">self</a>.<a href="#352">eq_pat</a>(<a href="#325">l</a>.pat, <a href="#325">r</a>.pat) &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#325">l</a>.ty, <span class="kw-2">&amp;</span><a href="#325">r</a>.ty, |l, r| <a class="self" href="#322">self</a>.<a href="#431">eq_ty</a>(<a href="#326">l</a>, <a href="#326">r</a>)) &amp;&amp; <a class="self" href="#322">self</a>.<a href="#212">eq_expr</a>(<a href="#325">l</a>.init, <a href="#325">r</a>.init)
+            },
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">fn </span>eq_generic_arg(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>GenericArg&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>GenericArg&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#332">left</a>, <a href="#332">right</a>) {
+            (GenericArg::Const(l), GenericArg::Const(r)) =&gt; <a class="self" href="#332">self</a>.<a href="#197">eq_body</a>(<a href="#334">l</a>.value.body, <a href="#334">r</a>.value.body),
+            (GenericArg::Lifetime(l_lt), GenericArg::Lifetime(r_lt)) =&gt; <span class="self">Self</span>::eq_lifetime(<a href="#335">l_lt</a>, <a href="#335">r_lt</a>),
+            (GenericArg::Type(l_ty), GenericArg::Type(r_ty)) =&gt; <a class="self" href="#332">self</a>.<a href="#431">eq_ty</a>(<a href="#336">l_ty</a>, <a href="#336">r_ty</a>),
+            (GenericArg::Infer(l_inf), GenericArg::Infer(r_inf)) =&gt; <a class="self" href="#332">self</a>.<a href="#431">eq_ty</a>(<span class="kw-2">&amp;</span><a href="#337">l_inf</a>.to_ty(), <span class="kw-2">&amp;</span><a href="#337">r_inf</a>.to_ty()),
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">fn </span>eq_lifetime(left: <span class="kw-2">&amp;</span><a href="../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a>, right: <span class="kw-2">&amp;</span><a href="../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#342">left</a>.name == <a href="#342">right</a>.name
+    }
+
+    <span class="kw">fn </span>eq_pat_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>PatField&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>PatField&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>(<a href="../../rustc_hir/hir/struct.PatField.html">PatField</a> { ident: li, pat: lp, .. }, <a href="../../rustc_hir/hir/struct.PatField.html">PatField</a> { ident: ri, pat: rp, .. }) = (<span class="kw-2">&amp;</span><a href="#346">left</a>, <span class="kw-2">&amp;</span><a href="#346">right</a>);
+        <a href="#347">li</a>.name == <a href="#347">ri</a>.name &amp;&amp; <a class="self" href="#346">self</a>.<a href="#352">eq_pat</a>(<a href="#347">lp</a>, <a href="#347">rp</a>)
+    }
+
+    <span class="doccomment">/// Checks whether two patterns are the same.
+    </span><span class="kw">fn </span>eq_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Pat&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Pat&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span><a href="#352">left</a>.kind, <span class="kw-2">&amp;</span><a href="#352">right</a>.kind) {
+            (<span class="kw-2">&amp;</span>PatKind::Box(l), <span class="kw-2">&amp;</span>PatKind::Box(r)) =&gt; <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#354">l</a>, <a href="#354">r</a>),
+            (<span class="kw-2">&amp;</span>PatKind::Struct(<span class="kw-2">ref </span>lp, la, ..), <span class="kw-2">&amp;</span>PatKind::Struct(<span class="kw-2">ref </span>rp, ra, ..)) =&gt; {
+                <a class="self" href="#352">self</a>.<a href="#386">eq_qpath</a>(<a href="#355">lp</a>, <a href="#355">rp</a>) &amp;&amp; <a href="#530">over</a>(<a href="#355">la</a>, <a href="#355">ra</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#346">eq_pat_field</a>(<a href="#356">l</a>, <a href="#356">r</a>))
+            },
+            (<span class="kw-2">&amp;</span>PatKind::TupleStruct(<span class="kw-2">ref </span>lp, la, ls), <span class="kw-2">&amp;</span>PatKind::TupleStruct(<span class="kw-2">ref </span>rp, ra, rs)) =&gt; {
+                <a class="self" href="#352">self</a>.<a href="#386">eq_qpath</a>(<a href="#358">lp</a>, <a href="#358">rp</a>) &amp;&amp; <a href="#530">over</a>(<a href="#358">la</a>, <a href="#358">ra</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#359">l</a>, <a href="#359">r</a>)) &amp;&amp; <a href="#358">ls</a> == <a href="#358">rs</a>
+            },
+            (<span class="kw-2">&amp;</span>PatKind::Binding(lb, li, <span class="kw">_</span>, <span class="kw-2">ref </span>lp), <span class="kw-2">&amp;</span>PatKind::Binding(rb, ri, <span class="kw">_</span>, <span class="kw-2">ref </span>rp)) =&gt; {
+                <span class="kw">let </span>eq = <a href="#361">lb</a> == <a href="#361">rb</a> &amp;&amp; <a href="#524">both</a>(<a href="#361">lp</a>, <a href="#361">rp</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#362">l</a>, <a href="#362">r</a>));
+                <span class="kw">if </span>eq {
+                    <a class="self" href="#352">self</a>.locals.insert(<a href="#361">li</a>, <a href="#361">ri</a>);
+                }
+                <a href="#362">eq</a>
+            },
+            (<span class="kw-2">&amp;</span>PatKind::Path(<span class="kw-2">ref </span>l), <span class="kw-2">&amp;</span>PatKind::Path(<span class="kw-2">ref </span>r)) =&gt; <a class="self" href="#352">self</a>.<a href="#386">eq_qpath</a>(<a href="#368">l</a>, <a href="#368">r</a>),
+            (<span class="kw-2">&amp;</span>PatKind::Lit(l), <span class="kw-2">&amp;</span>PatKind::Lit(r)) =&gt; <a class="self" href="#352">self</a>.<a href="#212">eq_expr</a>(<a href="#369">l</a>, <a href="#369">r</a>),
+            (<span class="kw-2">&amp;</span>PatKind::Tuple(l, ls), <span class="kw-2">&amp;</span>PatKind::Tuple(r, rs)) =&gt; <a href="#370">ls</a> == <a href="#370">rs</a> &amp;&amp; <a href="#530">over</a>(<a href="#370">l</a>, <a href="#370">r</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#370">l</a>, <a href="#370">r</a>)),
+            (<span class="kw-2">&amp;</span>PatKind::Range(<span class="kw-2">ref </span>ls, <span class="kw-2">ref </span>le, li), <span class="kw-2">&amp;</span>PatKind::Range(<span class="kw-2">ref </span>rs, <span class="kw-2">ref </span>re, ri)) =&gt; {
+                <a href="#524">both</a>(<a href="#371">ls</a>, <a href="#371">rs</a>, |a, b| <a class="self" href="#352">self</a>.<a href="#212">eq_expr</a>(<a href="#372">a</a>, <a href="#372">b</a>)) &amp;&amp; <a href="#524">both</a>(<a href="#371">le</a>, <a href="#371">re</a>, |a, b| <a class="self" href="#352">self</a>.<a href="#212">eq_expr</a>(<a href="#372">a</a>, <a href="#372">b</a>)) &amp;&amp; (<a href="#371">li</a> == <a href="#371">ri</a>)
+            },
+            (<span class="kw-2">&amp;</span>PatKind::Ref(le, <span class="kw-2">ref </span>lm), <span class="kw-2">&amp;</span>PatKind::Ref(re, <span class="kw-2">ref </span>rm)) =&gt; <a href="#374">lm</a> == <a href="#374">rm</a> &amp;&amp; <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#374">le</a>, <a href="#374">re</a>),
+            (<span class="kw-2">&amp;</span>PatKind::Slice(ls, <span class="kw-2">ref </span>li, le), <span class="kw-2">&amp;</span>PatKind::Slice(rs, <span class="kw-2">ref </span>ri, re)) =&gt; {
+                <a href="#530">over</a>(<a href="#375">ls</a>, <a href="#375">rs</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#376">l</a>, <a href="#376">r</a>))
+                    &amp;&amp; <a href="#530">over</a>(<a href="#375">le</a>, <a href="#375">re</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#377">l</a>, <a href="#377">r</a>))
+                    &amp;&amp; <a href="#524">both</a>(<a href="#375">li</a>, <a href="#375">ri</a>, |l, r| <a class="self" href="#352">self</a>.<a href="#352">eq_pat</a>(<a href="#378">l</a>, <a href="#378">r</a>))
+            },
+            (<span class="kw-2">&amp;</span>PatKind::Wild, <span class="kw-2">&amp;</span>PatKind::Wild) =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="attribute">#[expect(clippy::similar_names)]
+    </span><span class="kw">fn </span>eq_qpath(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>QPath&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>QPath&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#386">left</a>, <a href="#386">right</a>) {
+            (<span class="kw-2">&amp;</span>QPath::Resolved(<span class="kw-2">ref </span>lty, lpath), <span class="kw-2">&amp;</span>QPath::Resolved(<span class="kw-2">ref </span>rty, rpath)) =&gt; {
+                <a href="#524">both</a>(<a href="#388">lty</a>, <a href="#388">rty</a>, |l, r| <a class="self" href="#386">self</a>.<a href="#431">eq_ty</a>(<a href="#389">l</a>, <a href="#389">r</a>)) &amp;&amp; <a class="self" href="#386">self</a>.<a href="#399">eq_path</a>(<a href="#388">lpath</a>, <a href="#388">rpath</a>)
+            },
+            (<span class="kw-2">&amp;</span>QPath::TypeRelative(lty, lseg), <span class="kw-2">&amp;</span>QPath::TypeRelative(rty, rseg)) =&gt; {
+                <a class="self" href="#386">self</a>.<a href="#431">eq_ty</a>(<a href="#391">lty</a>, <a href="#391">rty</a>) &amp;&amp; <a class="self" href="#386">self</a>.<a href="#425">eq_path_segment</a>(<a href="#391">lseg</a>, <a href="#391">rseg</a>)
+            },
+            (<span class="kw-2">&amp;</span>QPath::LangItem(llang_item, ..), <span class="kw-2">&amp;</span>QPath::LangItem(rlang_item, ..)) =&gt; <a href="#394">llang_item</a> == <a href="#394">rlang_item</a>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>eq_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Path&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Path&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<a href="#399">left</a>.res, <a href="#399">right</a>.res) {
+            (Res::Local(l), Res::Local(r)) =&gt; <a href="#401">l</a> == <a href="#401">r</a> || <a class="self" href="#399">self</a>.locals.get(<span class="kw-2">&amp;</span><a href="#401">l</a>) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#401">r</a>),
+            (Res::Local(<span class="kw">_</span>), <span class="kw">_</span>) | (<span class="kw">_</span>, Res::Local(<span class="kw">_</span>)) =&gt; <span class="bool-val">false</span>,
+            <span class="kw">_ </span>=&gt; <a href="#530">over</a>(<a href="#399">left</a>.segments, <a href="#399">right</a>.segments, |l, r| <a class="self" href="#399">self</a>.<a href="#425">eq_path_segment</a>(<a href="#403">l</a>, <a href="#403">r</a>)),
+        }
+    }
+
+    <span class="kw">fn </span>eq_path_parameters(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>GenericArgs&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>GenericArgs&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">if </span>!(left.parenthesized || right.parenthesized) {
+            <a href="#530">over</a>(<a href="#407">left</a>.args, <a href="#407">right</a>.args, |l, r| <a class="self" href="#407">self</a>.<a href="#332">eq_generic_arg</a>(<a href="#409">l</a>, <a href="#409">r</a>)) <span class="comment">// FIXME(flip1995): may not work
+                </span>&amp;&amp; <a href="#530">over</a>(<a href="#407">left</a>.bindings, <a href="#407">right</a>.bindings, |l, r| <a class="self" href="#407">self</a>.<a href="#448">eq_type_binding</a>(<a href="#410">l</a>, <a href="#410">r</a>))
+        } <span class="kw">else if </span>left.parenthesized &amp;&amp; right.parenthesized {
+            <a href="#530">over</a>(<a href="#407">left</a>.inputs(), <a href="#407">right</a>.inputs(), |l, r| <a class="self" href="#407">self</a>.<a href="#431">eq_ty</a>(<a href="#412">l</a>, <a href="#412">r</a>))
+                &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#407">left</a>.bindings[<span class="number">0</span>].ty()), <span class="kw-2">&amp;</span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#407">right</a>.bindings[<span class="number">0</span>].ty()), |l, r| {
+                    <a class="self" href="#407">self</a>.<a href="#431">eq_ty</a>(<a href="#413">l</a>, <a href="#413">r</a>)
+                })
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>eq_path_segments(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>[PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;], right: <span class="kw-2">&amp;</span>[PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;]) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#421">left</a>.len() == <a href="#421">right</a>.len() &amp;&amp; <a href="#421">left</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">zip</a>(<a href="#421">right</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">all</a>(|(l, r)| <a class="self" href="#421">self</a>.<a href="#425">eq_path_segment</a>(<a href="#422">l</a>, <a href="#422">r</a>))
+    }
+
+    <span class="kw">pub fn </span>eq_path_segment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="comment">// The == of idents doesn&#39;t work with different contexts,
+        // we have to be explicit about hygiene
+        </span><a href="#425">left</a>.ident.name == <a href="#425">right</a>.ident.name &amp;&amp; <a href="#524">both</a>(<span class="kw-2">&amp;</span><a href="#425">left</a>.args, <span class="kw-2">&amp;</span><a href="#425">right</a>.args, |l, r| <a class="self" href="#425">self</a>.<a href="#407">eq_path_parameters</a>(<a href="#428">l</a>, <a href="#428">r</a>))
+    }
+
+    <span class="kw">pub fn </span>eq_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>Ty&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Ty&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span><a href="#431">left</a>.kind, <span class="kw-2">&amp;</span><a href="#431">right</a>.kind) {
+            (<span class="kw-2">&amp;</span>TyKind::Slice(l_vec), <span class="kw-2">&amp;</span>TyKind::Slice(r_vec)) =&gt; <a class="self" href="#431">self</a>.<a href="#431">eq_ty</a>(<a href="#433">l_vec</a>, <a href="#433">r_vec</a>),
+            (<span class="kw-2">&amp;</span>TyKind::Array(lt, ll), <span class="kw-2">&amp;</span>TyKind::Array(rt, rl)) =&gt; <a class="self" href="#431">self</a>.<a href="#431">eq_ty</a>(<a href="#434">lt</a>, <a href="#434">rt</a>) &amp;&amp; <a class="self" href="#431">self</a>.<a href="#189">eq_array_length</a>(<a href="#434">ll</a>, <a href="#434">rl</a>),
+            (<span class="kw-2">&amp;</span>TyKind::Ptr(<span class="kw-2">ref </span>l_mut), <span class="kw-2">&amp;</span>TyKind::Ptr(<span class="kw-2">ref </span>r_mut)) =&gt; {
+                <a href="#435">l_mut</a>.mutbl == <a href="#435">r_mut</a>.mutbl &amp;&amp; <a class="self" href="#431">self</a>.<a href="#431">eq_ty</a>(<a href="#435">l_mut</a>.ty, <a href="#435">r_mut</a>.ty)
+            },
+            (<span class="kw-2">&amp;</span>TyKind::Rptr(<span class="kw">_</span>, <span class="kw-2">ref </span>l_rmut), <span class="kw-2">&amp;</span>TyKind::Rptr(<span class="kw">_</span>, <span class="kw-2">ref </span>r_rmut)) =&gt; {
+                <a href="#438">l_rmut</a>.mutbl == <a href="#438">r_rmut</a>.mutbl &amp;&amp; <a class="self" href="#431">self</a>.<a href="#431">eq_ty</a>(<a href="#438">l_rmut</a>.ty, <a href="#438">r_rmut</a>.ty)
+            },
+            (<span class="kw-2">&amp;</span>TyKind::Path(<span class="kw-2">ref </span>l), <span class="kw-2">&amp;</span>TyKind::Path(<span class="kw-2">ref </span>r)) =&gt; <a class="self" href="#431">self</a>.<a href="#386">eq_qpath</a>(<a href="#441">l</a>, <a href="#441">r</a>),
+            (<span class="kw-2">&amp;</span>TyKind::Tup(l), <span class="kw-2">&amp;</span>TyKind::Tup(r)) =&gt; <a href="#530">over</a>(<a href="#442">l</a>, <a href="#442">r</a>, |l, r| <a class="self" href="#431">self</a>.<a href="#431">eq_ty</a>(<a href="#442">l</a>, <a href="#442">r</a>)),
+            (<span class="kw-2">&amp;</span>TyKind::Infer, <span class="kw-2">&amp;</span>TyKind::Infer) =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">fn </span>eq_type_binding(<span class="kw-2">&amp;mut </span><span class="self">self</span>, left: <span class="kw-2">&amp;</span>TypeBinding&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>TypeBinding&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#448">left</a>.ident.name == <a href="#448">right</a>.ident.name &amp;&amp; <a class="self" href="#448">self</a>.<a href="#431">eq_ty</a>(<a href="#448">left</a>.ty(), <a href="#448">right</a>.ty())
+    }
+}
+
+<span class="doccomment">/// Some simple reductions like `{ return }` =&gt; `return`
+</span><span class="kw">fn </span>reduce_exprkind&lt;<span class="lifetime">&#39;hir</span>&gt;(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, kind: <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ExprKind&lt;<span class="lifetime">&#39;hir</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ExprKind&lt;<span class="lifetime">&#39;hir</span>&gt; {
+    <span class="kw">if let </span>ExprKind::Block(block, <span class="kw">_</span>) = <a href="#454">kind</a> {
+        <span class="kw">match </span>(<a href="#455">block</a>.stmts, <a href="#455">block</a>.expr) {
+            <span class="comment">// From an `if let` expression without an `else` block. The arm for the implicit wild pattern is an empty
+            // block with an empty span.
+            </span>([], <span class="prelude-val">None</span>) <span class="kw">if </span><a href="#455">block</a>.span.is_empty() =&gt; <span class="kw-2">&amp;</span>ExprKind::Tup(<span class="kw-2">&amp;</span>[]),
+            <span class="comment">// `{}` =&gt; `()`
+            </span>([], <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span><a href="source.rs.html#213">snippet_opt</a>(<a href="#454">cx</a>, <a href="#455">block</a>.span) {
+                <span class="comment">// Don&#39;t reduce if there are any tokens contained in the braces
+                </span><span class="prelude-val">Some</span>(snip)
+                    <span class="kw">if </span><a href="../../rustc_lexer/fn.tokenize.html">tokenize</a>(<span class="kw-2">&amp;</span><a href="#463">snip</a>)
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|t| <a href="#465">t</a>.kind)
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|t| {
+                            !<a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                                t,
+                                TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } | TokenKind::Whitespace
+                            )
+                        })
+                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">ne</a>([TokenKind::OpenBrace, TokenKind::CloseBrace].iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">copied</a>()) =&gt;
+                {
+                    <a href="#454">kind</a>
+                },
+                <span class="kw">_ </span>=&gt; <span class="kw-2">&amp;</span>ExprKind::Tup(<span class="kw-2">&amp;</span>[]),
+            },
+            ([], <span class="prelude-val">Some</span>(expr)) =&gt; <span class="kw">match </span><a href="#478">expr</a>.kind {
+                <span class="comment">// `{ return .. }` =&gt; `return ..`
+                </span>ExprKind::Ret(..) =&gt; <span class="kw-2">&amp;</span><a href="#478">expr</a>.kind,
+                <span class="kw">_ </span>=&gt; <a href="#454">kind</a>,
+            },
+            ([stmt], <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span><a href="#483">stmt</a>.kind {
+                StmtKind::Expr(expr) | StmtKind::Semi(expr) =&gt; <span class="kw">match </span><a href="#484">expr</a>.kind {
+                    <span class="comment">// `{ return ..; }` =&gt; `return ..`
+                    </span>ExprKind::Ret(..) =&gt; <span class="kw-2">&amp;</span><a href="#484">expr</a>.kind,
+                    <span class="kw">_ </span>=&gt; <a href="#454">kind</a>,
+                },
+                <span class="kw">_ </span>=&gt; <a href="#454">kind</a>,
+            },
+            <span class="kw">_ </span>=&gt; <a href="#454">kind</a>,
+        }
+    } <span class="kw">else </span>{
+        <a href="#454">kind</a>
+    }
+}
+
+<span class="kw">fn </span>swap_binop&lt;<span class="lifetime">&#39;a</span>&gt;(
+    binop: <a href="../../rustc_hir/hir/enum.BinOpKind.html">BinOpKind</a>,
+    lhs: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Expr&lt;<span class="lifetime">&#39;a</span>&gt;,
+    rhs: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Expr&lt;<span class="lifetime">&#39;a</span>&gt;,
+) -&gt; <span class="prelude-ty">Option</span>&lt;(<a href="../../rustc_hir/hir/enum.BinOpKind.html">BinOpKind</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Expr&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Expr&lt;<span class="lifetime">&#39;a</span>&gt;)&gt; {
+    <span class="kw">match </span><a href="#499">binop</a> {
+        BinOpKind::Add | BinOpKind::Eq | BinOpKind::Ne | BinOpKind::BitAnd | BinOpKind::BitXor | BinOpKind::BitOr =&gt; {
+            <span class="prelude-val">Some</span>((<a href="#499">binop</a>, <a href="#501">rhs</a>, <a href="#500">lhs</a>))
+        },
+        BinOpKind::Lt =&gt; <span class="prelude-val">Some</span>((BinOpKind::Gt, <a href="#501">rhs</a>, <a href="#500">lhs</a>)),
+        BinOpKind::Le =&gt; <span class="prelude-val">Some</span>((BinOpKind::Ge, <a href="#501">rhs</a>, <a href="#500">lhs</a>)),
+        BinOpKind::Ge =&gt; <span class="prelude-val">Some</span>((BinOpKind::Le, <a href="#501">rhs</a>, <a href="#500">lhs</a>)),
+        BinOpKind::Gt =&gt; <span class="prelude-val">Some</span>((BinOpKind::Lt, <a href="#501">rhs</a>, <a href="#500">lhs</a>)),
+        BinOpKind::Mul <span class="comment">// Not always commutative, e.g. with matrices. See issue #5698
+        </span>| BinOpKind::Shl
+        | BinOpKind::Shr
+        | BinOpKind::Rem
+        | BinOpKind::Sub
+        | BinOpKind::Div
+        | BinOpKind::And
+        | BinOpKind::Or =&gt; <span class="prelude-val">None</span>,
+    }
+}
+
+<span class="doccomment">/// Checks if the two `Option`s are both `None` or some equal values as per
+/// `eq_fn`.
+</span><span class="kw">pub fn </span>both&lt;X&gt;(l: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;X&gt;, r: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;X&gt;, <span class="kw-2">mut </span>eq_fn: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>X, <span class="kw-2">&amp;</span>X) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#524">l</a>.as_ref()
+        .map_or_else(|| <a href="#524">r</a>.is_none(), |x| <a href="#524">r</a>.as_ref().map_or(<span class="bool-val">false</span>, |y| <a href="#524">eq_fn</a>(<a href="#526">x</a>, <a href="#526">y</a>)))
+}
+
+<span class="doccomment">/// Checks if two slices are equal as per `eq_fn`.
+</span><span class="kw">pub fn </span>over&lt;X&gt;(left: <span class="kw-2">&amp;</span>[X], right: <span class="kw-2">&amp;</span>[X], <span class="kw-2">mut </span>eq_fn: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>X, <span class="kw-2">&amp;</span>X) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <a href="#530">left</a>.len() == <a href="#530">right</a>.len() &amp;&amp; <a href="#530">left</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">zip</a>(<a href="#530">right</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">all</a>(|(x, y)| <a href="#530">eq_fn</a>(<a href="#531">x</a>, <a href="#531">y</a>))
+}
+
+<span class="doccomment">/// Counts how many elements of the slices are equal as per `eq_fn`.
+</span><span class="kw">pub fn </span>count_eq&lt;X: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>&gt;(
+    left: <span class="kw-2">&amp;mut </span><span class="kw">dyn </span>Iterator&lt;Item = X&gt;,
+    right: <span class="kw-2">&amp;mut </span><span class="kw">dyn </span>Iterator&lt;Item = X&gt;,
+    <span class="kw-2">mut </span>eq_fn: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>X, <span class="kw-2">&amp;</span>X) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+    <a href="#536">left</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">zip</a>(<a href="#537">right</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take_while</a>(|(l, r)| <a href="#538">eq_fn</a>(<a href="#540">l</a>, <a href="#540">r</a>)).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">count</a>()
+}
+
+<span class="doccomment">/// Checks if two expressions evaluate to the same value, and don&#39;t contain any side effects.
+</span><span class="kw">pub fn </span>eq_expr_value(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, left: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;, right: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    SpanlessEq::new(<a href="#544">cx</a>).<a href="#48">deny_side_effects</a>().<a href="#76">eq_expr</a>(<a href="#544">left</a>, <a href="#544">right</a>)
+}
+
+<span class="doccomment">/// Type used to hash an ast element. This is different from the `Hash` trait
+/// on ast types as this
+/// trait would consider IDs and spans.
+///
+/// All expressions kind are hashed, but some might have a weaker hash.
+</span><span class="kw">pub struct </span>SpanlessHash&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Context used to evaluate constant expressions.
+    </span>cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    maybe_typeck_results: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>TypeckResults&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    s: FxHasher,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; SpanlessHash&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>LateContext&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <a href="#561">cx</a>,
+            maybe_typeck_results: <a href="#561">cx</a>.maybe_typeck_results(),
+            s: FxHasher::default(),
+        }
+    }
+
+    <span class="kw">pub fn </span>finish(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+        <a class="self" href="#569">self</a>.s.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hasher.html">finish</a>()
+    }
+
+    <span class="kw">pub fn </span>hash_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, b: <span class="kw-2">&amp;</span>Block&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">for </span>s <span class="kw">in </span>b.stmts {
+            <span class="self">self</span>.hash_stmt(s);
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <a href="#573">b</a>.expr {
+            <a class="self" href="#573">self</a>.<a href="#586">hash_expr</a>(<a href="#578">e</a>);
+        }
+
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#573">b</a>.rules).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#573">self</a>.s);
+    }
+
+    <span class="attribute">#[expect(clippy::too_many_lines)]
+    </span><span class="kw">pub fn </span>hash_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, e: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">let </span>simple_const = <span class="self"><a href="#586">self</a>
+            </span>.maybe_typeck_results
+            .and_then(|typeck_results| <a href="consts.rs.html#214-218">constant_simple</a>(<a class="self" href="#586">self</a>.cx, <a href="#589">typeck_results</a>, <a href="#586">e</a>));
+
+        <span class="comment">// const hashing may result in the same hash as some unrelated node, so add a sort of
+        // discriminant depending on which path we&#39;re choosing next
+        </span><a href="#587">simple_const</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+        <span class="kw">if </span>simple_const.is_some() {
+            <span class="kw">return</span>;
+        }
+
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#586">e</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+
+        <span class="kw">match </span><a href="#586">e</a>.kind {
+            ExprKind::AddrOf(kind, m, e) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#601">kind</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <a href="#601">m</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#601">e</a>);
+            },
+            ExprKind::Continue(i) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(i) = <a href="#606">i</a>.label {
+                    <a class="self" href="#586">self</a>.<a href="#803">hash_name</a>(<a href="#607">i</a>.ident.name);
+                }
+            },
+            ExprKind::Assign(l, r, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#611">l</a>);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#611">r</a>);
+            },
+            ExprKind::AssignOp(<span class="kw-2">ref </span>o, l, r) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#615">o</a>.node).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#615">l</a>);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#615">r</a>);
+            },
+            ExprKind::Block(b, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#573">hash_block</a>(<a href="#620">b</a>);
+            },
+            ExprKind::Binary(op, l, r) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#623">op</a>.node).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#623">l</a>);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#623">r</a>);
+            },
+            ExprKind::Break(i, <span class="kw-2">ref </span>j) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(i) = <a href="#628">i</a>.label {
+                    <a class="self" href="#586">self</a>.<a href="#803">hash_name</a>(<a href="#629">i</a>.ident.name);
+                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(j) = <span class="kw-2">*</span><a href="#628">j</a> {
+                    <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#632">j</a>);
+                }
+            },
+            ExprKind::Box(e) | ExprKind::DropTemps(e) | ExprKind::Yield(e, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#636">e</a>);
+            },
+            ExprKind::Call(fun, args) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#639">fun</a>);
+                <a class="self" href="#586">self</a>.<a href="#797">hash_exprs</a>(<a href="#639">args</a>);
+            },
+            ExprKind::Cast(e, ty) | ExprKind::Type(e, ty) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#643">e</a>);
+                <a class="self" href="#586">self</a>.<a href="#946">hash_ty</a>(<a href="#643">ty</a>);
+            },
+            ExprKind::Closure(<span class="kw-2">&amp;</span><a href="../../rustc_hir/hir/struct.Closure.html">Closure</a> {
+                capture_clause, body, ..
+            }) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#648">capture_clause</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <span class="comment">// closures inherit TypeckResults
+                </span><a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a class="self" href="#586">self</a>.cx.tcx.hir().body(<a href="#648">body</a>).value);
+            },
+            ExprKind::Field(e, <span class="kw-2">ref </span>f) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#654">e</a>);
+                <a class="self" href="#586">self</a>.<a href="#803">hash_name</a>(<a href="#654">f</a>.name);
+            },
+            ExprKind::Index(a, i) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#658">a</a>);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#658">i</a>);
+            },
+            ExprKind::InlineAsm(asm) =&gt; {
+                <span class="kw">for </span>piece <span class="kw">in </span>asm.template {
+                    <span class="kw">match </span>piece {
+                        InlineAsmTemplatePiece::String(s) =&gt; s.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s),
+                        InlineAsmTemplatePiece::Placeholder {
+                            operand_idx,
+                            modifier,
+                            span: <span class="kw">_</span>,
+                        } =&gt; {
+                            operand_idx.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            modifier.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                        },
+                    }
+                }
+                <a href="#662">asm</a>.options.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <span class="kw">for </span>(op, _op_sp) <span class="kw">in </span>asm.operands {
+                    <span class="kw">match </span>op {
+                        InlineAsmOperand::In { reg, expr } =&gt; {
+                            reg.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            <span class="self">self</span>.hash_expr(expr);
+                        },
+                        InlineAsmOperand::Out { reg, late, expr } =&gt; {
+                            reg.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            late.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                                <span class="self">self</span>.hash_expr(expr);
+                            }
+                        },
+                        InlineAsmOperand::InOut { reg, late, expr } =&gt; {
+                            reg.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            late.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            <span class="self">self</span>.hash_expr(expr);
+                        },
+                        InlineAsmOperand::SplitInOut {
+                            reg,
+                            late,
+                            in_expr,
+                            out_expr,
+                        } =&gt; {
+                            reg.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            late.hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>.s);
+                            <span class="self">self</span>.hash_expr(in_expr);
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(out_expr) = out_expr {
+                                <span class="self">self</span>.hash_expr(out_expr);
+                            }
+                        },
+                        InlineAsmOperand::Const { anon_const } | InlineAsmOperand::SymFn { anon_const } =&gt; {
+                            <span class="self">self</span>.hash_body(anon_const.body);
+                        },
+                        InlineAsmOperand::SymStatic { path, def_id: <span class="kw">_ </span>} =&gt; <span class="self">self</span>.hash_qpath(path),
+                    }
+                }
+            },
+            ExprKind::Let(<a href="../../rustc_hir/hir/struct.Let.html">Let</a> { pat, init, ty, .. }) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#715">init</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(ty) = <a href="#715">ty</a> {
+                    <a class="self" href="#586">self</a>.<a href="#946">hash_ty</a>(<a href="#717">ty</a>);
+                }
+                <a class="self" href="#586">self</a>.<a href="#822">hash_pat</a>(<a href="#715">pat</a>);
+            },
+            ExprKind::Err =&gt; {},
+            ExprKind::Lit(<span class="kw-2">ref </span>l) =&gt; {
+                <a href="#723">l</a>.node.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+            },
+            ExprKind::Loop(b, <span class="kw-2">ref </span>i, ..) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#573">hash_block</a>(<a href="#726">b</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(i) = <span class="kw-2">*</span><a href="#726">i</a> {
+                    <a class="self" href="#586">self</a>.<a href="#803">hash_name</a>(<a href="#728">i</a>.ident.name);
+                }
+            },
+            ExprKind::If(cond, then, <span class="kw-2">ref </span>else_opt) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#732">cond</a>);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#732">then</a>);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="kw-2">*</span><a href="#732">else_opt</a> {
+                    <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#735">e</a>);
+                }
+            },
+            ExprKind::Match(e, arms, <span class="kw-2">ref </span>s) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#739">e</a>);
+
+                <span class="kw">for </span>arm <span class="kw">in </span>arms {
+                    <span class="self">self</span>.hash_pat(arm.pat);
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>e) = arm.guard {
+                        <span class="self">self</span>.hash_guard(e);
+                    }
+                    <span class="self">self</span>.hash_expr(arm.body);
+                }
+
+                <a href="#739">s</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+            },
+            ExprKind::MethodCall(path, receiver, args, <span class="kw-2">ref </span>_fn_span) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#803">hash_name</a>(<a href="#752">path</a>.ident.name);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#752">receiver</a>);
+                <a class="self" href="#586">self</a>.<a href="#797">hash_exprs</a>(<a href="#752">args</a>);
+            },
+            ExprKind::ConstBlock(<span class="kw-2">ref </span>l_id) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#1011">hash_body</a>(<a href="#757">l_id</a>.body);
+            },
+            ExprKind::Repeat(e, len) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#760">e</a>);
+                <a class="self" href="#586">self</a>.<a href="#1004">hash_array_length</a>(<a href="#760">len</a>);
+            },
+            ExprKind::Ret(<span class="kw-2">ref </span>e) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="kw-2">*</span><a href="#764">e</a> {
+                    <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#765">e</a>);
+                }
+            },
+            ExprKind::Path(<span class="kw-2">ref </span>qpath) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#807">hash_qpath</a>(<a href="#769">qpath</a>);
+            },
+            ExprKind::Struct(path, fields, <span class="kw-2">ref </span>expr) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#807">hash_qpath</a>(<a href="#772">path</a>);
+
+                <span class="kw">for </span>f <span class="kw">in </span>fields {
+                    <span class="self">self</span>.hash_name(f.ident.name);
+                    <span class="self">self</span>.hash_expr(f.expr);
+                }
+
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="kw-2">*</span><a href="#772">expr</a> {
+                    <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#780">e</a>);
+                }
+            },
+            ExprKind::Tup(tup) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#797">hash_exprs</a>(<a href="#784">tup</a>);
+            },
+            ExprKind::Array(v) =&gt; {
+                <a class="self" href="#586">self</a>.<a href="#797">hash_exprs</a>(<a href="#787">v</a>);
+            },
+            ExprKind::Unary(lop, le) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#790">lop</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#586">self</a>.s);
+                <a class="self" href="#586">self</a>.<a href="#586">hash_expr</a>(<a href="#790">le</a>);
+            },
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_exprs(<span class="kw-2">&amp;mut </span><span class="self">self</span>, e: <span class="kw-2">&amp;</span>[Expr&lt;<span class="lifetime">&#39;_</span>&gt;]) {
+        <span class="kw">for </span>e <span class="kw">in </span>e {
+            <span class="self">self</span>.hash_expr(e);
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_name(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) {
+        <a href="#803">n</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#803">self</a>.s);
+    }
+
+    <span class="kw">pub fn </span>hash_qpath(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: <span class="kw-2">&amp;</span>QPath&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#807">p</a> {
+            QPath::Resolved(<span class="kw">_</span>, path) =&gt; {
+                <a class="self" href="#807">self</a>.<a href="#889">hash_path</a>(<a href="#809">path</a>);
+            },
+            QPath::TypeRelative(<span class="kw">_</span>, path) =&gt; {
+                <a class="self" href="#807">self</a>.<a href="#803">hash_name</a>(<a href="#812">path</a>.ident.name);
+            },
+            QPath::LangItem(lang_item, ..) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#815">lang_item</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#807">self</a>.s);
+            },
+        }
+        <span class="comment">// self.maybe_typeck_results.unwrap().qpath_res(p, id).hash(&amp;mut self.s);
+    </span>}
+
+    <span class="kw">pub fn </span>hash_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pat: <span class="kw-2">&amp;</span>Pat&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#822">pat</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+        <span class="kw">match </span><a href="#822">pat</a>.kind {
+            PatKind::Binding(BindingAnnotation(by_ref, mutability), <span class="kw">_</span>, <span class="kw">_</span>, pat) =&gt; {
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#825">by_ref</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#825">mutability</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(pat) = <a href="#825">pat</a> {
+                    <a class="self" href="#822">self</a>.<a href="#822">hash_pat</a>(<a href="#828">pat</a>);
+                }
+            },
+            PatKind::Box(pat) =&gt; <a class="self" href="#822">self</a>.<a href="#822">hash_pat</a>(<a href="#832">pat</a>),
+            PatKind::Lit(expr) =&gt; <a class="self" href="#822">self</a>.<a href="#586">hash_expr</a>(<a href="#833">expr</a>),
+            PatKind::Or(pats) =&gt; {
+                <span class="kw">for </span>pat <span class="kw">in </span>pats {
+                    <span class="self">self</span>.hash_pat(pat);
+                }
+            },
+            PatKind::Path(<span class="kw-2">ref </span>qpath) =&gt; <a class="self" href="#822">self</a>.<a href="#807">hash_qpath</a>(<a href="#839">qpath</a>),
+            PatKind::Range(s, e, i) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <a href="#840">s</a> {
+                    <a class="self" href="#822">self</a>.<a href="#586">hash_expr</a>(<a href="#841">s</a>);
+                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <a href="#840">e</a> {
+                    <a class="self" href="#822">self</a>.<a href="#586">hash_expr</a>(<a href="#844">e</a>);
+                }
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#840">i</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+            },
+            PatKind::Ref(pat, mu) =&gt; {
+                <a class="self" href="#822">self</a>.<a href="#822">hash_pat</a>(<a href="#849">pat</a>);
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#849">mu</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+            },
+            PatKind::Slice(l, m, r) =&gt; {
+                <span class="kw">for </span>pat <span class="kw">in </span>l {
+                    <span class="self">self</span>.hash_pat(pat);
+                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(pat) = <a href="#853">m</a> {
+                    <a class="self" href="#822">self</a>.<a href="#822">hash_pat</a>(<a href="#857">pat</a>);
+                }
+                <span class="kw">for </span>pat <span class="kw">in </span>r {
+                    <span class="self">self</span>.hash_pat(pat);
+                }
+            },
+            PatKind::Struct(<span class="kw-2">ref </span>qpath, fields, e) =&gt; {
+                <a class="self" href="#822">self</a>.<a href="#807">hash_qpath</a>(<a href="#864">qpath</a>);
+                <span class="kw">for </span>f <span class="kw">in </span>fields {
+                    <span class="self">self</span>.hash_name(f.ident.name);
+                    <span class="self">self</span>.hash_pat(f.pat);
+                }
+                <a href="#864">e</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+            },
+            PatKind::Tuple(pats, e) =&gt; {
+                <span class="kw">for </span>pat <span class="kw">in </span>pats {
+                    <span class="self">self</span>.hash_pat(pat);
+                }
+                <a href="#872">e</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+            },
+            PatKind::TupleStruct(<span class="kw-2">ref </span>qpath, pats, e) =&gt; {
+                <a class="self" href="#822">self</a>.<a href="#807">hash_qpath</a>(<a href="#878">qpath</a>);
+                <span class="kw">for </span>pat <span class="kw">in </span>pats {
+                    <span class="self">self</span>.hash_pat(pat);
+                }
+                <a href="#878">e</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#822">self</a>.s);
+            },
+            PatKind::Wild =&gt; {},
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>Path&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><a href="#889">path</a>.res {
+            <span class="comment">// constant hash since equality is dependant on inter-expression context
+            // e.g. The expressions `if let Some(x) = foo() {}` and `if let Some(y) = foo() {}` are considered equal
+            // even though the binding names are different and they have different `HirId`s.
+            </span>Res::Local(<span class="kw">_</span>) =&gt; <span class="number">1_usize</span>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#889">self</a>.s),
+            <span class="kw">_ </span>=&gt; {
+                <span class="kw">for </span>seg <span class="kw">in </span>path.segments {
+                    <span class="self">self</span>.hash_name(seg.ident.name);
+                    <span class="self">self</span>.hash_generic_args(seg.args().args);
+                }
+            },
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, b: <span class="kw-2">&amp;</span>Stmt&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#904">b</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#904">self</a>.s);
+
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a href="#904">b</a>.kind {
+            StmtKind::Local(local) =&gt; {
+                <a class="self" href="#904">self</a>.<a href="#822">hash_pat</a>(<a href="#908">local</a>.pat);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(init) = <a href="#908">local</a>.init {
+                    <a class="self" href="#904">self</a>.<a href="#586">hash_expr</a>(<a href="#910">init</a>);
+                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(els) = <a href="#908">local</a>.els {
+                    <a class="self" href="#904">self</a>.<a href="#573">hash_block</a>(<a href="#913">els</a>);
+                }
+            },
+            StmtKind::Item(..) =&gt; {},
+            StmtKind::Expr(expr) | StmtKind::Semi(expr) =&gt; {
+                <a class="self" href="#904">self</a>.<a href="#586">hash_expr</a>(<a href="#918">expr</a>);
+            },
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_guard(<span class="kw-2">&amp;mut </span><span class="self">self</span>, g: <span class="kw-2">&amp;</span>Guard&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><a href="#924">g</a> {
+            Guard::If(expr) | Guard::IfLet(<a href="../../rustc_hir/hir/struct.Let.html">Let</a> { init: expr, .. }) =&gt; {
+                <a class="self" href="#924">self</a>.<a href="#586">hash_expr</a>(<a href="#926">expr</a>);
+            },
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_lifetime(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lifetime: <span class="kw-2">&amp;</span><a href="../../rustc_hir/hir/struct.Lifetime.html">Lifetime</a>) {
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#932">lifetime</a>.name).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#932">self</a>.s);
+        <span class="kw">if let </span>LifetimeName::Param(param_id, <span class="kw-2">ref </span>name) = <a href="#932">lifetime</a>.name {
+            std::mem::discriminant(<a href="#934">name</a>).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#932">self</a>.s);
+            <a href="#934">param_id</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#932">self</a>.s);
+            <span class="kw">match </span><a href="#934">name</a> {
+                ParamName::Plain(<span class="kw-2">ref </span>ident) =&gt; {
+                    <a href="#938">ident</a>.name.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#932">self</a>.s);
+                },
+                ParamName::Fresh | ParamName::Error =&gt; {},
+            }
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: <span class="kw-2">&amp;</span>Ty&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#946">ty</a>.kind).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#946">self</a>.s);
+        <a class="self" href="#946">self</a>.<a href="#951">hash_tykind</a>(<span class="kw-2">&amp;</span><a href="#946">ty</a>.kind);
+    }
+
+    <span class="kw">pub fn </span>hash_tykind(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: <span class="kw-2">&amp;</span>TyKind&lt;<span class="lifetime">&#39;_</span>&gt;) {
+        <span class="kw">match </span><a href="#951">ty</a> {
+            TyKind::Slice(ty) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#946">hash_ty</a>(<a href="#953">ty</a>);
+            },
+            <span class="kw-2">&amp;</span>TyKind::Array(ty, len) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#946">hash_ty</a>(<a href="#956">ty</a>);
+                <a class="self" href="#951">self</a>.<a href="#1004">hash_array_length</a>(<a href="#956">len</a>);
+            },
+            TyKind::Ptr(<span class="kw-2">ref </span>mut_ty) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#946">hash_ty</a>(<a href="#960">mut_ty</a>.ty);
+                <a href="#960">mut_ty</a>.mutbl.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+            },
+            TyKind::Rptr(lifetime, <span class="kw-2">ref </span>mut_ty) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#932">hash_lifetime</a>(<span class="kw-2">*</span><a href="#964">lifetime</a>);
+                <a class="self" href="#951">self</a>.<a href="#946">hash_ty</a>(<a href="#964">mut_ty</a>.ty);
+                <a href="#964">mut_ty</a>.mutbl.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+            },
+            TyKind::BareFn(bfn) =&gt; {
+                <a href="#969">bfn</a>.unsafety.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+                <a href="#969">bfn</a>.abi.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+                <span class="kw">for </span>arg <span class="kw">in </span>bfn.decl.inputs {
+                    <span class="self">self</span>.hash_ty(arg);
+                }
+                std::mem::discriminant(<span class="kw-2">&amp;</span><a href="#969">bfn</a>.decl.output).<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+                <span class="kw">match </span><a href="#969">bfn</a>.decl.output {
+                    FnRetTy::DefaultReturn(<span class="kw">_</span>) =&gt; {},
+                    FnRetTy::Return(ty) =&gt; {
+                        <a class="self" href="#951">self</a>.<a href="#946">hash_ty</a>(<a href="#978">ty</a>);
+                    },
+                }
+                <a href="#969">bfn</a>.decl.c_variadic.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+            },
+            TyKind::Tup(ty_list) =&gt; {
+                <span class="kw">for </span>ty <span class="kw">in </span><span class="kw-2">*</span>ty_list {
+                    <span class="self">self</span>.hash_ty(ty);
+                }
+            },
+            TyKind::Path(<span class="kw-2">ref </span>qpath) =&gt; <a class="self" href="#951">self</a>.<a href="#807">hash_qpath</a>(<a href="#989">qpath</a>),
+            TyKind::OpaqueDef(<span class="kw">_</span>, arg_list, in_trait) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#1018">hash_generic_args</a>(<a href="#990">arg_list</a>);
+                <a href="#990">in_trait</a>.<a href="https://doc.rust-lang.org/nightly/core/hash/trait.Hash.html">hash</a>(<span class="kw-2">&amp;mut </span><a class="self" href="#951">self</a>.s);
+            },
+            TyKind::TraitObject(<span class="kw">_</span>, lifetime, <span class="kw">_</span>) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#932">hash_lifetime</a>(<span class="kw-2">*</span><a href="#994">lifetime</a>);
+            },
+            TyKind::Typeof(anon_const) =&gt; {
+                <a class="self" href="#951">self</a>.<a href="#1011">hash_body</a>(<a href="#997">anon_const</a>.body);
+            },
+            TyKind::Err | TyKind::Infer | TyKind::Never =&gt; {},
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_array_length(<span class="kw-2">&amp;mut </span><span class="self">self</span>, length: <a href="../../rustc_hir/hir/enum.ArrayLen.html">ArrayLen</a>) {
+        <span class="kw">match </span><a href="#1004">length</a> {
+            ArrayLen::Infer(..) =&gt; {},
+            ArrayLen::Body(anon_const) =&gt; <a class="self" href="#1004">self</a>.<a href="#1011">hash_body</a>(<a href="#1007">anon_const</a>.body),
+        }
+    }
+
+    <span class="kw">pub fn </span>hash_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, body_id: <a href="../../rustc_hir/hir/struct.BodyId.html">BodyId</a>) {
+        <span class="comment">// swap out TypeckResults when hashing a body
+        </span><span class="kw">let </span>old_maybe_typeck_results = <a class="self" href="#1011">self</a>.maybe_typeck_results.replace(<a class="self" href="#1011">self</a>.cx.tcx.typeck_body(<a href="#1011">body_id</a>));
+        <a class="self" href="#1011">self</a>.<a href="#586">hash_expr</a>(<a class="self" href="#1011">self</a>.cx.tcx.hir().body(<a href="#1011">body_id</a>).value);
+        <a class="self" href="#1011">self</a>.maybe_typeck_results = <a href="#1013">old_maybe_typeck_results</a>;
+    }
+
+    <span class="kw">fn </span>hash_generic_args(<span class="kw-2">&amp;mut </span><span class="self">self</span>, arg_list: <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;_</span>&gt;]) {
+        <span class="kw">for </span>arg <span class="kw">in </span>arg_list {
+            <span class="kw">match </span><span class="kw-2">*</span>arg {
+                GenericArg::Lifetime(l) =&gt; <span class="self">self</span>.hash_lifetime(l),
+                GenericArg::Type(ty) =&gt; <span class="self">self</span>.hash_ty(ty),
+                GenericArg::Const(<span class="kw-2">ref </span>ca) =&gt; <span class="self">self</span>.hash_body(ca.value.body),
+                GenericArg::Infer(<span class="kw-2">ref </span>inf) =&gt; <span class="self">self</span>.hash_ty(<span class="kw-2">&amp;</span>inf.to_ty()),
+            }
+        }
+    }
+}
+
+<span class="kw">pub fn </span>hash_stmt(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, s: <span class="kw-2">&amp;</span>Stmt&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>h = SpanlessHash::new(<a href="#1030">cx</a>);
+    <a href="#1031">h</a>.<a href="#904">hash_stmt</a>(<a href="#1030">s</a>);
+    <a href="#1031">h</a>.<a href="#569">finish</a>()
+}
+
+<span class="kw">pub fn </span>hash_expr(cx: <span class="kw-2">&amp;</span>LateContext&lt;<span class="lifetime">&#39;_</span>&gt;, e: <span class="kw-2">&amp;</span>Expr&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a> {
+    <span class="kw">let </span><span class="kw-2">mut </span>h = SpanlessHash::new(<a href="#1036">cx</a>);
+    <a href="#1037">h</a>.<a href="#586">hash_expr</a>(<a href="#1036">e</a>);
+    <a href="#1037">h</a>.<a href="#569">finish</a>()
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="clippy_utils" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

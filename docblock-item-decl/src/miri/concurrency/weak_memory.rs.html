@@ -1,0 +1,1262 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/tools/miri/src/concurrency/weak_memory.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>weak_memory.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../miri/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../miri/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Implementation of C++11-consistent weak memory emulation using store buffers
+//! based on Dynamic Race Detection for C++ (&quot;the paper&quot;):
+//! &lt;https://www.doc.ic.ac.uk/~afd/homepages/papers/pdfs/2017/POPL.pdf&gt;
+//!
+//! This implementation will never generate weak memory behaviours forbidden by the C++11 model,
+//! but it is incapable of producing all possible weak behaviours allowed by the model. There are
+//! certain weak behaviours observable on real hardware but not while using this.
+//!
+//! Note that this implementation does not fully take into account of C++20&#39;s memory model revision to SC accesses
+//! and fences introduced by P0668 (&lt;https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0668r5.html&gt;).
+//! This implementation is not fully correct under the revised C++20 model and may generate behaviours C++20
+//! disallows (&lt;https://github.com/rust-lang/miri/issues/2301&gt;).
+//!
+//! A modification is made to the paper&#39;s model to partially address C++20 changes.
+//! Specifically, if an SC load reads from an atomic store of any ordering, then a later SC load cannot read from
+//! an earlier store in the location&#39;s modification order. This is to prevent creating a backwards S edge from the second
+//! load to the first, as a result of C++20&#39;s coherence-ordered before rules.
+//!
+//! Rust follows the C++20 memory model (except for the Consume ordering and some operations not performable through C++&#39;s
+//! std::atomic&lt;T&gt; API). It is therefore possible for this implementation to generate behaviours never observable when the
+//! same program is compiled and run natively. Unfortunately, no literature exists at the time of writing which proposes
+//! an implementable and C++20-compatible relaxed memory model that supports all atomic operation existing in Rust. The closest one is
+//! A Promising Semantics for Relaxed-Memory Concurrency by Jeehoon Kang et al. (&lt;https://www.cs.tau.ac.il/~orilahav/papers/popl17.pdf&gt;)
+//! However, this model lacks SC accesses and is therefore unusable by Miri (SC accesses are everywhere in library code).
+//!
+//! If you find anything that proposes a relaxed memory model that is C++20-consistent, supports all orderings Rust&#39;s atomic accesses
+//! and fences accept, and is implementable (with operational semanitcs), please open a GitHub issue!
+//!
+//! One characteristic of this implementation, in contrast to some other notable operational models such as ones proposed in
+//! Taming Release-Acquire Consistency by Ori Lahav et al. (&lt;https://plv.mpi-sws.org/sra/paper.pdf&gt;) or Promising Semantics noted above,
+//! is that this implementation does not require each thread to hold an isolated view of the entire memory. Here, store buffers are per-location
+//! and shared across all threads. This is more memory efficient but does require store elements (representing writes to a location) to record
+//! information about reads, whereas in the other two models it is the other way round: reads points to the write it got its value from.
+//! Additionally, writes in our implementation do not have globally unique timestamps attached. In the other two models this timestamp is
+//! used to make sure a value in a thread&#39;s view is not overwritten by a write that occured earlier than the one in the existing view.
+//! In our implementation, this is detected using read information attached to store elements, as there is no data strucutre representing reads.
+//!
+//! The C++ memory model is built around the notion of an &#39;atomic object&#39;, so it would be natural
+//! to attach store buffers to atomic objects. However, Rust follows LLVM in that it only has
+//! &#39;atomic accesses&#39;. Therefore Miri cannot know when and where atomic &#39;objects&#39; are being
+//! created or destroyed, to manage its store buffers. Instead, we hence lazily create an
+//! atomic object on the first atomic access to a given region, and we destroy that object
+//! on the next non-atomic or imperfectly overlapping atomic access to that region.
+//! These lazy (de)allocations happen in memory_accessed() on non-atomic accesses, and
+//! get_or_create_store_buffer() on atomic accesses. This mostly works well, but it does
+//! lead to some issues (&lt;https://github.com/rust-lang/miri/issues/2164&gt;).
+//!
+//! One consequence of this difference is that safe/sound Rust allows for more operations on atomic locations
+//! than the C++20 atomic API was intended to allow, such as non-atomically accessing
+//! a previously atomically accessed location, or accessing previously atomically accessed locations with a differently sized operation
+//! (such as accessing the top 16 bits of an AtomicU32). These senarios are generally undiscussed in formalisations of C++ memory model.
+//! In Rust, these operations can only be done through a `&amp;mut AtomicFoo` reference or one derived from it, therefore these operations
+//! can only happen after all previous accesses on the same locations. This implementation is adapted to allow these operations.
+//! A mixed atomicity read that races with writes, or a write that races with reads or writes will still cause UBs to be thrown.
+//! Mixed size atomic accesses must not race with any other atomic access, whether read or write, or a UB will be thrown.
+//! You can refer to test cases in weak_memory/extra_cpp.rs and weak_memory/extra_cpp_unsafe.rs for examples of these operations.
+
+</span><span class="comment">// Our and the author&#39;s own implementation (tsan11) of the paper have some deviations from the provided operational semantics in §5.3:
+// 1. In the operational semantics, store elements keep a copy of the atomic object&#39;s vector clock (AtomicCellClocks::sync_vector in miri),
+// but this is not used anywhere so it&#39;s omitted here.
+//
+// 2. In the operational semantics, each store element keeps the timestamp of a thread when it loads from the store.
+// If the same thread loads from the same store element multiple times, then the timestamps at all loads are saved in a list of load elements.
+// This is not necessary as later loads by the same thread will always have greater timetstamp values, so we only need to record the timestamp of the first
+// load by each thread. This optimisation is done in tsan11
+// (https://github.com/ChrisLidbury/tsan11/blob/ecbd6b81e9b9454e01cba78eb9d88684168132c7/lib/tsan/rtl/tsan_relaxed.h#L35-L37)
+// and here.
+//
+// 3. §4.5 of the paper wants an SC store to mark all existing stores in the buffer that happens before it
+// as SC. This is not done in the operational semantics but implemented correctly in tsan11
+// (https://github.com/ChrisLidbury/tsan11/blob/ecbd6b81e9b9454e01cba78eb9d88684168132c7/lib/tsan/rtl/tsan_relaxed.cc#L160-L167)
+// and here.
+//
+// 4. W_SC ; R_SC case requires the SC load to ignore all but last store maked SC (stores not marked SC are not
+// affected). But this rule is applied to all loads in ReadsFromSet from the paper (last two lines of code), not just SC load.
+// This is implemented correctly in tsan11
+// (https://github.com/ChrisLidbury/tsan11/blob/ecbd6b81e9b9454e01cba78eb9d88684168132c7/lib/tsan/rtl/tsan_relaxed.cc#L295)
+// and here.
+
+</span><span class="kw">use </span>std::{
+    cell::{<a href="https://doc.rust-lang.org/nightly/core/cell/struct.Ref.html">Ref</a>, <a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefCell.html">RefCell</a>},
+    <a href="https://doc.rust-lang.org/nightly/alloc/collections/vec_deque/struct.VecDeque.html">collections::VecDeque</a>,
+};
+
+<span class="kw">use </span>rustc_const_eval::interpret::{<a href="../../../miri/fn.alloc_range.html">alloc_range</a>, <a href="../../../miri/struct.AllocRange.html">AllocRange</a>, <a href="../../../miri/type.InterpResult.html">InterpResult</a>, <a href="../../../miri/struct.MPlaceTy.html">MPlaceTy</a>, <a href="../../../miri/enum.Scalar.html">Scalar</a>};
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+
+<span class="kw">use crate</span>::<span class="kw-2">*</span>;
+
+<span class="kw">use super</span>::{
+    data_race::{<a href="data_race.rs.html#1189">GlobalState</a> <span class="kw">as </span>DataRaceState, <a href="data_race.rs.html#103">ThreadClockSet</a>},
+    range_object_map::{<a href="range_object_map.rs.html#27">AccessType</a>, <a href="range_object_map.rs.html#22">RangeObjectMap</a>},
+    vector_clock::{<a href="vector_clock.rs.html#58">VClock</a>, <a href="vector_clock.rs.html#45">VTimestamp</a>, <a href="vector_clock.rs.html#9">VectorIdx</a>},
+};
+
+<span class="kw">pub type </span>AllocExtra = <a href="#105">StoreBufferAlloc</a>;
+
+<span class="comment">// Each store buffer must be bounded otherwise it will grow indefinitely.
+// However, bounding the store buffer means restricting the amount of weak
+// behaviours observable. The author picked 128 as a good tradeoff
+// so we follow them here.
+</span><span class="kw">const </span>STORE_BUFFER_LIMIT: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">128</span>;
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>StoreBufferAlloc {
+    <span class="doccomment">/// Store buffer of each atomic object in this allocation
+    </span><span class="comment">// Behind a RefCell because we need to allocate/remove on read access
+    </span>store_buffers: RefCell&lt;RangeObjectMap&lt;<a href="#112">StoreBuffer</a>&gt;&gt;,
+}
+
+<span class="attribute">#[derive(Debug, Clone, PartialEq, Eq)]
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>StoreBuffer {
+    <span class="comment">// Stores to this location in modification order
+    </span>buffer: VecDeque&lt;<a href="#125">StoreElement</a>&gt;,
+}
+
+<span class="doccomment">/// Whether a load returned the latest value or not.
+</span><span class="attribute">#[derive(PartialEq, Eq)]
+</span><span class="kw">enum </span>LoadRecency {
+    Latest,
+    Outdated,
+}
+
+<span class="attribute">#[derive(Debug, Clone, PartialEq, Eq)]
+</span><span class="kw">struct </span>StoreElement {
+    <span class="doccomment">/// The identifier of the vector index, corresponding to a thread
+    /// that performed the store.
+    </span>store_index: <a href="vector_clock.rs.html#9">VectorIdx</a>,
+
+    <span class="doccomment">/// Whether this store is SC.
+    </span>is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+
+    <span class="doccomment">/// The timestamp of the storing thread when it performed the store
+    </span>timestamp: <a href="vector_clock.rs.html#45">VTimestamp</a>,
+    <span class="doccomment">/// The value of this store
+    </span><span class="comment">// FIXME: this means the store must be fully initialized;
+    // we will have to change this if we want to support atomics on
+    // (partially) uninitialized data.
+    </span>val: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+
+    <span class="doccomment">/// Metadata about loads from this store element,
+    /// behind a RefCell to keep load op take &amp;self
+    </span>load_info: RefCell&lt;<a href="#147">LoadInfo</a>&gt;,
+}
+
+<span class="attribute">#[derive(Debug, Clone, PartialEq, Eq, Default)]
+</span><span class="kw">struct </span>LoadInfo {
+    <span class="doccomment">/// Timestamp of first loads from this store element by each thread
+    </span>timestamps: FxHashMap&lt;<a href="vector_clock.rs.html#9">VectorIdx</a>, <a href="vector_clock.rs.html#45">VTimestamp</a>&gt;,
+    <span class="doccomment">/// Whether this store element has been read by an SC load
+    </span>sc_loaded: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">impl </span><a href="#105">StoreBufferAlloc</a> {
+    <span class="kw">pub fn </span>new_allocation() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ store_buffers: RefCell::new(RangeObjectMap::new()) }
+    }
+
+    <span class="doccomment">/// Checks if the range imperfectly overlaps with existing buffers
+    /// Used to determine if mixed-size atomic accesses
+    </span><span class="kw">fn </span>is_overlapping(<span class="kw-2">&amp;</span><span class="self">self</span>, range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">let </span>buffers = <a class="self" href="#161">self</a>.store_buffers.borrow();
+        <span class="kw">let </span>access_type = <a href="#162">buffers</a>.<a href="range_object_map.rs.html#73">access_type</a>(<a href="#161">range</a>);
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(access_type, AccessType::ImperfectlyOverlapping(<span class="kw">_</span>))
+    }
+
+    <span class="doccomment">/// When a non-atomic access happens on a location that has been atomically accessed
+    /// before without data race, we can determine that the non-atomic access fully happens
+    /// after all the prior atomic accesses so the location no longer needs to exhibit
+    /// any weak memory behaviours until further atomic accesses.
+    </span><span class="kw">pub fn </span>memory_accessed(<span class="kw-2">&amp;</span><span class="self">self</span>, range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>, global: <span class="kw-2">&amp;</span><a href="data_race.rs.html#1189">DataRaceState</a>) {
+        <span class="kw">if </span>!global.ongoing_action_data_race_free() {
+            <span class="kw">let </span><span class="kw-2">mut </span>buffers = <a class="self" href="#171">self</a>.store_buffers.borrow_mut();
+            <span class="kw">let </span>access_type = <a href="#173">buffers</a>.<a href="range_object_map.rs.html#73">access_type</a>(<a href="#171">range</a>);
+            <span class="kw">match </span><a href="#174">access_type</a> {
+                <a href="range_object_map.rs.html#29">AccessType::PerfectlyOverlapping</a>(pos) =&gt; {
+                    <a href="#173">buffers</a>.<a href="range_object_map.rs.html#132">remove_from_pos</a>(<a href="#176">pos</a>);
+                }
+                <a href="range_object_map.rs.html#33">AccessType::ImperfectlyOverlapping</a>(pos_range) =&gt; {
+                    <a href="#173">buffers</a>.<a href="range_object_map.rs.html#128">remove_pos_range</a>(<a href="#179">pos_range</a>);
+                }
+                <a href="range_object_map.rs.html#31">AccessType::Empty</a>(<span class="kw">_</span>) =&gt; {
+                    <span class="comment">// The range had no weak behaivours attached, do nothing
+                </span>}
+            }
+        }
+    }
+
+    <span class="doccomment">/// Gets a store buffer associated with an atomic object in this allocation,
+    /// or creates one with the specified initial value if no atomic object exists yet.
+    </span><span class="kw">fn </span>get_or_create_store_buffer&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+        init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Ref&lt;<span class="lifetime">&#39;_</span>, <a href="#112">StoreBuffer</a>&gt;&gt; {
+        <span class="kw">let </span>access_type = <a class="self" href="#192">self</a>.store_buffers.borrow().<a href="range_object_map.rs.html#73">access_type</a>(<a href="#193">range</a>);
+        <span class="kw">let </span>pos = <span class="kw">match </span><a href="#196">access_type</a> {
+            <a href="range_object_map.rs.html#29">AccessType::PerfectlyOverlapping</a>(pos) =&gt; <a href="#198">pos</a>,
+            <a href="range_object_map.rs.html#31">AccessType::Empty</a>(pos) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>buffers = <a class="self" href="#192">self</a>.store_buffers.borrow_mut();
+                <a href="#200">buffers</a>.<a href="range_object_map.rs.html#116">insert_at_pos</a>(<a href="#199">pos</a>, <a href="#193">range</a>, StoreBuffer::new(<a href="#194">init</a>));
+                <a href="#199">pos</a>
+            }
+            <a href="range_object_map.rs.html#33">AccessType::ImperfectlyOverlapping</a>(pos_range) =&gt; {
+                <span class="comment">// Once we reach here we would&#39;ve already checked that this access is not racy
+                </span><span class="kw">let </span><span class="kw-2">mut </span>buffers = <a class="self" href="#192">self</a>.store_buffers.borrow_mut();
+                <a href="#206">buffers</a>.<a href="range_object_map.rs.html#128">remove_pos_range</a>(<a href="#204">pos_range</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>());
+                <a href="#206">buffers</a>.<a href="range_object_map.rs.html#116">insert_at_pos</a>(<a href="#204">pos_range</a>.start, <a href="#193">range</a>, StoreBuffer::new(<a href="#194">init</a>));
+                <a href="#204">pos_range</a>.start
+            }
+        };
+        <span class="prelude-val">Ok</span>(Ref::map(<a class="self" href="#192">self</a>.store_buffers.borrow(), |buffer| <span class="kw-2">&amp;</span><a href="#212">buffer</a>[<a href="#197">pos</a>]))
+    }
+
+    <span class="doccomment">/// Gets a mutable store buffer associated with an atomic object in this allocation
+    </span><span class="kw">fn </span>get_or_create_store_buffer_mut&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        range: <a href="../../../miri/struct.AllocRange.html">AllocRange</a>,
+        init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="kw-2">&amp;mut </span><a href="#112">StoreBuffer</a>&gt; {
+        <span class="kw">let </span>buffers = <a class="self" href="#217">self</a>.store_buffers.get_mut();
+        <span class="kw">let </span>access_type = <a href="#221">buffers</a>.<a href="range_object_map.rs.html#73">access_type</a>(<a href="#218">range</a>);
+        <span class="kw">let </span>pos = <span class="kw">match </span><a href="#222">access_type</a> {
+            <a href="range_object_map.rs.html#29">AccessType::PerfectlyOverlapping</a>(pos) =&gt; <a href="#224">pos</a>,
+            <a href="range_object_map.rs.html#31">AccessType::Empty</a>(pos) =&gt; {
+                <a href="#221">buffers</a>.<a href="range_object_map.rs.html#116">insert_at_pos</a>(<a href="#225">pos</a>, <a href="#218">range</a>, StoreBuffer::new(<a href="#219">init</a>));
+                <a href="#225">pos</a>
+            }
+            <a href="range_object_map.rs.html#33">AccessType::ImperfectlyOverlapping</a>(pos_range) =&gt; {
+                <a href="#221">buffers</a>.<a href="range_object_map.rs.html#128">remove_pos_range</a>(<a href="#229">pos_range</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>());
+                <a href="#221">buffers</a>.<a href="range_object_map.rs.html#116">insert_at_pos</a>(<a href="#229">pos_range</a>.start, <a href="#218">range</a>, StoreBuffer::new(<a href="#219">init</a>));
+                <a href="#229">pos_range</a>.start
+            }
+        };
+        <span class="prelude-val">Ok</span>(<span class="kw-2">&amp;mut </span><a href="#221">buffers</a>[<a href="#223">pos</a>])
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; <a href="#112">StoreBuffer</a> {
+    <span class="kw">fn </span>new(init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = VecDeque::new();
+        <a href="#241">buffer</a>.reserve(<a href="#102">STORE_BUFFER_LIMIT</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>ret = <span class="self">Self </span>{ <a href="#241">buffer</a> };
+        <span class="kw">let </span>store_elem = <a href="#125">StoreElement</a> {
+            <span class="comment">// The thread index and timestamp of the initialisation write
+            // are never meaningfully used, so it&#39;s fine to leave them as 0
+            </span>store_index: VectorIdx::from(<span class="number">0</span>),
+            timestamp: <span class="number">0</span>,
+            val: <a href="#240">init</a>,
+            is_seqcst: <span class="bool-val">false</span>,
+            load_info: RefCell::new(LoadInfo::default()),
+        };
+        <a href="#243">ret</a>.buffer.push_back(<a href="#244">store_elem</a>);
+        <a href="#243">ret</a>
+    }
+
+    <span class="doccomment">/// Reads from the last store in modification order
+    </span><span class="kw">fn </span>read_from_last_store(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        global: <span class="kw-2">&amp;</span><a href="data_race.rs.html#1189">DataRaceState</a>,
+        thread_mgr: <span class="kw-2">&amp;</span>ThreadManager&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) {
+        <span class="kw">let </span>store_elem = <a class="self" href="#259">self</a>.buffer.back();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(store_elem) = <a href="#264">store_elem</a> {
+            <span class="kw">let </span>(index, clocks) = <a href="#260">global</a>.<a href="data_race.rs.html#1552-1555">current_thread_state</a>(<a href="#261">thread_mgr</a>);
+            <a href="#265">store_elem</a>.<a href="#446-451">load_impl</a>(<a href="#266">index</a>, <span class="kw-2">&amp;</span><a href="#266">clocks</a>, <a href="#262">is_seqcst</a>);
+        }
+    }
+
+    <span class="kw">fn </span>buffered_read(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        global: <span class="kw-2">&amp;</span><a href="data_race.rs.html#1189">DataRaceState</a>,
+        thread_mgr: <span class="kw-2">&amp;</span>ThreadManager&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        rng: <span class="kw-2">&amp;mut </span>(<span class="kw">impl </span><a href="https://rust-random.github.io/rand/rand/rng/trait.Rng.html">rand::Rng</a> + <span class="question-mark">?</span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>),
+        validate: <span class="kw">impl </span>FnOnce() -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, (Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;, <a href="#119">LoadRecency</a>)&gt; {
+        <span class="comment">// Having a live borrow to store_buffer while calling validate_atomic_load is fine
+        // because the race detector doesn&#39;t touch store_buffer
+
+        </span><span class="kw">let </span>(store_elem, recency) = {
+            <span class="comment">// The `clocks` we got here must be dropped before calling validate_atomic_load
+            // as the race detector will update it
+            </span><span class="kw">let </span>(.., clocks) = <a href="#273">global</a>.<a href="data_race.rs.html#1552-1555">current_thread_state</a>(<a href="#274">thread_mgr</a>);
+            <span class="comment">// Load from a valid entry in the store buffer
+            </span><a class="self" href="#272">self</a>.<a href="#316-321">fetch_store</a>(<a href="#275">is_seqcst</a>, <span class="kw-2">&amp;</span><a href="#285">clocks</a>, <span class="kw-2">&amp;mut *</span><a href="#276">rng</a>)
+        };
+
+        <span class="comment">// Unlike in buffered_atomic_write, thread clock updates have to be done
+        // after we&#39;ve picked a store element from the store buffer, as presented
+        // in ATOMIC LOAD rule of the paper. This is because fetch_store
+        // requires access to ThreadClockSet.clock, which is updated by the race detector
+        </span>validate()<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(index, clocks) = <a href="#273">global</a>.<a href="data_race.rs.html#1552-1555">current_thread_state</a>(<a href="#274">thread_mgr</a>);
+        <span class="kw">let </span>loaded = <a href="#282">store_elem</a>.<a href="#446-451">load_impl</a>(<a href="#296">index</a>, <span class="kw-2">&amp;</span><a href="#296">clocks</a>, <a href="#275">is_seqcst</a>);
+        <span class="prelude-val">Ok</span>((<a href="#297">loaded</a>, <a href="#282">recency</a>))
+    }
+
+    <span class="kw">fn </span>buffered_write(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        val: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        global: <span class="kw-2">&amp;</span><a href="data_race.rs.html#1189">DataRaceState</a>,
+        thread_mgr: <span class="kw-2">&amp;</span>ThreadManager&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>(index, clocks) = <a href="#304">global</a>.<a href="data_race.rs.html#1552-1555">current_thread_state</a>(<a href="#305">thread_mgr</a>);
+
+        <a class="self" href="#302">self</a>.<a href="#402-408">store_impl</a>(<a href="#303">val</a>, <a href="#308">index</a>, <span class="kw-2">&amp;</span><a href="#308">clocks</a>.clock, <a href="#306">is_seqcst</a>);
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="attribute">#[allow(clippy::if_same_then_else, clippy::needless_bool)]
+    </span><span class="doccomment">/// Selects a valid store element in the buffer.
+    </span><span class="kw">fn </span>fetch_store&lt;R: <a href="https://rust-random.github.io/rand/rand/rng/trait.Rng.html">rand::Rng</a> + <span class="question-mark">?</span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+        clocks: <span class="kw-2">&amp;</span><a href="data_race.rs.html#103">ThreadClockSet</a>,
+        rng: <span class="kw-2">&amp;mut </span>R,
+    ) -&gt; (<span class="kw-2">&amp;</span><a href="#125">StoreElement</a>, <a href="#119">LoadRecency</a>) {
+        <span class="kw">use </span><a href="https://rust-random.github.io/rand/rand/seq/trait.IteratorRandom.html">rand::seq::IteratorRandom</a>;
+        <span class="kw">let </span><span class="kw-2">mut </span>found_sc = <span class="bool-val">false</span>;
+        <span class="comment">// FIXME: we want an inclusive take_while (stops after a false predicate, but
+        // includes the element that gave the false), but such function doesn&#39;t yet
+        // exist in the standard libary https://github.com/rust-lang/rust/issues/62208
+        // so we have to hack around it with keep_searching
+        </span><span class="kw">let </span><span class="kw-2">mut </span>keep_searching = <span class="bool-val">true</span>;
+        <span class="kw">let </span>candidates = <span class="self"><a href="#317">self</a>
+            </span>.buffer
+            .iter()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take_while</a>(<span class="kw">move </span>|<span class="kw-2">&amp;</span>store_elem| {
+                <span class="kw">if </span>!keep_searching {
+                    <span class="kw">return </span><span class="bool-val">false</span>;
+                }
+
+                <a href="#328">keep_searching</a> = <span class="kw">if </span>store_elem.timestamp &lt;= clocks.clock[store_elem.store_index] {
+                    <span class="comment">// CoWR: if a store happens-before the current load,
+                    // then we can&#39;t read-from anything earlier in modification order.
+                    // C++20 §6.9.2.2 [intro.races] paragraph 18
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else if </span>store_elem.load_info.borrow().timestamps.iter().any(
+                    |(<span class="kw-2">&amp;</span>load_index, <span class="kw-2">&amp;</span>load_timestamp)| load_timestamp &lt;= clocks.clock[load_index],
+                ) {
+                    <span class="comment">// CoRR: if there was a load from this store which happened-before the current load,
+                    // then we cannot read-from anything earlier in modification order.
+                    // C++20 §6.9.2.2 [intro.races] paragraph 16
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else if </span>store_elem.timestamp &lt;= clocks.fence_seqcst[store_elem.store_index] {
+                    <span class="comment">// The current load, which may be sequenced-after an SC fence, cannot read-before
+                    // the last store sequenced-before an SC fence in another thread.
+                    // C++17 §32.4 [atomics.order] paragraph 6
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else if </span>store_elem.timestamp &lt;= clocks.write_seqcst[store_elem.store_index]
+                    &amp;&amp; store_elem.is_seqcst
+                {
+                    <span class="comment">// The current non-SC load, which may be sequenced-after an SC fence,
+                    // cannot read-before the last SC store executed before the fence.
+                    // C++17 §32.4 [atomics.order] paragraph 4
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else if </span>is_seqcst
+                    &amp;&amp; store_elem.timestamp &lt;= clocks.read_seqcst[store_elem.store_index]
+                {
+                    <span class="comment">// The current SC load cannot read-before the last store sequenced-before
+                    // the last SC fence.
+                    // C++17 §32.4 [atomics.order] paragraph 5
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else if </span>is_seqcst &amp;&amp; store_elem.load_info.borrow().sc_loaded {
+                    <span class="comment">// The current SC load cannot read-before a store that an earlier SC load has observed.
+                    // See https://github.com/rust-lang/miri/issues/2301#issuecomment-1222720427
+                    // Consequences of C++20 §31.4 [atomics.order] paragraph 3.1, 3.3 (coherence-ordered before)
+                    // and 4.1 (coherence-ordered before between SC makes global total order S)
+                    </span><span class="bool-val">false
+                </span>} <span class="kw">else </span>{
+                    <span class="bool-val">true
+                </span>};
+
+                <span class="bool-val">true
+            </span>})
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>store_elem| {
+                <span class="kw">if </span>is_seqcst &amp;&amp; store_elem.is_seqcst {
+                    <span class="comment">// An SC load needs to ignore all but last store maked SC (stores not marked SC are not
+                    // affected)
+                    </span><span class="kw">let </span>include = !<a href="#323">found_sc</a>;
+                    <a href="#323">found_sc</a> = <span class="bool-val">true</span>;
+                    <a href="#385">include</a>
+                } <span class="kw">else </span>{
+                    <span class="bool-val">true
+                </span>}
+            });
+
+        <span class="kw">let </span>chosen = <a href="#329">candidates</a>.<a href="https://rust-random.github.io/rand/rand/seq/trait.IteratorRandom.html">choose</a>(<a href="#320">rng</a>).expect(<span class="string">&quot;store buffer cannot be empty&quot;</span>);
+        <span class="kw">if </span>std::ptr::eq(chosen, <span class="self">self</span>.buffer.back().expect(<span class="string">&quot;store buffer cannot be empty&quot;</span>)) {
+            (<a href="#393">chosen</a>, <a href="#120">LoadRecency::Latest</a>)
+        } <span class="kw">else </span>{
+            (<a href="#393">chosen</a>, <a href="#121">LoadRecency::Outdated</a>)
+        }
+    }
+
+    <span class="doccomment">/// ATOMIC STORE IMPL in the paper (except we don&#39;t need the location&#39;s vector clock)
+    </span><span class="kw">fn </span>store_impl(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        val: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        index: <a href="vector_clock.rs.html#9">VectorIdx</a>,
+        thread_clock: <span class="kw-2">&amp;</span><a href="vector_clock.rs.html#58">VClock</a>,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) {
+        <span class="kw">let </span>store_elem = <a href="#125">StoreElement</a> {
+            store_index: <a href="#405">index</a>,
+            timestamp: <a href="#406">thread_clock</a>[<a href="#405">index</a>],
+            <span class="comment">// In the language provided in the paper, an atomic store takes the value from a
+            // non-atomic memory location.
+            // But we already have the immediate value here so we don&#39;t need to do the memory
+            // access
+            </span><a href="#404">val</a>,
+            <a href="#407">is_seqcst</a>,
+            load_info: RefCell::new(LoadInfo::default()),
+        };
+        <a class="self" href="#403">self</a>.buffer.push_back(<a href="#409">store_elem</a>);
+        <span class="kw">if </span><span class="self">self</span>.buffer.len() &gt; STORE_BUFFER_LIMIT {
+            <a class="self" href="#403">self</a>.buffer.pop_front();
+        }
+        <span class="kw">if </span>is_seqcst {
+            <span class="comment">// Every store that happens before this needs to be marked as SC
+            // so that in a later SC load, only the last SC store (i.e. this one) or stores that
+            // aren&#39;t ordered by hb with the last SC is picked.
+            </span><a class="self" href="#403">self</a>.buffer.iter_mut().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">rev</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">for_each</a>(|elem| {
+                <span class="kw">if </span>elem.timestamp &lt;= thread_clock[elem.store_index] {
+                    <a href="#428">elem</a>.is_seqcst = <span class="bool-val">true</span>;
+                }
+            })
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="#125">StoreElement</a> {
+    <span class="doccomment">/// ATOMIC LOAD IMPL in the paper
+    /// Unlike the operational semantics in the paper, we don&#39;t need to keep track
+    /// of the thread timestamp for every single load. Keeping track of the first (smallest)
+    /// timestamp of each thread that has loaded from a store is sufficient: if the earliest
+    /// load of another thread happens before the current one, then we must stop searching the store
+    /// buffer regardless of subsequent loads by the same thread; if the earliest load of another
+    /// thread doesn&#39;t happen before the current one, then no subsequent load by the other thread
+    /// can happen before the current one.
+    </span><span class="kw">fn </span>load_impl(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        index: <a href="vector_clock.rs.html#9">VectorIdx</a>,
+        clocks: <span class="kw-2">&amp;</span><a href="data_race.rs.html#103">ThreadClockSet</a>,
+        is_seqcst: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+    ) -&gt; Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>load_info = <a class="self" href="#447">self</a>.load_info.borrow_mut();
+        <a href="#452">load_info</a>.sc_loaded |= <a href="#450">is_seqcst</a>;
+        <span class="kw">let _ </span>= <a href="#452">load_info</a>.timestamps.try_insert(<a href="#448">index</a>, <a href="#449">clocks</a>.clock[<a href="#448">index</a>]);
+        <a class="self" href="#447">self</a>.val
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt; EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw">crate</span>::MiriEvalContext&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt; {}
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">trait </span>EvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>&gt;:
+    <span class="kw">crate</span>::MiriEvalContextExt&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>&gt;
+{
+    <span class="comment">// If weak memory emulation is enabled, check if this atomic op imperfectly overlaps with a previous
+    // atomic read or write. If it does, then we require it to be ordered (non-racy) with all previous atomic
+    // accesses on all the bytes in range
+    </span><span class="kw">fn </span>validate_overlapping_atomic(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#467">self</a>.<a href="../machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">let </span>(alloc_id, base_offset, ..) = this.ptr_get_alloc_id(place.ptr)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><a href="../machine.rs.html#245"><span class="kw">crate</span>::AllocExtra</a> {
+            weak_memory: <span class="prelude-val">Some</span>(alloc_buffers),
+            data_race: <span class="prelude-val">Some</span>(alloc_clocks),
+            ..
+        } = this.get_alloc_extra(alloc_id)<span class="question-mark">?
+        </span>{
+            <span class="kw">let </span>range = <a href="../../../miri/fn.alloc_range.html">alloc_range</a>(<a href="#471">base_offset</a>, <a href="#468">place</a>.layout.size);
+            <span class="kw">if </span>alloc_buffers.is_overlapping(range)
+                &amp;&amp; !alloc_clocks.race_free_with_atomic(
+                    range,
+                    this.machine.data_race.as_ref().unwrap(),
+                    <span class="kw-2">&amp;</span>this.machine.threads,
+                )
+            {
+                <a class="macro" href="../../../rustc_middle/rustc_middle/macro.throw_unsup_format.html">throw_unsup_format!</a>(
+                    <span class="string">&quot;racy imperfectly overlapping atomic access is not possible in the C++20 memory model, and not supported by Miri&#39;s weak memory emulation&quot;
+                </span>);
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>buffered_atomic_rmw(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        new_val: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+        atomic: <a href="data_race.rs.html#66">AtomicRwOrd</a>,
+        init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#495">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>(alloc_id, base_offset, ..) = this.ptr_get_alloc_id(place.ptr)<span class="question-mark">?</span>;
+        <span class="kw">if let </span>(
+            <a href="../machine.rs.html#245"><span class="kw">crate</span>::AllocExtra</a> { weak_memory: <span class="prelude-val">Some</span>(alloc_buffers), .. },
+            <a href="../machine.rs.html#295"><span class="kw">crate</span>::Evaluator</a> { data_race: <span class="prelude-val">Some</span>(global), threads, .. },
+        ) = this.get_alloc_extra_mut(alloc_id)<span class="question-mark">?
+        </span>{
+            <span class="kw">if </span>atomic == AtomicRwOrd::SeqCst {
+                <a href="#505">global</a>.<a href="data_race.rs.html#1592">sc_read</a>(<a href="#505">threads</a>);
+                <a href="#505">global</a>.<a href="data_race.rs.html#1586">sc_write</a>(<a href="#505">threads</a>);
+            }
+            <span class="kw">let </span>range = <a href="../../../miri/fn.alloc_range.html">alloc_range</a>(<a href="#502">base_offset</a>, <a href="#497">place</a>.layout.size);
+            <span class="kw">let </span>buffer = alloc_buffers.get_or_create_store_buffer_mut(range, init)<span class="question-mark">?</span>;
+            <a href="#513">buffer</a>.<a href="#258-263">read_from_last_store</a>(<a href="#505">global</a>, <a href="#505">threads</a>, <a href="#498">atomic</a> == <a href="data_race.rs.html#71">AtomicRwOrd::SeqCst</a>);
+            buffer.buffered_write(new_val, global, threads, atomic == AtomicRwOrd::SeqCst)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>buffered_atomic_read(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+        atomic: <a href="data_race.rs.html#76">AtomicReadOrd</a>,
+        latest_in_mo: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        validate: <span class="kw">impl </span>FnOnce() -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#521">self</a>.<a href="../machine.rs.html#577">eval_context_ref</a>();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(global) = <span class="kw-2">&amp;</span><a href="#527">this</a>.machine.data_race {
+            <span class="kw">let </span>(alloc_id, base_offset, ..) = this.ptr_get_alloc_id(place.ptr)<span class="question-mark">?</span>;
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(alloc_buffers) = this.get_alloc_extra(alloc_id)<span class="question-mark">?</span>.weak_memory.as_ref() {
+                <span class="kw">if </span>atomic == AtomicReadOrd::SeqCst {
+                    <a href="#528">global</a>.<a href="data_race.rs.html#1592">sc_read</a>(<span class="kw-2">&amp;</span><a href="#527">this</a>.machine.threads);
+                }
+                <span class="kw">let </span><span class="kw-2">mut </span>rng = <a href="#527">this</a>.machine.rng.borrow_mut();
+                <span class="kw">let </span>buffer = alloc_buffers.get_or_create_store_buffer(
+                    alloc_range(base_offset, place.layout.size),
+                    latest_in_mo,
+                )<span class="question-mark">?</span>;
+                <span class="kw">let </span>(loaded, recency) = buffer.buffered_read(
+                    global,
+                    <span class="kw-2">&amp;</span>this.machine.threads,
+                    atomic == AtomicReadOrd::SeqCst,
+                    <span class="kw-2">&amp;mut *</span>rng,
+                    validate,
+                )<span class="question-mark">?</span>;
+                <span class="kw">if </span>global.track_outdated_loads &amp;&amp; recency == LoadRecency::Outdated {
+                    <a href="../diagnostics.rs.html#378">register_diagnostic</a>(<a href="../diagnostics.rs.html#79">NonHaltingDiagnostic::WeakMemoryOutdatedLoad</a>);
+                }
+
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(<a href="#539">loaded</a>);
+            }
+        }
+
+        <span class="comment">// Race detector or weak memory disabled, simply read the latest value
+        </span>validate()<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<a href="#524">latest_in_mo</a>)
+    }
+
+    <span class="kw">fn </span>buffered_atomic_write(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        val: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+        dest: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+        atomic: <a href="data_race.rs.html#84">AtomicWriteOrd</a>,
+        init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#560">self</a>.<a href="../machine.rs.html#578">eval_context_mut</a>();
+        <span class="kw">let </span>(alloc_id, base_offset, ..) = this.ptr_get_alloc_id(dest.ptr)<span class="question-mark">?</span>;
+        <span class="kw">if let </span>(
+            <a href="../machine.rs.html#245"><span class="kw">crate</span>::AllocExtra</a> { weak_memory: <span class="prelude-val">Some</span>(alloc_buffers), .. },
+            <a href="../machine.rs.html#295"><span class="kw">crate</span>::Evaluator</a> { data_race: <span class="prelude-val">Some</span>(global), threads, .. },
+        ) = this.get_alloc_extra_mut(alloc_id)<span class="question-mark">?
+        </span>{
+            <span class="kw">if </span>atomic == AtomicWriteOrd::SeqCst {
+                <a href="#570">global</a>.<a href="data_race.rs.html#1586">sc_write</a>(<a href="#570">threads</a>);
+            }
+
+            <span class="comment">// UGLY HACK: in write_scalar_atomic() we don&#39;t know the value before our write,
+            // so init == val always. If the buffer is fresh then we would&#39;ve duplicated an entry,
+            // so we need to remove it.
+            // See https://github.com/rust-lang/miri/issues/2164
+            </span><span class="kw">let </span>was_empty = <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(
+                alloc_buffers
+                    .store_buffers
+                    .borrow()
+                    .access_type(alloc_range(base_offset, dest.layout.size)),
+                AccessType::Empty(<span class="kw">_</span>)
+            );
+            <span class="kw">let </span>buffer = alloc_buffers
+                .get_or_create_store_buffer_mut(alloc_range(base_offset, dest.layout.size), init)<span class="question-mark">?</span>;
+            <span class="kw">if </span>was_empty {
+                <a href="#588">buffer</a>.buffer.pop_front();
+            }
+
+            buffer.buffered_write(val, global, threads, atomic == AtomicWriteOrd::SeqCst)<span class="question-mark">?</span>;
+        }
+
+        <span class="comment">// Caller should&#39;ve written to dest with the vanilla scalar write, we do nothing here
+        </span><span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="doccomment">/// Caller should never need to consult the store buffer for the latest value.
+    /// This function is used exclusively for failed atomic_compare_exchange_scalar
+    /// to perform load_impl on the latest store element
+    </span><span class="kw">fn </span>perform_read_on_buffered_latest(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        place: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>, <a href="../machine.rs.html#130">Provenance</a>&gt;,
+        atomic: <a href="data_race.rs.html#76">AtomicReadOrd</a>,
+        init: Scalar&lt;<a href="../machine.rs.html#130">Provenance</a>&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>this = <a class="self" href="#605">self</a>.<a href="../machine.rs.html#577">eval_context_ref</a>();
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(global) = <span class="kw-2">&amp;</span><a href="#610">this</a>.machine.data_race {
+            <span class="kw">if </span>atomic == AtomicReadOrd::SeqCst {
+                <a href="#612">global</a>.<a href="data_race.rs.html#1592">sc_read</a>(<span class="kw-2">&amp;</span><a href="#610">this</a>.machine.threads);
+            }
+            <span class="kw">let </span>size = <a href="#606">place</a>.layout.size;
+            <span class="kw">let </span>(alloc_id, base_offset, ..) = this.ptr_get_alloc_id(place.ptr)<span class="question-mark">?</span>;
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(alloc_buffers) = this.get_alloc_extra(alloc_id)<span class="question-mark">?</span>.weak_memory.as_ref() {
+                <span class="kw">let </span>buffer = alloc_buffers
+                    .get_or_create_store_buffer(alloc_range(base_offset, size), init)<span class="question-mark">?</span>;
+                <a href="#619">buffer</a>.<a href="#258-263">read_from_last_store</a>(
+                    <a href="#612">global</a>,
+                    <span class="kw-2">&amp;</span><a href="#610">this</a>.machine.threads,
+                    <a href="#607">atomic</a> == <a href="data_race.rs.html#79">AtomicReadOrd::SeqCst</a>,
+                );
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="miri" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

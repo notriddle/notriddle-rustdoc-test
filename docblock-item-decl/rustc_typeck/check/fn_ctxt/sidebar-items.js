@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["_impl",""],["arg_matrix",""],["checks",""],["suggestions",""]],"struct":[["FnCtxt","The `FnCtxt` stores type-checking context needed to type-check bodies of functions, closures, and `const`s, including performing type inference with `InferCtxt`."]]};

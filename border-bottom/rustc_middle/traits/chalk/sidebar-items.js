@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["ChalkEnvironmentAndGoal","A chalk environment and goal."],["RustInterner",""]]};

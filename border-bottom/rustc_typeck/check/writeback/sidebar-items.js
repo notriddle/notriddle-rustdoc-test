@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["EraseEarlyRegions",""],["Resolver","The Resolver. This is the type folding engine that detects unresolved types and so forth."],["WritebackCx",""]],"trait":[["Locatable",""]]};

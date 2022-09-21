@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["STRIP_PRIVATE",""]],"fn":[["strip_private","Strip private items from the point of view of a crate or externally from a crate, specified by the `xcrate` flag."]]};

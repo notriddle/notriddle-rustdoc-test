@@ -1,0 +1,148 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_traits/src/normalize_erasing_regions.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>normalize_erasing_regions.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_traits/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_traits/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_traits/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/trait.TyCtxtInferExt.html">rustc_infer::infer::TyCtxtInferExt</a>;
+<span class="kw">use </span>rustc_middle::traits::query::NoSolution;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">rustc_middle::ty::query::Providers</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.ParamEnvAnd.html">ParamEnvAnd</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/fold/trait.TypeFoldable.html">TypeFoldable</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/normalize/trait.AtExt.html">rustc_trait_selection::traits::query::normalize::AtExt</a>;
+<span class="kw">use </span>rustc_trait_selection::traits::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/traits/project/struct.Normalized.html">Normalized</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/traits/struct.ObligationCause.html">ObligationCause</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/sync/atomic/enum.Ordering.html">std::sync::atomic::Ordering</a>;
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>provide(p: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <span class="kw-2">*</span><a href="#9">p</a> = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a> {
+        try_normalize_generic_arg_after_erasing_regions: |tcx, goal| {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;try_normalize_generic_arg_after_erasing_regions(goal={:#?}&quot;</span>, goal);
+
+            <a href="#11">tcx</a>.sess
+                .perf_stats
+                .normalize_generic_arg_after_erasing_regions
+                .fetch_add(<span class="number">1</span>, Ordering::Relaxed);
+
+            <a href="#28-31">try_normalize_after_erasing_regions</a>(<a href="#11">tcx</a>, <a href="#11">goal</a>)
+        },
+        try_normalize_mir_const_after_erasing_regions: |tcx, goal| {
+            <a href="#28-31">try_normalize_after_erasing_regions</a>(<a href="#21">tcx</a>, <a href="#21">goal</a>)
+        },
+        ..<span class="kw-2">*</span><a href="#9">p</a>
+    };
+}
+
+<span class="kw">fn </span>try_normalize_after_erasing_regions&lt;<span class="lifetime">&#39;tcx</span>, T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; + <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html">PartialEq</a> + <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    goal: ParamEnvAnd&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;T, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/traits/query/struct.NoSolution.html">NoSolution</a>&gt; {
+    <span class="kw">let </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.ParamEnvAnd.html">ParamEnvAnd</a> { param_env, value } = <a href="#30">goal</a>;
+    <a href="#29">tcx</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/trait.TyCtxtInferExt.html">infer_ctxt</a>().enter(|infcx| {
+        <span class="kw">let </span>cause = ObligationCause::dummy();
+        <span class="kw">match </span><a href="#33">infcx</a>.at(<span class="kw-2">&amp;</span><a href="#34">cause</a>, <a href="#32">param_env</a>).<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/query/normalize/trait.AtExt.html">normalize</a>(<a href="#32">value</a>) {
+            <span class="prelude-val">Ok</span>(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/traits/project/struct.Normalized.html">Normalized</a> { value: normalized_value, obligations: normalized_obligations }) =&gt; {
+                <span class="comment">// We don&#39;t care about the `obligations`; they are
+                // always only region relations, and we are about to
+                // erase those anyway:
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(
+                    normalized_obligations.iter().find(|p| not_outlives_predicate(p.predicate)),
+                    <span class="prelude-val">None</span>,
+                );
+
+                <span class="kw">let </span>resolved_value = <a href="#33">infcx</a>.resolve_vars_if_possible(<a href="#36">normalized_value</a>);
+                <span class="comment">// It&#39;s unclear when `resolve_vars` would have an effect in a
+                // fresh `InferCtxt`. If this assert does trigger, it will give
+                // us a test case.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert_eq.html">debug_assert_eq!</a>(normalized_value, resolved_value);
+                <span class="kw">let </span>erased = <a href="#33">infcx</a>.tcx.erase_regions(<a href="#45">resolved_value</a>);
+                <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.debug_assert.html">debug_assert!</a>(!erased.needs_infer(), <span class="string">&quot;{:?}&quot;</span>, erased);
+                <span class="prelude-val">Ok</span>(<a href="#50">erased</a>)
+            }
+            <span class="prelude-val">Err</span>(NoSolution) =&gt; <span class="prelude-val">Err</span>(NoSolution),
+        }
+    })
+}
+
+<span class="kw">fn </span>not_outlives_predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;(p: ty::Predicate&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">match </span><a href="#59">p</a>.kind().skip_binder() {
+        ty::PredicateKind::RegionOutlives(..) | ty::PredicateKind::TypeOutlives(..) =&gt; <span class="bool-val">false</span>,
+        ty::PredicateKind::Trait(..)
+        | ty::PredicateKind::Projection(..)
+        | ty::PredicateKind::WellFormed(..)
+        | ty::PredicateKind::ObjectSafe(..)
+        | ty::PredicateKind::ClosureKind(..)
+        | ty::PredicateKind::Subtype(..)
+        | ty::PredicateKind::Coerce(..)
+        | ty::PredicateKind::ConstEvaluatable(..)
+        | ty::PredicateKind::ConstEquate(..)
+        | ty::PredicateKind::TypeWellFormedFromEnv(..) =&gt; <span class="bool-val">true</span>,
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_traits" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

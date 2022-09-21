@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["build_projection",""],["build_ptr_tys","Constructs the types used when accessing a Box’s pointer"]],"struct":[["ElaborateBoxDerefVisitor",""],["ElaborateBoxDerefs",""]]};

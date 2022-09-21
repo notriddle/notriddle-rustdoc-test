@@ -1,0 +1,1506 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_hir/src/def.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>def.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_hir/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_hir/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_hir/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+</pre><pre class="rust"><code><span class="kw">use </span><a href="lib.rs.html#35"><span class="kw">crate</span>::hir</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/index.html">rustc_ast</a> <span class="kw">as </span>ast;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">rustc_ast::NodeId</a>;
+<span class="kw">use </span><a href="../../rustc_macros/derive.HashStable_Generic.html">rustc_macros::HashStable_Generic</a>;
+<span class="kw">use </span>rustc_span::def_id::{<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>, <a href="../../rustc_hir/def_id/struct.LocalDefId.html">LocalDefId</a>};
+<span class="kw">use </span><a href="../../rustc_span/hygiene/enum.MacroKind.html">rustc_span::hygiene::MacroKind</a>;
+<span class="kw">use </span><a href="../../rustc_span/symbol/struct.Symbol.html">rustc_span::Symbol</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/array/iter/struct.IntoIter.html">std::array::IntoIter</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/fmt/macros/derive.Debug.html">std::fmt::Debug</a>;
+
+<span class="doccomment">/// Encodes if a `DefKind::Ctor` is the constructor of an enum variant or a struct.
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq, Encodable, Decodable, Hash, Debug)]
+#[derive(HashStable_Generic)]
+</span><span class="kw">pub enum </span>CtorOf {
+    <span class="doccomment">/// This `DefKind::Ctor` is a synthesized constructor of a tuple or unit struct.
+    </span>Struct,
+    <span class="doccomment">/// This `DefKind::Ctor` is a synthesized constructor of a tuple or unit variant.
+    </span>Variant,
+}
+
+<span class="doccomment">/// What kind of constructor something is.
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq, Encodable, Decodable, Hash, Debug)]
+#[derive(HashStable_Generic)]
+</span><span class="kw">pub enum </span>CtorKind {
+    <span class="doccomment">/// Constructor function automatically created by a tuple struct/variant.
+    </span>Fn,
+    <span class="doccomment">/// Constructor constant automatically created by a unit struct/variant.
+    </span>Const,
+    <span class="doccomment">/// Unusable name in value namespace created by a struct variant.
+    </span>Fictive,
+}
+
+<span class="doccomment">/// An attribute that is not a macro; e.g., `#[inline]` or `#[rustfmt::skip]`.
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq, Encodable, Decodable, Hash, Debug)]
+#[derive(HashStable_Generic)]
+</span><span class="kw">pub enum </span>NonMacroAttrKind {
+    <span class="doccomment">/// Single-segment attribute defined by the language (`#[inline]`)
+    </span>Builtin(<a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>),
+    <span class="doccomment">/// Multi-segment custom attribute living in a &quot;tool module&quot; (`#[rustfmt::skip]`).
+    </span>Tool,
+    <span class="doccomment">/// Single-segment custom attribute registered by a derive macro (`#[serde(default)]`).
+    </span>DeriveHelper,
+    <span class="doccomment">/// Single-segment custom attribute registered by a derive macro
+    /// but used before that derive macro was expanded (deprecated).
+    </span>DeriveHelperCompat,
+}
+
+<span class="doccomment">/// What kind of definition something is; e.g., `mod` vs `struct`.
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq, Encodable, Decodable, Hash, Debug)]
+#[derive(HashStable_Generic)]
+</span><span class="kw">pub enum </span>DefKind {
+    <span class="comment">// Type namespace
+    </span>Mod,
+    <span class="doccomment">/// Refers to the struct itself, [`DefKind::Ctor`] refers to its constructor if it exists.
+    </span>Struct,
+    Union,
+    Enum,
+    <span class="doccomment">/// Refers to the variant itself, [`DefKind::Ctor`] refers to its constructor if it exists.
+    </span>Variant,
+    Trait,
+    <span class="doccomment">/// Type alias: `type Foo = Bar;`
+    </span>TyAlias,
+    <span class="doccomment">/// Type from an `extern` block.
+    </span>ForeignTy,
+    <span class="doccomment">/// Trait alias: `trait IntIterator = Iterator&lt;Item = i32&gt;;`
+    </span>TraitAlias,
+    <span class="doccomment">/// Associated type: `trait MyTrait { type Assoc; }`
+    </span>AssocTy,
+    <span class="doccomment">/// Type parameter: the `T` in `struct Vec&lt;T&gt; { ... }`
+    </span>TyParam,
+
+    <span class="comment">// Value namespace
+    </span>Fn,
+    Const,
+    <span class="doccomment">/// Constant generic parameter: `struct Foo&lt;const N: usize&gt; { ... }`
+    </span>ConstParam,
+    Static(<a href="../../rustc_hir/enum.Mutability.html">ast::Mutability</a>),
+    <span class="doccomment">/// Refers to the struct or enum variant&#39;s constructor.
+    ///
+    /// The reason `Ctor` exists in addition to [`DefKind::Struct`] and
+    /// [`DefKind::Variant`] is because structs and enum variants exist
+    /// in the *type* namespace, whereas struct and enum variant *constructors*
+    /// exist in the *value* namespace.
+    ///
+    /// You may wonder why enum variants exist in the type namespace as opposed
+    /// to the value namespace. Check out [RFC 2593] for intuition on why that is.
+    ///
+    /// [RFC 2593]: https://github.com/rust-lang/rfcs/pull/2593
+    </span>Ctor(<a href="#16">CtorOf</a>, <a href="#26">CtorKind</a>),
+    <span class="doccomment">/// Associated function: `impl MyStruct { fn associated() {} }`
+    /// or `trait Foo { fn associated() {} }`
+    </span>AssocFn,
+    <span class="doccomment">/// Associated constant: `trait MyTrait { const ASSOC: usize; }`
+    </span>AssocConst,
+
+    <span class="comment">// Macro namespace
+    </span>Macro(<a href="../../rustc_span/hygiene/enum.MacroKind.html">MacroKind</a>),
+
+    <span class="comment">// Not namespaced (or they are, but we don&#39;t treat them so)
+    </span>ExternCrate,
+    Use,
+    <span class="doccomment">/// An `extern` block.
+    </span>ForeignMod,
+    <span class="doccomment">/// Anonymous constant, e.g. the `1 + 2` in `[u8; 1 + 2]`
+    </span>AnonConst,
+    <span class="doccomment">/// An inline constant, e.g. `const { 1 + 2 }`
+    </span>InlineConst,
+    <span class="doccomment">/// Opaque type, aka `impl Trait`.
+    </span>OpaqueTy,
+    <span class="doccomment">/// A return-position `impl Trait` in a trait definition
+    </span>ImplTraitPlaceholder,
+    Field,
+    <span class="doccomment">/// Lifetime parameter: the `&#39;a` in `struct Foo&lt;&#39;a&gt; { ... }`
+    </span>LifetimeParam,
+    <span class="doccomment">/// A use of `global_asm!`.
+    </span>GlobalAsm,
+    Impl,
+    Closure,
+    Generator,
+}
+
+<span class="kw">impl </span><a href="#53">DefKind</a> {
+    <span class="kw">pub fn </span>descr(<span class="self">self</span>, def_id: <a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="self"><a href="#125">self</a> </span>{
+            <a href="#75">DefKind::Fn</a> =&gt; <span class="string">&quot;function&quot;</span>,
+            <a href="#55">DefKind::Mod</a> <span class="kw">if </span><a href="#125">def_id</a>.is_crate_root() &amp;&amp; !<a href="#125">def_id</a>.is_local() =&gt; <span class="string">&quot;crate&quot;</span>,
+            <a href="#55">DefKind::Mod</a> =&gt; <span class="string">&quot;module&quot;</span>,
+            <a href="#79">DefKind::Static</a>(..) =&gt; <span class="string">&quot;static&quot;</span>,
+            <a href="#59">DefKind::Enum</a> =&gt; <span class="string">&quot;enum&quot;</span>,
+            <a href="#61">DefKind::Variant</a> =&gt; <span class="string">&quot;variant&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#20">CtorOf::Variant</a>, <a href="#28">CtorKind::Fn</a>) =&gt; <span class="string">&quot;tuple variant&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#20">CtorOf::Variant</a>, <a href="#30">CtorKind::Const</a>) =&gt; <span class="string">&quot;unit variant&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#20">CtorOf::Variant</a>, <a href="#32">CtorKind::Fictive</a>) =&gt; <span class="string">&quot;struct variant&quot;</span>,
+            <a href="#57">DefKind::Struct</a> =&gt; <span class="string">&quot;struct&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#18">CtorOf::Struct</a>, <a href="#28">CtorKind::Fn</a>) =&gt; <span class="string">&quot;tuple struct&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#18">CtorOf::Struct</a>, <a href="#30">CtorKind::Const</a>) =&gt; <span class="string">&quot;unit struct&quot;</span>,
+            <a href="#91">DefKind::Ctor</a>(<a href="#18">CtorOf::Struct</a>, <a href="#32">CtorKind::Fictive</a>) =&gt; {
+                <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;impossible struct constructor&quot;</span>)
+            }
+            <a href="#111">DefKind::OpaqueTy</a> =&gt; <span class="string">&quot;opaque type&quot;</span>,
+            <a href="#113">DefKind::ImplTraitPlaceholder</a> =&gt; <span class="string">&quot;opaque type in trait&quot;</span>,
+            <a href="#64">DefKind::TyAlias</a> =&gt; <span class="string">&quot;type alias&quot;</span>,
+            <a href="#68">DefKind::TraitAlias</a> =&gt; <span class="string">&quot;trait alias&quot;</span>,
+            <a href="#70">DefKind::AssocTy</a> =&gt; <span class="string">&quot;associated type&quot;</span>,
+            <a href="#58">DefKind::Union</a> =&gt; <span class="string">&quot;union&quot;</span>,
+            <a href="#62">DefKind::Trait</a> =&gt; <span class="string">&quot;trait&quot;</span>,
+            <a href="#66">DefKind::ForeignTy</a> =&gt; <span class="string">&quot;foreign type&quot;</span>,
+            <a href="#94">DefKind::AssocFn</a> =&gt; <span class="string">&quot;associated function&quot;</span>,
+            <a href="#76">DefKind::Const</a> =&gt; <span class="string">&quot;constant&quot;</span>,
+            <a href="#96">DefKind::AssocConst</a> =&gt; <span class="string">&quot;associated constant&quot;</span>,
+            <a href="#72">DefKind::TyParam</a> =&gt; <span class="string">&quot;type parameter&quot;</span>,
+            <a href="#78">DefKind::ConstParam</a> =&gt; <span class="string">&quot;const parameter&quot;</span>,
+            <a href="#99">DefKind::Macro</a>(macro_kind) =&gt; <a href="#155">macro_kind</a>.descr(),
+            <a href="#116">DefKind::LifetimeParam</a> =&gt; <span class="string">&quot;lifetime parameter&quot;</span>,
+            <a href="#103">DefKind::Use</a> =&gt; <span class="string">&quot;import&quot;</span>,
+            <a href="#105">DefKind::ForeignMod</a> =&gt; <span class="string">&quot;foreign module&quot;</span>,
+            <a href="#107">DefKind::AnonConst</a> =&gt; <span class="string">&quot;constant expression&quot;</span>,
+            <a href="#109">DefKind::InlineConst</a> =&gt; <span class="string">&quot;inline constant&quot;</span>,
+            <a href="#114">DefKind::Field</a> =&gt; <span class="string">&quot;field&quot;</span>,
+            <a href="#119">DefKind::Impl</a> =&gt; <span class="string">&quot;implementation&quot;</span>,
+            <a href="#120">DefKind::Closure</a> =&gt; <span class="string">&quot;closure&quot;</span>,
+            <a href="#121">DefKind::Generator</a> =&gt; <span class="string">&quot;generator&quot;</span>,
+            <a href="#102">DefKind::ExternCrate</a> =&gt; <span class="string">&quot;extern crate&quot;</span>,
+            <a href="#118">DefKind::GlobalAsm</a> =&gt; <span class="string">&quot;global assembly block&quot;</span>,
+        }
+    }
+
+    <span class="doccomment">/// Gets an English article for the definition.
+    </span><span class="kw">pub fn </span>article(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#171">self</a> </span>{
+            <a href="#70">DefKind::AssocTy</a>
+            | <a href="#96">DefKind::AssocConst</a>
+            | <a href="#94">DefKind::AssocFn</a>
+            | <a href="#59">DefKind::Enum</a>
+            | <a href="#111">DefKind::OpaqueTy</a>
+            | <a href="#119">DefKind::Impl</a>
+            | <a href="#103">DefKind::Use</a>
+            | <a href="#109">DefKind::InlineConst</a>
+            | <a href="#102">DefKind::ExternCrate</a> =&gt; <span class="string">&quot;an&quot;</span>,
+            <a href="#99">DefKind::Macro</a>(macro_kind) =&gt; <a href="#182">macro_kind</a>.article(),
+            <span class="kw">_ </span>=&gt; <span class="string">&quot;a&quot;</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>ns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#466">Namespace</a>&gt; {
+        <span class="kw">match </span><span class="self"><a href="#187">self</a> </span>{
+            <a href="#55">DefKind::Mod</a>
+            | <a href="#57">DefKind::Struct</a>
+            | <a href="#58">DefKind::Union</a>
+            | <a href="#59">DefKind::Enum</a>
+            | <a href="#61">DefKind::Variant</a>
+            | <a href="#62">DefKind::Trait</a>
+            | <a href="#111">DefKind::OpaqueTy</a>
+            | <a href="#64">DefKind::TyAlias</a>
+            | <a href="#66">DefKind::ForeignTy</a>
+            | <a href="#68">DefKind::TraitAlias</a>
+            | <a href="#70">DefKind::AssocTy</a>
+            | <a href="#72">DefKind::TyParam</a> =&gt; <span class="prelude-val">Some</span>(<a href="#472">Namespace::TypeNS</a>),
+
+            <a href="#75">DefKind::Fn</a>
+            | <a href="#76">DefKind::Const</a>
+            | <a href="#78">DefKind::ConstParam</a>
+            | <a href="#79">DefKind::Static</a>(..)
+            | <a href="#91">DefKind::Ctor</a>(..)
+            | <a href="#94">DefKind::AssocFn</a>
+            | <a href="#96">DefKind::AssocConst</a> =&gt; <span class="prelude-val">Some</span>(<a href="#474">Namespace::ValueNS</a>),
+
+            <a href="#99">DefKind::Macro</a>(..) =&gt; <span class="prelude-val">Some</span>(<a href="#478">Namespace::MacroNS</a>),
+
+            <span class="comment">// Not namespaced.
+            </span><a href="#107">DefKind::AnonConst</a>
+            | <a href="#109">DefKind::InlineConst</a>
+            | <a href="#114">DefKind::Field</a>
+            | <a href="#116">DefKind::LifetimeParam</a>
+            | <a href="#102">DefKind::ExternCrate</a>
+            | <a href="#120">DefKind::Closure</a>
+            | <a href="#121">DefKind::Generator</a>
+            | <a href="#103">DefKind::Use</a>
+            | <a href="#105">DefKind::ForeignMod</a>
+            | <a href="#118">DefKind::GlobalAsm</a>
+            | <a href="#119">DefKind::Impl</a>
+            | <a href="#113">DefKind::ImplTraitPlaceholder</a> =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>is_fn_like(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#229">self</a> </span>{
+            <a href="#75">DefKind::Fn</a> | <a href="#94">DefKind::AssocFn</a> | <a href="#120">DefKind::Closure</a> | <a href="#121">DefKind::Generator</a> =&gt; <span class="bool-val">true</span>,
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="doccomment">/// Whether `query get_codegen_attrs` should be used with this definition.
+    </span><span class="kw">pub fn </span>has_codegen_attrs(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#237">self</a> </span>{
+            <a href="#75">DefKind::Fn</a>
+            | <a href="#94">DefKind::AssocFn</a>
+            | <a href="#91">DefKind::Ctor</a>(..)
+            | <a href="#120">DefKind::Closure</a>
+            | <a href="#121">DefKind::Generator</a>
+            | <a href="#79">DefKind::Static</a>(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            <a href="#55">DefKind::Mod</a>
+            | <a href="#57">DefKind::Struct</a>
+            | <a href="#58">DefKind::Union</a>
+            | <a href="#59">DefKind::Enum</a>
+            | <a href="#61">DefKind::Variant</a>
+            | <a href="#62">DefKind::Trait</a>
+            | <a href="#64">DefKind::TyAlias</a>
+            | <a href="#66">DefKind::ForeignTy</a>
+            | <a href="#68">DefKind::TraitAlias</a>
+            | <a href="#70">DefKind::AssocTy</a>
+            | <a href="#76">DefKind::Const</a>
+            | <a href="#96">DefKind::AssocConst</a>
+            | <a href="#99">DefKind::Macro</a>(..)
+            | <a href="#103">DefKind::Use</a>
+            | <a href="#105">DefKind::ForeignMod</a>
+            | <a href="#111">DefKind::OpaqueTy</a>
+            | <a href="#113">DefKind::ImplTraitPlaceholder</a>
+            | <a href="#119">DefKind::Impl</a>
+            | <a href="#114">DefKind::Field</a>
+            | <a href="#72">DefKind::TyParam</a>
+            | <a href="#78">DefKind::ConstParam</a>
+            | <a href="#116">DefKind::LifetimeParam</a>
+            | <a href="#107">DefKind::AnonConst</a>
+            | <a href="#109">DefKind::InlineConst</a>
+            | <a href="#118">DefKind::GlobalAsm</a>
+            | <a href="#102">DefKind::ExternCrate</a> =&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+
+<span class="doccomment">/// The resolution of a path or export.
+///
+/// For every path or identifier in Rust, the compiler must determine
+/// what the path refers to. This process is called name resolution,
+/// and `Res` is the primary result of name resolution.
+///
+/// For example, everything prefixed with `/* Res */` in this example has
+/// an associated `Res`:
+///
+/// ```
+/// fn str_to_string(s: &amp; /* Res */ str) -&gt; /* Res */ String {
+///     /* Res */ String::from(/* Res */ s)
+/// }
+///
+/// /* Res */ str_to_string(&quot;hello&quot;);
+/// ```
+///
+/// The associated `Res`s will be:
+///
+/// - `str` will resolve to [`Res::PrimTy`];
+/// - `String` will resolve to [`Res::Def`], and the `Res` will include the [`DefId`]
+///   for `String` as defined in the standard library;
+/// - `String::from` will also resolve to [`Res::Def`], with the [`DefId`]
+///   pointing to `String::from`;
+/// - `s` will resolve to [`Res::Local`];
+/// - the call to `str_to_string` will resolve to [`Res::Def`], with the [`DefId`]
+///   pointing to the definition of `str_to_string` in the current crate.
+</span><span class="comment">//
+</span><span class="attribute">#[derive(Clone, Copy, PartialEq, Eq, Encodable, Decodable, Hash, Debug)]
+#[derive(HashStable_Generic)]
+</span><span class="kw">pub enum </span>Res&lt;Id = <a href="hir_id.rs.html#17">hir::HirId</a>&gt; {
+    <span class="doccomment">/// Definition having a unique ID (`DefId`), corresponds to something defined in user code.
+    ///
+    /// **Not bound to a specific namespace.**
+    </span>Def(<a href="#53">DefKind</a>, <a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>),
+
+    <span class="comment">// Type namespace
+    </span><span class="doccomment">/// A primitive type such as `i32` or `str`.
+    ///
+    /// **Belongs to the type namespace.**
+    </span>PrimTy(<a href="hir.rs.html#2424">hir::PrimTy</a>),
+
+    <span class="doccomment">/// The `Self` type, optionally with the [`DefId`] of the trait it belongs to and
+    /// optionally with the [`DefId`] of the item introducing the `Self` type alias.
+    ///
+    /// **Belongs to the type namespace.**
+    ///
+    /// Examples:
+    /// ```
+    /// struct Bar(Box&lt;Self&gt;);
+    /// // `Res::SelfTy { trait_: None, alias_of: Some(Bar) }`
+    ///
+    /// trait Foo {
+    ///     fn foo() -&gt; Box&lt;Self&gt;;
+    ///     // `Res::SelfTy { trait_: Some(Foo), alias_of: None }`
+    /// }
+    ///
+    /// impl Bar {
+    ///     fn blah() {
+    ///         let _: Self;
+    ///         // `Res::SelfTy { trait_: None, alias_of: Some(::{impl#0}) }`
+    ///     }
+    /// }
+    ///
+    /// impl Foo for Bar {
+    ///     fn foo() -&gt; Box&lt;Self&gt; {
+    ///     // `Res::SelfTy { trait_: Some(Foo), alias_of: Some(::{impl#1}) }`
+    ///         let _: Self;
+    ///         // `Res::SelfTy { trait_: Some(Foo), alias_of: Some(::{impl#1}) }`
+    ///
+    ///         todo!()
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// *See also [`Res::SelfCtor`].*
+    ///
+    /// -----
+    ///
+    /// HACK(min_const_generics): self types also have an optional requirement to **not** mention
+    /// any generic parameters to allow the following with `min_const_generics`:
+    /// ```
+    /// # struct Foo;
+    /// impl Foo { fn test() -&gt; [u8; std::mem::size_of::&lt;Self&gt;()] { todo!() } }
+    ///
+    /// struct Bar([u8; baz::&lt;Self&gt;()]);
+    /// const fn baz&lt;T&gt;() -&gt; usize { 10 }
+    /// ```
+    /// We do however allow `Self` in repeat expression even if it is generic to not break code
+    /// which already works on stable while causing the `const_evaluatable_unchecked` future compat
+    /// lint:
+    /// ```
+    /// fn foo&lt;T&gt;() {
+    ///     let _bar = [1_u8; std::mem::size_of::&lt;*mut T&gt;()];
+    /// }
+    /// ```
+    </span><span class="comment">// FIXME(generic_const_exprs): Remove this bodge once that feature is stable.
+    </span>SelfTy {
+        <span class="doccomment">/// The trait this `Self` is a generic arg for.
+        </span>trait_: <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>&gt;,
+        <span class="doccomment">/// The item introducing the `Self` type alias. Can be used in the `type_of` query
+        /// to get the underlying type. Additionally whether the `Self` type is disallowed
+        /// from mentioning generics (i.e. when used in an anonymous constant).
+        </span>alias_to: <span class="prelude-ty">Option</span>&lt;(<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>)&gt;,
+    },
+
+    <span class="doccomment">/// A tool attribute module; e.g., the `rustfmt` in `#[rustfmt::skip]`.
+    ///
+    /// **Belongs to the type namespace.**
+    </span>ToolMod,
+
+    <span class="comment">// Value namespace
+    </span><span class="doccomment">/// The `Self` constructor, along with the [`DefId`]
+    /// of the impl it is associated with.
+    ///
+    /// **Belongs to the value namespace.**
+    ///
+    /// *See also [`Res::SelfTy`].*
+    </span>SelfCtor(<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>),
+
+    <span class="doccomment">/// A local variable or function parameter.
+    ///
+    /// **Belongs to the value namespace.**
+    </span>Local(Id),
+
+    <span class="comment">// Macro namespace
+    </span><span class="doccomment">/// An attribute that is *not* implemented via macro.
+    /// E.g., `#[inline]` and `#[rustfmt::skip]`, which are essentially directives,
+    /// as opposed to `#[test]`, which is a builtin macro.
+    ///
+    /// **Belongs to the macro namespace.**
+    </span>NonMacroAttr(<a href="#38">NonMacroAttrKind</a>), <span class="comment">// e.g., `#[inline]` or `#[rustfmt::skip]`
+
+    // All namespaces
+    </span><span class="doccomment">/// Name resolution failed. We use a dummy `Res` variant so later phases
+    /// of the compiler won&#39;t crash and can instead report more errors.
+    ///
+    /// **Not bound to a specific namespace.**
+    </span><span class="prelude-val">Err</span>,
+}
+
+<span class="doccomment">/// The result of resolving a path before lowering to HIR,
+/// with &quot;module&quot; segments resolved and associated item
+/// segments deferred to type checking.
+/// `base_res` is the resolution of the resolved part of the
+/// path, `unresolved_segments` is the number of unresolved
+/// segments.
+///
+/// ```text
+/// module::Type::AssocX::AssocY::MethodOrAssocType
+/// ^~~~~~~~~~~~  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// base_res      unresolved_segments = 3
+///
+/// &lt;T as Trait&gt;::AssocX::AssocY::MethodOrAssocType
+///       ^~~~~~~~~~~~~~  ^~~~~~~~~~~~~~~~~~~~~~~~~
+///       base_res        unresolved_segments = 2
+/// ```
+</span><span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">pub struct </span>PartialRes {
+    base_res: Res&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>&gt;,
+    unresolved_segments: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+}
+
+<span class="kw">impl </span><a href="#433">PartialRes</a> {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>new(base_res: Res&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>&gt;) -&gt; <span class="self">Self </span>{
+        <a href="#433">PartialRes</a> { <a href="#440">base_res</a>, unresolved_segments: <span class="number">0 </span>}
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>with_unresolved_segments(base_res: Res&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>&gt;, <span class="kw-2">mut </span>unresolved_segments: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">if </span>base_res == Res::Err {
+            <a href="#445">unresolved_segments</a> = <span class="number">0
+        </span>}
+        <a href="#433">PartialRes</a> { <a href="#445">base_res</a>, <a href="#445">unresolved_segments</a> }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>base_res(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Res&lt;<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>&gt; {
+        <a class="self" href="#453">self</a>.base_res
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>unresolved_segments(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> {
+        <a class="self" href="#458">self</a>.unresolved_segments
+    }
+}
+
+<span class="doccomment">/// Different kinds of symbols can coexist even if they share the same textual name.
+/// Therefore, they each have a separate universe (known as a &quot;namespace&quot;).
+</span><span class="attribute">#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+</span><span class="kw">pub enum </span>Namespace {
+    <span class="doccomment">/// The type namespace includes `struct`s, `enum`s, `union`s, `trait`s, and `mod`s
+    /// (and, by extension, crates).
+    ///
+    /// Note that the type namespace includes other items; this is not an
+    /// exhaustive list.
+    </span>TypeNS,
+    <span class="doccomment">/// The value namespace includes `fn`s, `const`s, `static`s, and local variables (including function arguments).
+    </span>ValueNS,
+    <span class="doccomment">/// The macro namespace includes `macro_rules!` macros, declarative `macro`s,
+    /// procedural macros, attribute macros, `derive` macros, and non-macro attributes
+    /// like `#[inline]` and `#[rustfmt::skip]`.
+    </span>MacroNS,
+}
+
+<span class="kw">impl </span><a href="#466">Namespace</a> {
+    <span class="doccomment">/// The English description of the namespace.
+    </span><span class="kw">pub fn </span>descr(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="self"><a href="#483">self</a> </span>{
+            <span class="self">Self</span>::TypeNS =&gt; <span class="string">&quot;type&quot;</span>,
+            <span class="self">Self</span>::ValueNS =&gt; <span class="string">&quot;value&quot;</span>,
+            <span class="self">Self</span>::MacroNS =&gt; <span class="string">&quot;macro&quot;</span>,
+        }
+    }
+}
+
+<span class="doccomment">/// Just a helper ‒ separate structure for each namespace.
+</span><span class="attribute">#[derive(Copy, Clone, Default, Debug)]
+</span><span class="kw">pub struct </span>PerNS&lt;T&gt; {
+    <span class="kw">pub </span>value_ns: T,
+    <span class="kw">pub </span>type_ns: T,
+    <span class="kw">pub </span>macro_ns: T,
+}
+
+<span class="kw">impl</span>&lt;T&gt; PerNS&lt;T&gt; {
+    <span class="kw">pub fn </span>map&lt;U, F: FnMut(T) -&gt; U&gt;(<span class="self">self</span>, <span class="kw-2">mut </span>f: F) -&gt; PerNS&lt;U&gt; {
+        <a href="#494">PerNS</a> { value_ns: <a href="#501">f</a>(<a class="self" href="#501">self</a>.value_ns), type_ns: <a href="#501">f</a>(<a class="self" href="#501">self</a>.type_ns), macro_ns: <a href="#501">f</a>(<a class="self" href="#501">self</a>.macro_ns) }
+    }
+
+    <span class="kw">pub fn </span>into_iter(<span class="self">self</span>) -&gt; IntoIter&lt;T, <span class="number">3</span>&gt; {
+        [<a class="self" href="#505">self</a>.value_ns, <a class="self" href="#505">self</a>.type_ns, <a class="self" href="#505">self</a>.macro_ns].<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+    }
+
+    <span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IntoIter&lt;<span class="kw-2">&amp;</span>T, <span class="number">3</span>&gt; {
+        [<span class="kw-2">&amp;</span><a class="self" href="#509">self</a>.value_ns, <span class="kw-2">&amp;</span><a class="self" href="#509">self</a>.type_ns, <span class="kw-2">&amp;</span><a class="self" href="#509">self</a>.macro_ns].<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;T&gt; ::std::ops::Index&lt;<a href="#466">Namespace</a>&gt; <span class="kw">for </span>PerNS&lt;T&gt; {
+    <span class="kw">type </span>Output = T;
+
+    <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>, ns: <a href="#466">Namespace</a>) -&gt; <span class="kw-2">&amp;</span>T {
+        <span class="kw">match </span><a href="#517">ns</a> {
+            <a href="#474">Namespace::ValueNS</a> =&gt; <span class="kw-2">&amp;</span><a class="self" href="#517">self</a>.value_ns,
+            <a href="#472">Namespace::TypeNS</a> =&gt; <span class="kw-2">&amp;</span><a class="self" href="#517">self</a>.type_ns,
+            <a href="#478">Namespace::MacroNS</a> =&gt; <span class="kw-2">&amp;</span><a class="self" href="#517">self</a>.macro_ns,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;T&gt; ::std::ops::IndexMut&lt;<a href="#466">Namespace</a>&gt; <span class="kw">for </span>PerNS&lt;T&gt; {
+    <span class="kw">fn </span>index_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ns: <a href="#466">Namespace</a>) -&gt; <span class="kw-2">&amp;mut </span>T {
+        <span class="kw">match </span><a href="#527">ns</a> {
+            <a href="#474">Namespace::ValueNS</a> =&gt; <span class="kw-2">&amp;mut </span><a class="self" href="#527">self</a>.value_ns,
+            <a href="#472">Namespace::TypeNS</a> =&gt; <span class="kw-2">&amp;mut </span><a class="self" href="#527">self</a>.type_ns,
+            <a href="#478">Namespace::MacroNS</a> =&gt; <span class="kw-2">&amp;mut </span><a class="self" href="#527">self</a>.macro_ns,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;T&gt; PerNS&lt;<span class="prelude-ty">Option</span>&lt;T&gt;&gt; {
+    <span class="doccomment">/// Returns `true` if all the items in this collection are `None`.
+    </span><span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#538">self</a>.type_ns.is_none() &amp;&amp; <a class="self" href="#538">self</a>.value_ns.is_none() &amp;&amp; <a class="self" href="#538">self</a>.macro_ns.is_none()
+    }
+
+    <span class="doccomment">/// Returns an iterator over the items which are `Some`.
+    </span><span class="kw">pub fn </span>present_items(<span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = T&gt; {
+        [<a class="self" href="#543">self</a>.type_ns, <a class="self" href="#543">self</a>.value_ns, <a class="self" href="#543">self</a>.macro_ns].<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">flatten</a>()
+    }
+}
+
+<span class="kw">impl </span><a href="#26">CtorKind</a> {
+    <span class="kw">pub fn </span>from_ast(vdata: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/enum.VariantData.html">ast::VariantData</a>) -&gt; <a href="#26">CtorKind</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#549">vdata</a> {
+            ast::VariantData::Tuple(..) =&gt; <a href="#28">CtorKind::Fn</a>,
+            ast::VariantData::Unit(..) =&gt; <a href="#30">CtorKind::Const</a>,
+            ast::VariantData::Struct(..) =&gt; <a href="#32">CtorKind::Fictive</a>,
+        }
+    }
+
+    <span class="kw">pub fn </span>from_hir(vdata: <span class="kw-2">&amp;</span>hir::VariantData&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="#26">CtorKind</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#557">vdata</a> {
+            <a href="hir.rs.html#2861">hir::VariantData::Tuple</a>(..) =&gt; <a href="#28">CtorKind::Fn</a>,
+            <a href="hir.rs.html#2865">hir::VariantData::Unit</a>(..) =&gt; <a href="#30">CtorKind::Const</a>,
+            <a href="hir.rs.html#2857">hir::VariantData::Struct</a>(..) =&gt; <a href="#32">CtorKind::Fictive</a>,
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="#38">NonMacroAttrKind</a> {
+    <span class="kw">pub fn </span>descr(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="self"><a href="#567">self</a> </span>{
+            <a href="#40">NonMacroAttrKind::Builtin</a>(..) =&gt; <span class="string">&quot;built-in attribute&quot;</span>,
+            <a href="#42">NonMacroAttrKind::Tool</a> =&gt; <span class="string">&quot;tool attribute&quot;</span>,
+            <a href="#44">NonMacroAttrKind::DeriveHelper</a> | <a href="#47">NonMacroAttrKind::DeriveHelperCompat</a> =&gt; {
+                <span class="string">&quot;derive helper attribute&quot;
+            </span>}
+        }
+    }
+
+    <span class="kw">pub fn </span>article(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="string">&quot;a&quot;
+    </span>}
+
+    <span class="doccomment">/// Users of some attributes cannot mark them as used, so they are considered always used.
+    </span><span class="kw">pub fn </span>is_used(<span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><span class="self"><a href="#582">self</a> </span>{
+            <a href="#42">NonMacroAttrKind::Tool</a>
+            | <a href="#44">NonMacroAttrKind::DeriveHelper</a>
+            | <a href="#47">NonMacroAttrKind::DeriveHelperCompat</a> =&gt; <span class="bool-val">true</span>,
+            <a href="#40">NonMacroAttrKind::Builtin</a>(..) =&gt; <span class="bool-val">false</span>,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;Id&gt; Res&lt;Id&gt; {
+    <span class="doccomment">/// Return the `DefId` of this `Def` if it has an ID, else panic.
+    </span><span class="kw">pub fn </span>def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>
+    <span class="kw">where
+        </span>Id: <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">Debug</a>,
+    {
+        <a class="self" href="#594">self</a>.<a href="#603">opt_def_id</a>()
+            .unwrap_or_else(|| <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;attempted .def_id() on invalid res: {:?}&quot;</span>, <span class="self">self</span>))
+    }
+
+    <span class="doccomment">/// Return `Some(..)` with the `DefId` of this `Res` if it has a ID, else `None`.
+    </span><span class="kw">pub fn </span>opt_def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#603">self</a> </span>{
+            <a href="#309">Res::Def</a>(<span class="kw">_</span>, id) =&gt; <span class="prelude-val">Some</span>(<a href="#605">id</a>),
+
+            <a href="#398">Res::Local</a>(..)
+            | <a href="#315">Res::PrimTy</a>(..)
+            | <a href="#372">Res::SelfTy</a> { .. }
+            | <a href="#393">Res::SelfCtor</a>(..)
+            | <a href="#384">Res::ToolMod</a>
+            | <a href="#406">Res::NonMacroAttr</a>(..)
+            | <a href="#413">Res::Err</a> =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Return the `DefId` of this `Res` if it represents a module.
+    </span><span class="kw">pub fn </span>mod_def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_hir/def_id/struct.DefId.html">DefId</a>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#618">self</a> </span>{
+            <a href="#309">Res::Def</a>(<a href="#55">DefKind::Mod</a>, id) =&gt; <span class="prelude-val">Some</span>(<a href="#620">id</a>),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// A human readable name for the res kind (&quot;function&quot;, &quot;module&quot;, etc.).
+    </span><span class="kw">pub fn </span>descr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#626">self</a> </span>{
+            <a href="#309">Res::Def</a>(kind, def_id) =&gt; <a href="#628">kind</a>.<a href="#125">descr</a>(<a href="#628">def_id</a>),
+            <a href="#393">Res::SelfCtor</a>(..) =&gt; <span class="string">&quot;self constructor&quot;</span>,
+            <a href="#315">Res::PrimTy</a>(..) =&gt; <span class="string">&quot;builtin type&quot;</span>,
+            <a href="#398">Res::Local</a>(..) =&gt; <span class="string">&quot;local variable&quot;</span>,
+            <a href="#372">Res::SelfTy</a> { .. } =&gt; <span class="string">&quot;self type&quot;</span>,
+            <a href="#384">Res::ToolMod</a> =&gt; <span class="string">&quot;tool module&quot;</span>,
+            <a href="#406">Res::NonMacroAttr</a>(attr_kind) =&gt; <a href="#634">attr_kind</a>.<a href="#567">descr</a>(),
+            <a href="#413">Res::Err</a> =&gt; <span class="string">&quot;unresolved item&quot;</span>,
+        }
+    }
+
+    <span class="doccomment">/// Gets an English article for the `Res`.
+    </span><span class="kw">pub fn </span>article(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#640">self</a> </span>{
+            <a href="#309">Res::Def</a>(kind, <span class="kw">_</span>) =&gt; <a href="#642">kind</a>.<a href="#171">article</a>(),
+            <a href="#406">Res::NonMacroAttr</a>(kind) =&gt; <a href="#643">kind</a>.<a href="#577">article</a>(),
+            <a href="#413">Res::Err</a> =&gt; <span class="string">&quot;an&quot;</span>,
+            <span class="kw">_ </span>=&gt; <span class="string">&quot;a&quot;</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>map_id&lt;R&gt;(<span class="self">self</span>, <span class="kw-2">mut </span>map: <span class="kw">impl </span>FnMut(Id) -&gt; R) -&gt; Res&lt;R&gt; {
+        <span class="kw">match </span><span class="self"><a href="#649">self</a> </span>{
+            <a href="#309">Res::Def</a>(kind, id) =&gt; <a href="#309">Res::Def</a>(<a href="#651">kind</a>, <a href="#651">id</a>),
+            <a href="#393">Res::SelfCtor</a>(id) =&gt; <a href="#393">Res::SelfCtor</a>(<a href="#652">id</a>),
+            <a href="#315">Res::PrimTy</a>(id) =&gt; <a href="#315">Res::PrimTy</a>(<a href="#653">id</a>),
+            <a href="#398">Res::Local</a>(id) =&gt; <a href="#398">Res::Local</a>(<a href="#649">map</a>(<a href="#654">id</a>)),
+            <a href="#372">Res::SelfTy</a> { trait_, alias_to } =&gt; <a href="#372">Res::SelfTy</a> { <a href="#655">trait_</a>, <a href="#655">alias_to</a> },
+            <a href="#384">Res::ToolMod</a> =&gt; <a href="#384">Res::ToolMod</a>,
+            <a href="#406">Res::NonMacroAttr</a>(attr_kind) =&gt; <a href="#406">Res::NonMacroAttr</a>(<a href="#657">attr_kind</a>),
+            <a href="#413">Res::Err</a> =&gt; <a href="#413">Res::Err</a>,
+        }
+    }
+
+    <span class="kw">pub fn </span>apply_id&lt;R, E&gt;(<span class="self">self</span>, <span class="kw-2">mut </span>map: <span class="kw">impl </span>FnMut(Id) -&gt; <span class="prelude-ty">Result</span>&lt;R, E&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Res&lt;R&gt;, E&gt; {
+        <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="self"><a href="#662">self</a> </span>{
+            <a href="#309">Res::Def</a>(kind, id) =&gt; <a href="#309">Res::Def</a>(<a href="#664">kind</a>, <a href="#664">id</a>),
+            <a href="#393">Res::SelfCtor</a>(id) =&gt; <a href="#393">Res::SelfCtor</a>(<a href="#665">id</a>),
+            <a href="#315">Res::PrimTy</a>(id) =&gt; <a href="#315">Res::PrimTy</a>(<a href="#666">id</a>),
+            <a href="#398">Res::Local</a>(id) =&gt; <a href="#398">Res::Local</a>(map(id)<span class="question-mark">?</span>),
+            <a href="#372">Res::SelfTy</a> { trait_, alias_to } =&gt; <a href="#372">Res::SelfTy</a> { <a href="#668">trait_</a>, <a href="#668">alias_to</a> },
+            <a href="#384">Res::ToolMod</a> =&gt; <a href="#384">Res::ToolMod</a>,
+            <a href="#406">Res::NonMacroAttr</a>(attr_kind) =&gt; <a href="#406">Res::NonMacroAttr</a>(<a href="#670">attr_kind</a>),
+            <a href="#413">Res::Err</a> =&gt; <a href="#413">Res::Err</a>,
+        })
+    }
+
+    <span class="attribute">#[track_caller]
+    </span><span class="kw">pub fn </span>expect_non_local&lt;OtherId&gt;(<span class="self">self</span>) -&gt; Res&lt;OtherId&gt; {
+        <a class="self" href="#676">self</a>.<a href="#649">map_id</a>(
+            <span class="attribute">#[track_caller]
+            </span>|<span class="kw">_</span>| <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;unexpected `Res::Local`&quot;</span>),
+        )
+    }
+
+    <span class="kw">pub fn </span>macro_kind(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../rustc_span/hygiene/enum.MacroKind.html">MacroKind</a>&gt; {
+        <span class="kw">match </span><span class="self"><a href="#683">self</a> </span>{
+            <a href="#309">Res::Def</a>(<a href="#99">DefKind::Macro</a>(kind), <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(<a href="#685">kind</a>),
+            <a href="#406">Res::NonMacroAttr</a>(..) =&gt; <span class="prelude-val">Some</span>(MacroKind::Attr),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Returns `None` if this is `Res::Err`
+    </span><span class="kw">pub fn </span>ns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#466">Namespace</a>&gt; {
+        <span class="kw">match </span><span class="self"><a href="#692">self</a> </span>{
+            <a href="#309">Res::Def</a>(kind, ..) =&gt; <a href="#694">kind</a>.<a href="#187">ns</a>(),
+            <a href="#315">Res::PrimTy</a>(..) | <a href="#372">Res::SelfTy</a> { .. } | <a href="#384">Res::ToolMod</a> =&gt; <span class="prelude-val">Some</span>(<a href="#472">Namespace::TypeNS</a>),
+            <a href="#393">Res::SelfCtor</a>(..) | <a href="#398">Res::Local</a>(..) =&gt; <span class="prelude-val">Some</span>(<a href="#474">Namespace::ValueNS</a>),
+            <a href="#406">Res::NonMacroAttr</a>(..) =&gt; <span class="prelude-val">Some</span>(<a href="#478">Namespace::MacroNS</a>),
+            <a href="#413">Res::Err</a> =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Always returns `true` if `self` is `Res::Err`
+    </span><span class="kw">pub fn </span>matches_ns(<span class="kw-2">&amp;</span><span class="self">self</span>, ns: <a href="#466">Namespace</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#703">self</a>.<a href="#692">ns</a>().map_or(<span class="bool-val">true</span>, |actual_ns| <a href="#704">actual_ns</a> == <a href="#703">ns</a>)
+    }
+
+    <span class="doccomment">/// Returns whether such a resolved path can occur in a tuple struct/variant pattern
+    </span><span class="kw">pub fn </span>expected_in_tuple_struct_pat(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(<span class="self">self</span>, Res::Def(DefKind::Ctor(<span class="kw">_</span>, CtorKind::Fn), <span class="kw">_</span>) | Res::SelfCtor(..))
+    }
+
+    <span class="doccomment">/// Returns whether such a resolved path can occur in a unit struct/variant pattern
+    </span><span class="kw">pub fn </span>expected_in_unit_struct_pat(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(<span class="self">self</span>, Res::Def(DefKind::Ctor(<span class="kw">_</span>, CtorKind::Const), <span class="kw">_</span>) | Res::SelfCtor(..))
+    }
+}
+
+<span class="doccomment">/// Resolution for a lifetime appearing in a type.
+</span><span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+</span><span class="kw">pub enum </span>LifetimeRes {
+    <span class="doccomment">/// Successfully linked the lifetime to a generic parameter.
+    </span>Param {
+        <span class="doccomment">/// Id of the generic parameter that introduced it.
+        </span>param: <a href="../../rustc_hir/def_id/struct.LocalDefId.html">LocalDefId</a>,
+        <span class="doccomment">/// Id of the introducing place. That can be:
+        /// - an item&#39;s id, for the item&#39;s generic parameters;
+        /// - a TraitRef&#39;s ref_id, identifying the `for&lt;...&gt;` binder;
+        /// - a BareFn type&#39;s id.
+        ///
+        /// This information is used for impl-trait lifetime captures, to know when to or not to
+        /// capture any given lifetime.
+        </span>binder: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+    },
+    <span class="doccomment">/// Created a generic parameter for an anonymous lifetime.
+    </span>Fresh {
+        <span class="doccomment">/// Id of the generic parameter that introduced it.
+        ///
+        /// Creating the associated `LocalDefId` is the responsibility of lowering.
+        </span>param: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+        <span class="doccomment">/// Id of the introducing place. See `Param`.
+        </span>binder: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>,
+    },
+    <span class="doccomment">/// This variant is used for anonymous lifetimes that we did not resolve during
+    /// late resolution.  Those lifetimes will be inferred by typechecking.
+    </span>Infer,
+    <span class="doccomment">/// Explicit `&#39;static` lifetime.
+    </span>Static,
+    <span class="doccomment">/// Resolution failure.
+    </span>Error,
+    <span class="doccomment">/// HACK: This is used to recover the NodeId of an elided lifetime.
+    </span>ElidedAnchor { start: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a>, end: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/node_id/struct.NodeId.html">NodeId</a> },
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_hir" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

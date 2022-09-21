@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["dylink_registrar","Dynamically link a registrar function into the compiler process."],["load_plugin",""],["load_plugins","Read plugin metadata and dynamically load registrar functions."]],"type":[["PluginRegistrarFn","Pointer to a registrar function."]]};

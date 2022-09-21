@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["EmulateByNameResult","Returned by `emulate_foreign_item_by_name`."]],"trait":[["EvalContextExt",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["error_kind_to_snippet_annotation_type",""],["slice_annotation",""]],"struct":[["FormatReportFormatter","Formats the warnings/errors in a [`FormatReport`]."],["FormatReportFormatterBuilder","A builder for [`FormatReportFormatter`]."]]};

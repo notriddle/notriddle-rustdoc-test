@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["supertraits","Given a PolyTraitRef, get the PolyTraitRefs of the trait’s (transitive) supertraits."]],"struct":[["Elaborator",""]]};

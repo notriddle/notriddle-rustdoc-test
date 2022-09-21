@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["DefIdForest","Represents a forest of `DefId`s closed under the ancestor relation. That is, if a `DefId` representing a module is contained in the forest then all `DefId`s defined in that module or submodules are also implicitly contained in the forest."]],"fn":[["type_uninhabited_from",""]],"mod":[["def_id_forest",""]]};

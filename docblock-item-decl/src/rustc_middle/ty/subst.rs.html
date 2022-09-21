@@ -1,0 +1,1560 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_middle/src/ty/subst.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>subst.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_middle/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_middle/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+</pre><pre class="rust"><code><span class="comment">// Type substitutions.
+
+</span><span class="kw">use </span><a href="../lib.rs.html#95"><span class="kw">crate</span>::mir</a>;
+<span class="kw">use </span><span class="kw">crate</span>::ty::codec::{<a href="../../../rustc_middle/ty/trait.TyDecoder.html">TyDecoder</a>, <a href="../../../rustc_middle/ty/trait.TyEncoder.html">TyEncoder</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::fold::{<a href="fold.rs.html#151">FallibleTypeFolder</a>, <a href="fold.rs.html#58">TypeFoldable</a>, <a href="fold.rs.html#109">TypeFolder</a>, <a href="fold.rs.html#80">TypeSuperFoldable</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::sty::{<a href="sty.rs.html#206">ClosureSubsts</a>, <a href="sty.rs.html#337">GeneratorSubsts</a>, <a href="sty.rs.html#617">InlineConstSubsts</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::visit::{<a href="visit.rs.html#56">TypeVisitable</a>, <a href="visit.rs.html#180">TypeVisitor</a>};
+<span class="kw">use </span><span class="kw">crate</span>::ty::{<a class="self" href="../lib.rs.html#98">self</a>, <a href="context.rs.html#1749">Lift</a>, <a href="list.rs.html#30">List</a>, <a href="sty.rs.html#1340">ParamConst</a>, <a href="mod.rs.html#484">Ty</a>, <a href="context.rs.html#1029">TyCtxt</a>};
+
+<span class="kw">use </span>rustc_data_structures::intern::{Interned, <a href="../../../rustc_data_structures/intern/struct.WithStableHash.html">WithStableHash</a>};
+<span class="kw">use </span><a href="../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../rustc_macros/derive.HashStable.html">rustc_macros::HashStable</a>;
+<span class="kw">use </span>rustc_serialize::{<a class="self" href="../../../rustc_serialize/index.html">self</a>, <a href="../../../rustc_serialize/serialize/trait.Decodable.html">Decodable</a>, <a href="../../../rustc_serialize/serialize/trait.Encodable.html">Encodable</a>};
+<span class="kw">use </span><a href="https://docs.rs/smallvec/1.8.1/smallvec/struct.SmallVec.html">smallvec::SmallVec</a>;
+
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/intrinsics/index.html">core::intrinsics</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/cmp/enum.Ordering.html">std::cmp::Ordering</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">std::fmt</a>;
+<span class="kw">use </span>std::marker::PhantomData;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/mem/index.html">std::mem</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/num/nonzero/struct.NonZeroUsize.html">std::num::NonZeroUsize</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/control_flow/enum.ControlFlow.html">std::ops::ControlFlow</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/slice/index.html">std::slice</a>;
+
+<span class="doccomment">/// An entity in the Rust type system, which can be one of
+/// several kinds (types, lifetimes, and consts).
+/// To reduce memory usage, a `GenericArg` is an interned pointer,
+/// with the lowest 2 bits being reserved for a tag to
+/// indicate the type (`Ty`, `Region`, or `Const`) it points to.
+///
+/// Note: the `PartialEq`, `Eq` and `Hash` derives are only valid because `Ty`,
+/// `Region` and `Const` are all interned.
+</span><span class="attribute">#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    ptr: <a href="https://doc.rust-lang.org/nightly/core/num/nonzero/struct.NonZeroUsize.html">NonZeroUsize</a>,
+    marker: PhantomData&lt;(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt;,
+}
+
+<span class="kw">const </span>TAG_MASK: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">0b11</span>;
+<span class="kw">const </span>TYPE_TAG: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">0b00</span>;
+<span class="kw">const </span>REGION_TAG: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">0b01</span>;
+<span class="kw">const </span>CONST_TAG: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a> = <span class="number">0b10</span>;
+
+<span class="attribute">#[derive(Debug, TyEncodable, TyDecodable, PartialEq, Eq, PartialOrd, Ord)]
+</span><span class="kw">pub enum </span>GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    Lifetime(ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+    Type(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+    Const(ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+}
+
+<span class="doccomment">/// This function goes from `&amp;&#39;a [Ty&lt;&#39;tcx&gt;]` to `&amp;&#39;a [GenericArg&lt;&#39;tcx&gt;]`
+///
+/// This is sound as, for types, `GenericArg` is just
+/// `NonZeroUsize::new_unchecked(ty as *const _ as usize)` as
+/// long as we use `0` for the `TYPE_TAG`.
+</span><span class="kw">pub fn </span>ty_slice_as_generic_args&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;(ts: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;] {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(TYPE_TAG, <span class="number">0</span>);
+    <span class="comment">// SAFETY: the whole slice is valid and immutable.
+    // `Ty` and `GenericArg` is explained above.
+    </span><span class="kw">unsafe </span>{ slice::from_raw_parts(<a href="#56">ts</a>.as_ptr().cast(), <a href="#56">ts</a>.len()) }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="doccomment">/// Allows to freely switch between `List&lt;Ty&lt;&#39;tcx&gt;&gt;` and `List&lt;GenericArg&lt;&#39;tcx&gt;&gt;`.
+    ///
+    /// As lists are interned, `List&lt;Ty&lt;&#39;tcx&gt;&gt;` and `List&lt;GenericArg&lt;&#39;tcx&gt;&gt;` have
+    /// be interned together, see `intern_type_list` for more details.
+    </span><span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>as_substs(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(TYPE_TAG, <span class="number">0</span>);
+        <span class="comment">// SAFETY: `List&lt;T&gt;` is `#[repr(C)]`. `Ty` and `GenericArg` is explained above.
+        </span><span class="kw">unsafe </span>{ <span class="kw-2">&amp;*</span>(<span class="self"><a href="#69">self</a> </span><span class="kw">as </span><span class="kw-2">*const </span>List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">as </span><span class="kw-2">*const </span>List&lt;GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;) }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>pack(<span class="self">self</span>) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>(tag, ptr) = <span class="kw">match </span><span class="self"><a href="#78">self</a> </span>{
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; {
+                <span class="comment">// Ensure we can use the tag bits.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(mem::align_of_val(<span class="kw-2">&amp;*</span>lt.<span class="number">0.0</span>) &amp; TAG_MASK, <span class="number">0</span>);
+                (<a href="#41">REGION_TAG</a>, <a href="#80">lt</a>.<span class="number">0.0 </span><span class="kw">as </span><span class="kw-2">*const </span>ty::RegionKind&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)
+            }
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; {
+                <span class="comment">// Ensure we can use the tag bits.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(mem::align_of_val(<span class="kw-2">&amp;*</span>ty.<span class="number">0.0</span>) &amp; TAG_MASK, <span class="number">0</span>);
+                (<a href="#40">TYPE_TAG</a>, <a href="#85">ty</a>.<span class="number">0.0 </span><span class="kw">as </span><span class="kw-2">*const </span>WithStableHash&lt;ty::TyS&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)
+            }
+            <a href="#48">GenericArgKind::Const</a>(ct) =&gt; {
+                <span class="comment">// Ensure we can use the tag bits.
+                </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(mem::align_of_val(<span class="kw-2">&amp;*</span>ct.<span class="number">0.0</span>) &amp; TAG_MASK, <span class="number">0</span>);
+                (<a href="#42">CONST_TAG</a>, <a href="#90">ct</a>.<span class="number">0.0 </span><span class="kw">as </span><span class="kw-2">*const </span>ty::ConstS&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)
+            }
+        };
+
+        <a href="#34">GenericArg</a> { ptr: <span class="kw">unsafe </span>{ NonZeroUsize::new_unchecked(<a href="#79">ptr</a> | <a href="#79">tag</a>) }, marker: PhantomData }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt::Debug</a> <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <span class="kw">match </span><a class="self" href="#102">self</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; <a href="#104">lt</a>.<a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt</a>(<a href="#102">f</a>),
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; <a href="#105">ty</a>.<a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt</a>(<a href="#102">f</a>),
+            <a href="#48">GenericArgKind::Const</a>(ct) =&gt; <a href="#106">ct</a>.<a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">fmt</a>(<a href="#102">f</a>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">Ord</a> <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/cmp/enum.Ordering.html">Ordering</a> {
+        <a class="self" href="#112">self</a>.<a href="#146">unpack</a>().<a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">cmp</a>(<span class="kw-2">&amp;</span><a href="#112">other</a>.<a href="#146">unpack</a>())
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.PartialOrd.html">PartialOrd</a> <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>partial_cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="https://doc.rust-lang.org/nightly/core/cmp/enum.Ordering.html">Ordering</a>&gt; {
+        <span class="prelude-val">Some</span>(<a class="self" href="#118">self</a>.<a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">cmp</a>(<span class="kw-2">&amp;</span><a href="#118">other</a>))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; From&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>from(r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#46">GenericArgKind::Lifetime</a>(<a href="#125">r</a>).<a href="#78">pack</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; From&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>from(ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#47">GenericArgKind::Type</a>(<a href="#132">ty</a>).<a href="#78">pack</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; From&lt;ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>from(c: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#48">GenericArgKind::Const</a>(<a href="#139">c</a>).<a href="#78">pack</a>()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>unpack(<span class="self">self</span>) -&gt; GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>ptr = <a class="self" href="#146">self</a>.ptr.get();
+        <span class="comment">// SAFETY: use of `Interned::new_unchecked` here is ok because these
+        // pointers were originally created from `Interned` types in `pack()`,
+        // and this is just going in the other direction.
+        </span><span class="kw">unsafe </span>{
+            <span class="kw">match </span><a href="#147">ptr</a> &amp; <a href="#39">TAG_MASK</a> {
+                <a href="#41">REGION_TAG</a> =&gt; <a href="#46">GenericArgKind::Lifetime</a>(<a href="sty.rs.html#1358">ty::Region</a>(Interned::new_unchecked(
+                    <span class="kw-2">&amp;*</span>((<a href="#147">ptr</a> &amp; !<a href="#39">TAG_MASK</a>) <span class="kw">as </span><span class="kw-2">*const </span>ty::RegionKind&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+                ))),
+                <a href="#40">TYPE_TAG</a> =&gt; <a href="#47">GenericArgKind::Type</a>(<a href="mod.rs.html#484">Ty</a>(Interned::new_unchecked(
+                    <span class="kw-2">&amp;*</span>((<a href="#147">ptr</a> &amp; !<a href="#39">TAG_MASK</a>) <span class="kw">as </span><span class="kw-2">*const </span>WithStableHash&lt;ty::TyS&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;),
+                ))),
+                <a href="#42">CONST_TAG</a> =&gt; <a href="#48">GenericArgKind::Const</a>(<a href="consts.rs.html#25">ty::Const</a>(Interned::new_unchecked(
+                    <span class="kw-2">&amp;*</span>((<a href="#147">ptr</a> &amp; !<a href="#39">TAG_MASK</a>) <span class="kw">as </span><span class="kw-2">*const </span>ty::ConstS&lt;<span class="lifetime">&#39;tcx</span>&gt;),
+                ))),
+                <span class="kw">_ </span>=&gt; intrinsics::unreachable(),
+            }
+        }
+    }
+
+    <span class="doccomment">/// Unpack the `GenericArg` as a region when it is known certainly to be a region.
+    </span><span class="kw">pub fn </span>expect_region(<span class="self">self</span>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a class="self" href="#168">self</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; <a href="#170">lt</a>,
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected a region, but found another kind&quot;</span>),
+        }
+    }
+
+    <span class="doccomment">/// Unpack the `GenericArg` as a type when it is known certainly to be a type.
+    /// This is true in cases where `Substs` is used in places where the kinds are known
+    /// to be limited (e.g. in tuples, where the only parameters are type parameters).
+    </span><span class="kw">pub fn </span>expect_ty(<span class="self">self</span>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a class="self" href="#178">self</a>.<a href="#146">unpack</a>() {
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; <a href="#180">ty</a>,
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected a type, but found another kind&quot;</span>),
+        }
+    }
+
+    <span class="doccomment">/// Unpack the `GenericArg` as a const when it is known certainly to be a const.
+    </span><span class="kw">pub fn </span>expect_const(<span class="self">self</span>) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">match </span><a class="self" href="#186">self</a>.<a href="#146">unpack</a>() {
+            <a href="#48">GenericArgKind::Const</a>(c) =&gt; <a href="#188">c</a>,
+            <span class="kw">_ </span>=&gt; <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected a const, but found another kind&quot;</span>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Lift&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Lifted = GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="kw">fn </span>lift_to_tcx(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Lifted&gt; {
+        <span class="kw">match </span><a class="self" href="#197">self</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; <a href="#197">tcx</a>.<a href="context.rs.html#1222">lift</a>(<a href="#199">lt</a>).map(|lt| <a href="#199">lt</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; <a href="#197">tcx</a>.<a href="context.rs.html#1222">lift</a>(<a href="#200">ty</a>).map(|ty| <a href="#200">ty</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+            <a href="#48">GenericArgKind::Const</a>(ct) =&gt; <a href="#197">tcx</a>.<a href="context.rs.html#1222">lift</a>(<a href="#201">ct</a>).map(|ct| <a href="#201">ct</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>try_fold_with&lt;F: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, F::Error&gt; {
+        <span class="kw">match </span><a class="self" href="#207">self</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; <a href="#209">lt</a>.<a href="fold.rs.html#69">try_fold_with</a>(<a href="#207">folder</a>).map(<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">Into::into</a>),
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; <a href="#210">ty</a>.<a href="fold.rs.html#69">try_fold_with</a>(<a href="#207">folder</a>).map(<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">Into::into</a>),
+            <a href="#48">GenericArgKind::Const</a>(ct) =&gt; <a href="#211">ct</a>.<a href="fold.rs.html#69">try_fold_with</a>(<a href="#207">folder</a>).map(<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">Into::into</a>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_with&lt;V: TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, visitor: <span class="kw-2">&amp;mut </span>V) -&gt; ControlFlow&lt;V::BreakTy&gt; {
+        <span class="kw">match </span><a class="self" href="#217">self</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(lt) =&gt; <a href="#219">lt</a>.<a href="visit.rs.html#67">visit_with</a>(<a href="#217">visitor</a>),
+            <a href="#47">GenericArgKind::Type</a>(ty) =&gt; <a href="#220">ty</a>.<a href="visit.rs.html#67">visit_with</a>(<a href="#217">visitor</a>),
+            <a href="#48">GenericArgKind::Const</a>(ct) =&gt; <a href="#221">ct</a>.<a href="visit.rs.html#67">visit_with</a>(<a href="#217">visitor</a>),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, E: TyEncoder&lt;I = TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; Encodable&lt;E&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>encode(<span class="kw-2">&amp;</span><span class="self">self</span>, e: <span class="kw-2">&amp;mut </span>E) {
+        <a class="self" href="#227">self</a>.<a href="#146">unpack</a>().<a href="../../../rustc_serialize/serialize/trait.Encodable.html">encode</a>(<a href="#227">e</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, D: TyDecoder&lt;I = TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; Decodable&lt;D&gt; <span class="kw">for </span>GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>decode(d: <span class="kw-2">&amp;mut </span>D) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        GenericArgKind::decode(<a href="#233">d</a>).<a href="#78">pack</a>()
+    }
+}
+
+<span class="doccomment">/// A substitution mapping generic parameters to new values.
+</span><span class="kw">pub type </span>InternalSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; = List&lt;GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;;
+
+<span class="kw">pub type </span>SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; = <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>InternalSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; InternalSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Checks whether all elements of this list are types, if so, transmute.
+    </span><span class="kw">pub fn </span>try_as_type_list(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt; {
+        <span class="kw">if </span><span class="self">self</span>.iter().all(|arg| <span class="macro">matches!</span>(arg.unpack(), GenericArgKind::Type(<span class="kw">_</span>))) {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(TYPE_TAG, <span class="number">0</span>);
+            <span class="comment">// SAFETY: All elements are types, see `List&lt;Ty&lt;&#39;tcx&gt;&gt;::as_substs`.
+            </span><span class="prelude-val">Some</span>(<span class="kw">unsafe </span>{ <span class="kw-2">&amp;*</span>(<span class="self"><a href="#245">self</a> </span><span class="kw">as </span><span class="kw-2">*const </span>List&lt;GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; <span class="kw">as </span><span class="kw-2">*const </span>List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;) })
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+
+    <span class="doccomment">/// Interpret these substitutions as the substitutions of a closure type.
+    /// Closure substitutions have a particular structure controlled by the
+    /// compiler that encodes information like the signature and closure kind;
+    /// see `ty::ClosureSubsts` struct for more comments.
+    </span><span class="kw">pub fn </span>as_closure(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; ClosureSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="sty.rs.html#206">ClosureSubsts</a> { substs: <span class="self"><a href="#259">self</a> </span>}
+    }
+
+    <span class="doccomment">/// Interpret these substitutions as the substitutions of a generator type.
+    /// Generator substitutions have a particular structure controlled by the
+    /// compiler that encodes information like the signature and generator kind;
+    /// see `ty::GeneratorSubsts` struct for more comments.
+    </span><span class="kw">pub fn </span>as_generator(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; GeneratorSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="sty.rs.html#337">GeneratorSubsts</a> { substs: <span class="self"><a href="#267">self</a> </span>}
+    }
+
+    <span class="doccomment">/// Interpret these substitutions as the substitutions of an inline const.
+    /// Inline const substitutions have a particular structure controlled by the
+    /// compiler that encodes information like the inferred type;
+    /// see `ty::InlineConstSubsts` struct for more comments.
+    </span><span class="kw">pub fn </span>as_inline_const(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; InlineConstSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="sty.rs.html#617">InlineConstSubsts</a> { substs: <span class="self"><a href="#275">self</a> </span>}
+    }
+
+    <span class="doccomment">/// Creates an `InternalSubsts` that maps each generic parameter to itself.
+    </span><span class="kw">pub fn </span>identity_for_item(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="self">Self</span>::for_item(<a href="#280">tcx</a>, <a href="#280">def_id</a>, |param, <span class="kw">_</span>| <a href="#280">tcx</a>.<a href="context.rs.html#2620">mk_param_from_def</a>(<a href="#281">param</a>))
+    }
+
+    <span class="doccomment">/// Creates an `InternalSubsts` for generic parameter definitions,
+    /// by calling closures to obtain each kind.
+    /// The closures get to observe the `InternalSubsts` as they&#39;re
+    /// being built, which can be used to correctly
+    /// substitute defaults of generic parameters.
+    </span><span class="kw">pub fn </span>for_item&lt;F&gt;(tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <span class="kw-2">mut </span>mk_kind: F) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;
+    <span class="kw">where
+        </span>F: FnMut(<span class="kw-2">&amp;</span><a href="generics.rs.html#52">ty::GenericParamDef</a>, <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">let </span>defs = <a href="#289">tcx</a>.<a href="query.rs.html#337">generics_of</a>(<a href="#289">def_id</a>);
+        <span class="kw">let </span>count = <a href="#293">defs</a>.<a href="generics.rs.html#141">count</a>();
+        <span class="kw">let </span><span class="kw-2">mut </span>substs = SmallVec::with_capacity(<a href="#294">count</a>);
+        <span class="self">Self</span>::fill_item(<span class="kw-2">&amp;mut </span><a href="#295">substs</a>, <a href="#289">tcx</a>, <a href="#293">defs</a>, <span class="kw-2">&amp;mut </span><a href="#289">mk_kind</a>);
+        <a href="#289">tcx</a>.<a href="context.rs.html#2720">intern_substs</a>(<span class="kw-2">&amp;</span><a href="#295">substs</a>)
+    }
+
+    <span class="kw">pub fn </span>extend_to&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>, <span class="kw-2">mut </span>mk_kind: F) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;
+    <span class="kw">where
+        </span>F: FnMut(<span class="kw-2">&amp;</span><a href="generics.rs.html#52">ty::GenericParamDef</a>, <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="self">Self</span>::for_item(<a href="#300">tcx</a>, <a href="#300">def_id</a>, |param, substs| {
+            <a class="self" href="#300">self</a>.get(<a href="#304">param</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>).cloned().unwrap_or_else(|| <a href="#300">mk_kind</a>(<a href="#304">param</a>, <a href="#304">substs</a>))
+        })
+    }
+
+    <span class="kw">pub fn </span>fill_item&lt;F&gt;(
+        substs: <span class="kw-2">&amp;mut </span>SmallVec&lt;[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;; <span class="number">8</span>]&gt;,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        defs: <span class="kw-2">&amp;</span><a href="generics.rs.html#111">ty::Generics</a>,
+        mk_kind: <span class="kw-2">&amp;mut </span>F,
+    ) <span class="kw">where
+        </span>F: FnMut(<span class="kw-2">&amp;</span><a href="generics.rs.html#52">ty::GenericParamDef</a>, <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(def_id) = <a href="#312">defs</a>.parent {
+            <span class="kw">let </span>parent_defs = <a href="#311">tcx</a>.<a href="query.rs.html#337">generics_of</a>(<a href="#317">def_id</a>);
+            <span class="self">Self</span>::fill_item(<a href="#310">substs</a>, <a href="#311">tcx</a>, <a href="#318">parent_defs</a>, <a href="#313">mk_kind</a>);
+        }
+        <span class="self">Self</span>::fill_single(<a href="#310">substs</a>, <a href="#312">defs</a>, <a href="#313">mk_kind</a>)
+    }
+
+    <span class="kw">pub fn </span>fill_single&lt;F&gt;(
+        substs: <span class="kw-2">&amp;mut </span>SmallVec&lt;[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;; <span class="number">8</span>]&gt;,
+        defs: <span class="kw-2">&amp;</span><a href="generics.rs.html#111">ty::Generics</a>,
+        mk_kind: <span class="kw-2">&amp;mut </span>F,
+    ) <span class="kw">where
+        </span>F: FnMut(<span class="kw-2">&amp;</span><a href="generics.rs.html#52">ty::GenericParamDef</a>, <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    {
+        <a href="#325">substs</a>.reserve(<a href="#326">defs</a>.params.len());
+        <span class="kw">for </span>param <span class="kw">in </span><span class="kw-2">&amp;</span>defs.params {
+            <span class="kw">let </span>kind = mk_kind(param, substs);
+            <span class="macro">assert_eq!</span>(param.index <span class="kw">as </span>usize, substs.len());
+            substs.push(kind);
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>types(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>DoubleEndedIterator&lt;Item = Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; + <span class="lifetime">&#39;tcx </span>{
+        <a class="self" href="#340">self</a>.<a href="list.rs.html#111">iter</a>()
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|k| <span class="kw">if let </span><a href="#47">GenericArgKind::Type</a>(ty) = <a href="#342">k</a>.<a href="#146">unpack</a>() { <span class="prelude-val">Some</span>(<a href="#342">ty</a>) } <span class="kw">else </span>{ <span class="prelude-val">None </span>})
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>regions(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>DoubleEndedIterator&lt;Item = ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; + <span class="lifetime">&#39;tcx </span>{
+        <a class="self" href="#346">self</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|k| {
+            <span class="kw">if let </span><a href="#46">GenericArgKind::Lifetime</a>(lt) = <a href="#347">k</a>.<a href="#146">unpack</a>() { <span class="prelude-val">Some</span>(<a href="#348">lt</a>) } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+        })
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>consts(<span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>DoubleEndedIterator&lt;Item = ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; + <span class="lifetime">&#39;tcx </span>{
+        <a class="self" href="#353">self</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|k| {
+            <span class="kw">if let </span><a href="#48">GenericArgKind::Const</a>(ct) = <a href="#354">k</a>.<a href="#146">unpack</a>() { <span class="prelude-val">Some</span>(<a href="#355">ct</a>) } <span class="kw">else </span>{ <span class="prelude-val">None </span>}
+        })
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>non_erasable_generics(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>DoubleEndedIterator&lt;Item = GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; + <span class="lifetime">&#39;tcx </span>{
+        <a class="self" href="#361">self</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|k| <span class="kw">match </span><a href="#363">k</a>.<a href="#146">unpack</a>() {
+            <a href="#46">GenericArgKind::Lifetime</a>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            generic =&gt; <span class="prelude-val">Some</span>(<a href="#365">generic</a>),
+        })
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>type_at(<span class="kw-2">&amp;</span><span class="self">self</span>, i: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><a href="#47">GenericArgKind::Type</a>(ty) = <a class="self" href="#370">self</a>[<a href="#370">i</a>].<a href="#146">unpack</a>() {
+            <a href="#371">ty</a>
+        } <span class="kw">else </span>{
+            <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected type for param #{} in {:?}&quot;</span>, i, <span class="self">self</span>);
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>region_at(<span class="kw-2">&amp;</span><span class="self">self</span>, i: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><a href="#46">GenericArgKind::Lifetime</a>(lt) = <a class="self" href="#379">self</a>[<a href="#379">i</a>].<a href="#146">unpack</a>() {
+            <a href="#380">lt</a>
+        } <span class="kw">else </span>{
+            <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected region for param #{} in {:?}&quot;</span>, i, <span class="self">self</span>);
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>const_at(<span class="kw-2">&amp;</span><span class="self">self</span>, i: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><a href="#48">GenericArgKind::Const</a>(ct) = <a class="self" href="#388">self</a>[<a href="#388">i</a>].<a href="#146">unpack</a>() {
+            <a href="#389">ct</a>
+        } <span class="kw">else </span>{
+            <a class="macro" href="../macros.rs.html#2-9">bug!</a>(<span class="string">&quot;expected const for param #{} in {:?}&quot;</span>, i, <span class="self">self</span>);
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub fn </span>type_for_def(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <span class="kw-2">&amp;</span><a href="generics.rs.html#52">ty::GenericParamDef</a>) -&gt; GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#397">self</a>.<a href="#370">type_at</a>(<a href="#397">def</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>).<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>()
+    }
+
+    <span class="doccomment">/// Transform from substitutions for a child of `source_ancestor`
+    /// (e.g., a trait or impl) to substitutions for the same child
+    /// in a different item, with `target_substs` as the base for
+    /// the target impl/trait, with the source child-specific
+    /// parameters (e.g., method parameters) on top of that base.
+    ///
+    /// For example given:
+    ///
+    /// ```no_run
+    /// trait X&lt;S&gt; { fn f&lt;T&gt;(); }
+    /// impl&lt;U&gt; X&lt;U&gt; for U { fn f&lt;V&gt;() {} }
+    /// ```
+    ///
+    /// * If `self` is `[Self, S, T]`: the identity substs of `f` in the trait.
+    /// * If `source_ancestor` is the def_id of the trait.
+    /// * If `target_substs` is `[U]`, the substs for the impl.
+    /// * Then we will return `[U, T]`, the subst for `f` in the impl that
+    ///   are needed for it to match the trait.
+    </span><span class="kw">pub fn </span>rebase_onto(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        source_ancestor: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        target_substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>defs = <a href="#421">tcx</a>.<a href="query.rs.html#337">generics_of</a>(<a href="#422">source_ancestor</a>);
+        <a href="#421">tcx</a>.<a href="context.rs.html#2788-2791">mk_substs</a>(<a href="#423">target_substs</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">chain</a>(<a class="self" href="#420">self</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">skip</a>(<a href="#425">defs</a>.params.len())))
+    }
+
+    <span class="kw">pub fn </span>truncate_to(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, generics: <span class="kw-2">&amp;</span><a href="generics.rs.html#111">ty::Generics</a>) -&gt; SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#429">tcx</a>.<a href="context.rs.html#2788-2791">mk_substs</a>(<a class="self" href="#429">self</a>.<a href="list.rs.html#111">iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">take</a>(<a href="#429">generics</a>.<a href="generics.rs.html#141">count</a>()))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>try_fold_with&lt;F: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, F::Error&gt; {
+        <span class="comment">// This code is hot enough that it&#39;s worth specializing for the most
+        // common length lists, to avoid the overhead of `SmallVec` creation.
+        // The match arms are in order of frequency. The 1, 2, and 0 cases are
+        // typically hit in 90--99.99% of cases. When folding doesn&#39;t change
+        // the substs, it&#39;s faster to reuse the existing substs rather than
+        // calling `intern_substs`.
+        </span><span class="kw">match </span><a class="self" href="#435">self</a>.<a href="list.rs.html#65">len</a>() {
+            <span class="number">1 </span>=&gt; {
+                <span class="kw">let </span>param0 = <span class="self">self</span>[<span class="number">0</span>].try_fold_with(folder)<span class="question-mark">?</span>;
+                <span class="kw">if </span>param0 == <span class="self">self</span>[<span class="number">0</span>] { <span class="prelude-val">Ok</span>(<a class="self" href="#435">self</a>) } <span class="kw">else </span>{ <span class="prelude-val">Ok</span>(<a href="#435">folder</a>.<a href="fold.rs.html#154">tcx</a>().<a href="context.rs.html#2720">intern_substs</a>(<span class="kw-2">&amp;</span>[<a href="#444">param0</a>])) }
+            }
+            <span class="number">2 </span>=&gt; {
+                <span class="kw">let </span>param0 = <span class="self">self</span>[<span class="number">0</span>].try_fold_with(folder)<span class="question-mark">?</span>;
+                <span class="kw">let </span>param1 = <span class="self">self</span>[<span class="number">1</span>].try_fold_with(folder)<span class="question-mark">?</span>;
+                <span class="kw">if </span>param0 == <span class="self">self</span>[<span class="number">0</span>] &amp;&amp; param1 == <span class="self">self</span>[<span class="number">1</span>] {
+                    <span class="prelude-val">Ok</span>(<a class="self" href="#435">self</a>)
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Ok</span>(<a href="#435">folder</a>.<a href="fold.rs.html#154">tcx</a>().<a href="context.rs.html#2720">intern_substs</a>(<span class="kw-2">&amp;</span>[<a href="#448">param0</a>, <a href="#449">param1</a>]))
+                }
+            }
+            <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(<a class="self" href="#435">self</a>),
+            <span class="kw">_ </span>=&gt; <a href="util.rs.html#1232-1239">ty::util::fold_list</a>(<a class="self" href="#435">self</a>, <a href="#435">folder</a>, |tcx, v| <a href="#457">tcx</a>.<a href="context.rs.html#2720">intern_substs</a>(<a href="#457">v</a>)),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::List&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+    <span class="kw">fn </span>try_fold_with&lt;F: FallibleTypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="self">self</span>, folder: <span class="kw-2">&amp;mut </span>F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, F::Error&gt; {
+        <span class="comment">// This code is fairly hot, though not as hot as `SubstsRef`.
+        //
+        // When compiling stage 2, I get the following results:
+        //
+        // len |   total   |   %
+        // --- | --------- | -----
+        //  2  |  15083590 |  48.1
+        //  3  |   7540067 |  24.0
+        //  1  |   5300377 |  16.9
+        //  4  |   1351897 |   4.3
+        //  0  |   1256849 |   4.0
+        //
+        // I&#39;ve tried it with some private repositories and got
+        // close to the same result, with 4 and 0 swapping places
+        // sometimes.
+        </span><span class="kw">match </span><a class="self" href="#463">self</a>.<a href="list.rs.html#65">len</a>() {
+            <span class="number">2 </span>=&gt; {
+                <span class="kw">let </span>param0 = <span class="self">self</span>[<span class="number">0</span>].try_fold_with(folder)<span class="question-mark">?</span>;
+                <span class="kw">let </span>param1 = <span class="self">self</span>[<span class="number">1</span>].try_fold_with(folder)<span class="question-mark">?</span>;
+                <span class="kw">if </span>param0 == <span class="self">self</span>[<span class="number">0</span>] &amp;&amp; param1 == <span class="self">self</span>[<span class="number">1</span>] {
+                    <span class="prelude-val">Ok</span>(<a class="self" href="#463">self</a>)
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Ok</span>(<a href="#463">folder</a>.<a href="fold.rs.html#154">tcx</a>().<a href="context.rs.html#2704">intern_type_list</a>(<span class="kw-2">&amp;</span>[<a href="#481">param0</a>, <a href="#482">param1</a>]))
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a href="util.rs.html#1232-1239">ty::util::fold_list</a>(<a class="self" href="#463">self</a>, <a href="#463">folder</a>, |tcx, v| <a href="#489">tcx</a>.<a href="context.rs.html#2704">intern_type_list</a>(<a href="#489">v</a>)),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, T: TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; TypeVisitable&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>ty::List&lt;T&gt; {
+    <span class="kw">fn </span>visit_with&lt;V: TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, visitor: <span class="kw-2">&amp;mut </span>V) -&gt; ControlFlow&lt;V::BreakTy&gt; {
+        <a class="self" href="#495">self</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">try_for_each</a>(|t| <a href="#496">t</a>.<a href="visit.rs.html#67">visit_with</a>(<a href="#495">visitor</a>))
+    }
+}
+
+<span class="comment">// Just call `foo.subst(tcx, substs)` to perform a substitution across `foo`.
+</span><span class="attribute">#[rustc_on_unimplemented(message = <span class="string">&quot;Calling `subst` must now be done through an `EarlyBinder`&quot;</span>)]
+</span><span class="kw">pub trait </span>Subst&lt;<span class="lifetime">&#39;tcx</span>&gt;: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {
+    <span class="kw">type </span>Inner;
+
+    <span class="kw">fn </span>subst(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, substs: <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; <span class="self">Self</span>::Inner;
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>, T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; Subst&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ty::EarlyBinder&lt;T&gt; {
+    <span class="kw">type </span>Inner = T;
+
+    <span class="kw">fn </span>subst(<span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, substs: <span class="kw-2">&amp;</span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;]) -&gt; <span class="self">Self</span>::Inner {
+        <span class="kw">let </span><span class="kw-2">mut </span>folder = <a href="#520">SubstFolder</a> { <a href="#511">tcx</a>, <a href="#511">substs</a>, binders_passed: <span class="number">0 </span>};
+        <a class="self" href="#511">self</a>.<span class="number">0</span>.<a href="fold.rs.html#74">fold_with</a>(<span class="kw-2">&amp;mut </span><a href="#512">folder</a>)
+    }
+}
+
+<span class="comment">///////////////////////////////////////////////////////////////////////////
+// The actual substitution engine itself is a type folder.
+
+</span><span class="kw">struct </span>SubstFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    substs: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[GenericArg&lt;<span class="lifetime">&#39;tcx</span>&gt;],
+
+    <span class="doccomment">/// Number of region binders we have passed through while doing the substitution
+    </span>binders_passed: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeFolder&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>SubstFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#530">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>fold_binder&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        t: ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt;,
+    ) -&gt; ty::Binder&lt;<span class="lifetime">&#39;tcx</span>, T&gt; {
+        <a class="self" href="#535">self</a>.binders_passed += <span class="number">1</span>;
+        <span class="kw">let </span>t = <a href="#536">t</a>.<a href="fold.rs.html#95">super_fold_with</a>(<a class="self" href="#535">self</a>);
+        <a class="self" href="#535">self</a>.binders_passed -= <span class="number">1</span>;
+        <a href="#539">t</a>
+    }
+
+    <span class="kw">fn </span>fold_region(<span class="kw-2">&amp;mut </span><span class="self">self</span>, r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="attribute">#[cold]
+        #[inline(never)]
+        </span><span class="kw">fn </span>region_param_out_of_range(data: <a href="sty.rs.html#1377">ty::EarlyBoundRegion</a>) -&gt; ! {
+            <a class="macro" href="../macros.rs.html#2-9">bug!</a>(
+                <span class="string">&quot;Region parameter out of range when substituting in region {} (index={})&quot;</span>,
+                data.name,
+                data.index
+            )
+        }
+
+        <span class="comment">// Note: This routine only handles regions that are bound on
+        // type declarations and other outer declarations, not those
+        // bound in *fn types*. Region substitution of the bound
+        // regions that appear in a function signature is done using
+        // the specialized routine `ty::replace_late_regions()`.
+        </span><span class="kw">match </span><span class="kw-2">*</span><a href="#544">r</a> {
+            ty::ReEarlyBound(data) =&gt; {
+                <span class="kw">let </span>rk = <a class="self" href="#544">self</a>.substs.get(<a href="#561">data</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>).map(|k| <a href="#562">k</a>.<a href="#146">unpack</a>());
+                <span class="kw">match </span><a href="#562">rk</a> {
+                    <span class="prelude-val">Some</span>(<a href="#46">GenericArgKind::Lifetime</a>(lt)) =&gt; <a class="self" href="#544">self</a>.<a href="#737">shift_region_through_binders</a>(<a href="#564">lt</a>),
+                    <span class="kw">_ </span>=&gt; <a href="#547">region_param_out_of_range</a>(<a href="#561">data</a>),
+                }
+            }
+            <span class="kw">_ </span>=&gt; <a href="#544">r</a>,
+        }
+    }
+
+    <span class="kw">fn </span>fold_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span>!t.needs_subst() {
+            <span class="kw">return </span><a href="#572">t</a>;
+        }
+
+        <span class="kw">match </span><span class="kw-2">*</span><a href="#572">t</a>.<a href="sty.rs.html#1639">kind</a>() {
+            ty::Param(p) =&gt; <a class="self" href="#572">self</a>.<a href="#598">ty_for_param</a>(<a href="#578">p</a>, <a href="#572">t</a>),
+            <span class="kw">_ </span>=&gt; <a href="#572">t</a>.<a href="fold.rs.html#95">super_fold_with</a>(<a class="self" href="#572">self</a>),
+        }
+    }
+
+    <span class="kw">fn </span>fold_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><a href="consts/kind.rs.html#57">ty::ConstKind::Param</a>(p) = <a href="#583">c</a>.<a href="consts.rs.html#53">kind</a>() {
+            <a class="self" href="#583">self</a>.<a href="#635">const_for_param</a>(<a href="#584">p</a>, <a href="#583">c</a>)
+        } <span class="kw">else </span>{
+            <a href="#583">c</a>.<a href="fold.rs.html#95">super_fold_with</a>(<a class="self" href="#583">self</a>)
+        }
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>fold_mir_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; mir::ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#592">c</a>.<a href="fold.rs.html#95">super_fold_with</a>(<a class="self" href="#592">self</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; SubstFolder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>ty_for_param(<span class="kw-2">&amp;</span><span class="self">self</span>, p: <a href="sty.rs.html#1318">ty::ParamTy</a>, source_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Look up the type in the substitutions. It really should be in there.
+        </span><span class="kw">let </span>opt_ty = <a class="self" href="#598">self</a>.substs.get(<a href="#598">p</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>).map(|k| <a href="#600">k</a>.<a href="#146">unpack</a>());
+        <span class="kw">let </span>ty = <span class="kw">match </span><a href="#600">opt_ty</a> {
+            <span class="prelude-val">Some</span>(<a href="#47">GenericArgKind::Type</a>(ty)) =&gt; <a href="#602">ty</a>,
+            <span class="prelude-val">Some</span>(kind) =&gt; <a class="self" href="#598">self</a>.<a href="#612">type_param_expected</a>(<a href="#598">p</a>, <a href="#598">source_ty</a>, <a href="#603">kind</a>),
+            <span class="prelude-val">None </span>=&gt; <a class="self" href="#598">self</a>.<a href="#625">type_param_out_of_range</a>(<a href="#598">p</a>, <a href="#598">source_ty</a>),
+        };
+
+        <a class="self" href="#598">self</a>.<a href="#719">shift_vars_through_binders</a>(<a href="#601">ty</a>)
+    }
+
+    <span class="attribute">#[cold]
+    #[inline(never)]
+    </span><span class="kw">fn </span>type_param_expected(<span class="kw-2">&amp;</span><span class="self">self</span>, p: <a href="sty.rs.html#1318">ty::ParamTy</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, kind: GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ! {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(
+            <span class="string">&quot;expected type for `{:?}` ({:?}/{}) but found {:?} when substituting, substs={:?}&quot;</span>,
+            p,
+            ty,
+            p.index,
+            kind,
+            <span class="self">self</span>.substs,
+        )
+    }
+
+    <span class="attribute">#[cold]
+    #[inline(never)]
+    </span><span class="kw">fn </span>type_param_out_of_range(<span class="kw-2">&amp;</span><span class="self">self</span>, p: <a href="sty.rs.html#1318">ty::ParamTy</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ! {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(
+            <span class="string">&quot;type parameter `{:?}` ({:?}/{}) out of range when substituting, substs={:?}&quot;</span>,
+            p,
+            ty,
+            p.index,
+            <span class="self">self</span>.substs,
+        )
+    }
+
+    <span class="kw">fn </span>const_for_param(<span class="kw-2">&amp;</span><span class="self">self</span>, p: <a href="sty.rs.html#1340">ParamConst</a>, source_ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Look up the const in the substitutions. It really should be in there.
+        </span><span class="kw">let </span>opt_ct = <a class="self" href="#635">self</a>.substs.get(<a href="#635">p</a>.index <span class="kw">as </span><a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>).map(|k| <a href="#637">k</a>.<a href="#146">unpack</a>());
+        <span class="kw">let </span>ct = <span class="kw">match </span><a href="#637">opt_ct</a> {
+            <span class="prelude-val">Some</span>(<a href="#48">GenericArgKind::Const</a>(ct)) =&gt; <a href="#639">ct</a>,
+            <span class="prelude-val">Some</span>(kind) =&gt; <a class="self" href="#635">self</a>.<a href="#649-654">const_param_expected</a>(<a href="#635">p</a>, <a href="#635">source_ct</a>, <a href="#640">kind</a>),
+            <span class="prelude-val">None </span>=&gt; <a class="self" href="#635">self</a>.<a href="#667">const_param_out_of_range</a>(<a href="#635">p</a>, <a href="#635">source_ct</a>),
+        };
+
+        <a class="self" href="#635">self</a>.<a href="#719">shift_vars_through_binders</a>(<a href="#638">ct</a>)
+    }
+
+    <span class="attribute">#[cold]
+    #[inline(never)]
+    </span><span class="kw">fn </span>const_param_expected(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        p: <a href="sty.rs.html#1340">ty::ParamConst</a>,
+        ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        kind: GenericArgKind&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; ! {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(
+            <span class="string">&quot;expected const for `{:?}` ({:?}/{}) but found {:?} when substituting substs={:?}&quot;</span>,
+            p,
+            ct,
+            p.index,
+            kind,
+            <span class="self">self</span>.substs,
+        )
+    }
+
+    <span class="attribute">#[cold]
+    #[inline(never)]
+    </span><span class="kw">fn </span>const_param_out_of_range(<span class="kw-2">&amp;</span><span class="self">self</span>, p: <a href="sty.rs.html#1340">ty::ParamConst</a>, ct: ty::Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ! {
+        <a class="macro" href="../macros.rs.html#2-9">bug!</a>(
+            <span class="string">&quot;const parameter `{:?}` ({:?}/{}) out of range when substituting substs={:?}&quot;</span>,
+            p,
+            ct,
+            p.index,
+            <span class="self">self</span>.substs,
+        )
+    }
+
+    <span class="doccomment">/// It is sometimes necessary to adjust the De Bruijn indices during substitution. This occurs
+    /// when we are substituting a type with escaping bound vars into a context where we have
+    /// passed through binders. That&#39;s quite a mouthful. Let&#39;s see an example:
+    ///
+    /// ```
+    /// type Func&lt;A&gt; = fn(A);
+    /// type MetaFunc = for&lt;&#39;a&gt; fn(Func&lt;&amp;&#39;a i32&gt;);
+    /// ```
+    ///
+    /// The type `MetaFunc`, when fully expanded, will be
+    /// ```ignore (illustrative)
+    /// for&lt;&#39;a&gt; fn(fn(&amp;&#39;a i32))
+    /// //      ^~ ^~ ^~~
+    /// //      |  |  |
+    /// //      |  |  DebruijnIndex of 2
+    /// //      Binders
+    /// ```
+    /// Here the `&#39;a` lifetime is bound in the outer function, but appears as an argument of the
+    /// inner one. Therefore, that appearance will have a DebruijnIndex of 2, because we must skip
+    /// over the inner binder (remember that we count De Bruijn indices from 1). However, in the
+    /// definition of `MetaFunc`, the binder is not visible, so the type `&amp;&#39;a i32` will have a
+    /// De Bruijn index of 1. It&#39;s only during the substitution that we can see we must increase the
+    /// depth by 1 to account for the binder that we passed through.
+    ///
+    /// As a second example, consider this twist:
+    ///
+    /// ```
+    /// type FuncTuple&lt;A&gt; = (A,fn(A));
+    /// type MetaFuncTuple = for&lt;&#39;a&gt; fn(FuncTuple&lt;&amp;&#39;a i32&gt;);
+    /// ```
+    ///
+    /// Here the final type will be:
+    /// ```ignore (illustrative)
+    /// for&lt;&#39;a&gt; fn((&amp;&#39;a i32, fn(&amp;&#39;a i32)))
+    /// //          ^~~         ^~~
+    /// //          |           |
+    /// //   DebruijnIndex of 1 |
+    /// //               DebruijnIndex of 2
+    /// ```
+    /// As indicated in the diagram, here the same type `&amp;&#39;a i32` is substituted once, but in the
+    /// first case we do not increase the De Bruijn index and in the second case we do. The reason
+    /// is that only in the second case have we passed through a fn binder.
+    </span><span class="kw">fn </span>shift_vars_through_binders&lt;T: TypeFoldable&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, val: T) -&gt; T {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;shift_vars(val={:?}, binders_passed={:?}, has_escaping_bound_vars={:?})&quot;</span>,
+            val,
+            <span class="self">self</span>.binders_passed,
+            val.has_escaping_bound_vars()
+        );
+
+        <span class="kw">if </span><span class="self">self</span>.binders_passed == <span class="number">0 </span>|| !val.has_escaping_bound_vars() {
+            <span class="kw">return </span><a href="#719">val</a>;
+        }
+
+        <span class="kw">let </span>result = <a href="fold.rs.html#797-799">ty::fold::shift_vars</a>(<a href="fold.rs.html#110">TypeFolder::tcx</a>(<a class="self" href="#719">self</a>), <a href="#719">val</a>, <a class="self" href="#719">self</a>.binders_passed);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;shift_vars: shifted result = {:?}&quot;</span>, result);
+
+        <a href="#731">result</a>
+    }
+
+    <span class="kw">fn </span>shift_region_through_binders(<span class="kw-2">&amp;</span><span class="self">self</span>, region: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span><span class="self">self</span>.binders_passed == <span class="number">0 </span>|| !region.has_escaping_bound_vars() {
+            <span class="kw">return </span><a href="#737">region</a>;
+        }
+        <a href="fold.rs.html#784-788">ty::fold::shift_region</a>(<a class="self" href="#737">self</a>.tcx, <a href="#737">region</a>, <a class="self" href="#737">self</a>.binders_passed)
+    }
+}
+
+<span class="doccomment">/// Stores the user-given substs to reach some fully qualified path
+/// (e.g., `&lt;T&gt;::Item` or `&lt;T as Trait&gt;::Item`).
+</span><span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, TyEncodable, TyDecodable)]
+#[derive(HashStable, TypeFoldable, TypeVisitable, Lift)]
+</span><span class="kw">pub struct </span>UserSubsts&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// The substitutions for the item as given by the user.
+    </span><span class="kw">pub </span>substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// The self type, in the case of a `&lt;T&gt;::Item` path (when applied
+    /// to an inherent impl). See `UserSelfTy` below.
+    </span><span class="kw">pub </span>user_self_ty: <span class="prelude-ty">Option</span>&lt;UserSelfTy&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="doccomment">/// Specifies the user-given self type. In the case of a path that
+/// refers to a member in an inherent impl, this self type is
+/// sometimes needed to constrain the type parameters on the impl. For
+/// example, in this code:
+///
+/// ```ignore (illustrative)
+/// struct Foo&lt;T&gt; { }
+/// impl&lt;A&gt; Foo&lt;A&gt; { fn method() { } }
+/// ```
+///
+/// when you then have a path like `&lt;Foo&lt;&amp;&#39;static u32&gt;&gt;::method`,
+/// this struct would carry the `DefId` of the impl along with the
+/// self type `Foo&lt;u32&gt;`. Then we can instantiate the parameters of
+/// the impl (with the substs from `UserSubsts`) and apply those to
+/// the self type, giving `Foo&lt;?A&gt;`. Finally, we unify that with
+/// the self type here, which contains `?A` to be `&amp;&#39;static u32`
+</span><span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, TyEncodable, TyDecodable)]
+#[derive(HashStable, TypeFoldable, TypeVisitable, Lift)]
+</span><span class="kw">pub struct </span>UserSelfTy&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub </span>impl_def_id: <a href="../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    <span class="kw">pub </span>self_ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_middle" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

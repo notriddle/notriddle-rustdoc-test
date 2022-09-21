@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["REMOVED_FEATURES","Represents unstable features which have since been removed (it was once Active)"],["STABLE_REMOVED_FEATURES","Represents stable features which have since been removed (it was once Accepted)"]],"macro":[["declare_features",""]]};

@@ -1,0 +1,822 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_monomorphize/src/polymorphize.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>polymorphize.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_monomorphize/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_monomorphize/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_monomorphize/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+</pre><pre class="rust"><code><span class="doccomment">//! Polymorphization Analysis
+//! =========================
+//!
+//! This module implements an analysis of functions, methods and closures to determine which
+//! generic parameters are unused (and eventually, in what ways generic parameters are used - only
+//! for their size, offset of a field, etc.).
+
+</span><span class="kw">use </span>rustc_hir::{<a href="../../rustc_hir/def/enum.DefKind.html">def::DefKind</a>, <a href="../../rustc_span/def_id/struct.DefId.html">def_id::DefId</a>, <a href="../../rustc_hir/hir/enum.ConstContext.html">ConstContext</a>};
+<span class="kw">use </span>rustc_index::bit_set::FiniteBitSet;
+<span class="kw">use </span>rustc_middle::mir::{
+    visit::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.TyContext.html">TyContext</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">Visitor</a>},
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Constant.html">Constant</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/enum.ConstantKind.html">ConstantKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.LocalDecl.html">LocalDecl</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>,
+};
+<span class="kw">use </span>rustc_middle::ty::{
+    <a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>,
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">query::Providers</a>,
+    <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/type.SubstsRef.html">subst::SubstsRef</a>,
+    visit::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">TypeSuperVisitable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">TypeVisitable</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitor.html">TypeVisitor</a>},
+    Const, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>,
+};
+<span class="kw">use </span><a href="../../rustc_span/symbol/sym/index.html">rustc_span::symbol::sym</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">std::convert::TryInto</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/control_flow/enum.ControlFlow.html">std::ops::ControlFlow</a>;
+
+<span class="kw">use </span><a href="errors.rs.html#41"><span class="kw">crate</span>::errors::UnusedGenericParams</a>;
+
+<span class="doccomment">/// Provide implementations of queries relating to polymorphization analysis.
+</span><span class="kw">pub fn </span>provide(providers: <span class="kw-2">&amp;mut </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/query/struct.Providers.html">Providers</a>) {
+    <a href="#28">providers</a>.unused_generic_params = <a href="#36-39">unused_generic_params</a>;
+}
+
+<span class="doccomment">/// Determine which generic parameters are used by the instance.
+///
+/// Returns a bitset where bits representing unused parameters are set (`is_empty` indicates all
+/// parameters are used).
+</span><span class="kw">fn </span>unused_generic_params&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    instance: ty::InstanceDef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; FiniteBitSet&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt; {
+    <span class="kw">if </span>!tcx.sess.opts.unstable_opts.polymorphize {
+        <span class="comment">// If polymorphization disabled, then all parameters are used.
+        </span><span class="kw">return </span>FiniteBitSet::new_empty();
+    }
+
+    <span class="kw">let </span>def_id = <a href="#38">instance</a>.def_id();
+    <span class="comment">// Exit early if this instance should not be polymorphized.
+    </span><span class="kw">if </span>!should_polymorphize(tcx, def_id, instance) {
+        <span class="kw">return </span>FiniteBitSet::new_empty();
+    }
+
+    <span class="kw">let </span>generics = <a href="#37">tcx</a>.generics_of(<a href="#45">def_id</a>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>generics);
+
+    <span class="comment">// Exit early when there are no parameters to be unused.
+    </span><span class="kw">if </span>generics.count() == <span class="number">0 </span>{
+        <span class="kw">return </span>FiniteBitSet::new_empty();
+    }
+
+    <span class="comment">// Create a bitset with N rightmost ones for each parameter.
+    </span><span class="kw">let </span>generics_count: <a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a> =
+        <a href="#51">generics</a>.count().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html">try_into</a>().expect(<span class="string">&quot;more generic parameters than can fit into a `u32`&quot;</span>);
+    <span class="kw">let </span><span class="kw-2">mut </span>unused_parameters = FiniteBitSet::&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt;::new_empty();
+    <a href="#62">unused_parameters</a>.set_range(<span class="number">0</span>..<a href="#60">generics_count</a>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>unused_parameters, <span class="string">&quot;(start)&quot;</span>);
+
+    <a href="#134">mark_used_by_default_parameters</a>(<a href="#37">tcx</a>, <a href="#45">def_id</a>, <a href="#51">generics</a>, <span class="kw-2">&amp;mut </span><a href="#62">unused_parameters</a>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>unused_parameters, <span class="string">&quot;(after default)&quot;</span>);
+
+    <span class="comment">// Visit MIR and accumulate used generic parameters.
+    </span><span class="kw">let </span>body = <span class="kw">match </span><a href="#37">tcx</a>.hir().body_const_context(<a href="#45">def_id</a>.expect_local()) {
+        <span class="comment">// Const functions are actually called and should thus be considered for polymorphization
+        // via their runtime MIR.
+        </span><span class="prelude-val">Some</span>(ConstContext::ConstFn) | <span class="prelude-val">None </span>=&gt; <a href="#37">tcx</a>.optimized_mir(<a href="#45">def_id</a>),
+        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <a href="#37">tcx</a>.mir_for_ctfe(<a href="#45">def_id</a>),
+    };
+    <span class="kw">let </span><span class="kw-2">mut </span>vis = <a href="#231">MarkUsedGenericParams</a> { <a href="#37">tcx</a>, <a href="#45">def_id</a>, unused_parameters: <span class="kw-2">&amp;mut </span><a href="#62">unused_parameters</a> };
+    <a href="#76">vis</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">visit_body</a>(<a href="#70">body</a>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="question-mark">?</span>unused_parameters, <span class="string">&quot;(end)&quot;</span>);
+
+    <span class="comment">// Emit errors for debugging and testing if enabled.
+    </span><span class="kw">if </span>!unused_parameters.is_empty() {
+        <a href="#194">emit_unused_generic_params_error</a>(<a href="#37">tcx</a>, <a href="#45">def_id</a>, <a href="#51">generics</a>, <span class="kw-2">&amp;</span><a href="#62">unused_parameters</a>);
+    }
+
+    <a href="#62">unused_parameters</a>
+}
+
+<span class="doccomment">/// Returns `true` if the instance should be polymorphized.
+</span><span class="kw">fn </span>should_polymorphize&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    instance: ty::InstanceDef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="comment">// If an instance&#39;s MIR body is not polymorphic then the modified substitutions that are
+    // derived from polymorphization&#39;s result won&#39;t make any difference.
+    </span><span class="kw">if </span>!instance.has_polymorphic_mir_body() {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Don&#39;t polymorphize intrinsics or virtual calls - calling `instance_mir` will panic.
+    </span><span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(instance, ty::InstanceDef::Intrinsic(..) | ty::InstanceDef::Virtual(..)) {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Polymorphization results are stored in cross-crate metadata only when there are unused
+    // parameters, so assume that non-local items must have only used parameters (else this query
+    // would not be invoked, and the cross-crate metadata used instead).
+    </span><span class="kw">if </span>!def_id.is_local() {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Foreign items have no bodies to analyze.
+    </span><span class="kw">if </span>tcx.is_foreign_item(def_id) {
+        <span class="kw">return </span><span class="bool-val">false</span>;
+    }
+
+    <span class="comment">// Make sure there is MIR available.
+    </span><span class="kw">match </span><a href="#90">tcx</a>.hir().body_const_context(<a href="#91">def_id</a>.expect_local()) {
+        <span class="prelude-val">Some</span>(ConstContext::ConstFn) | <span class="prelude-val">None </span><span class="kw">if </span>!<a href="#90">tcx</a>.is_mir_available(<a href="#91">def_id</a>) =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;no mir available&quot;</span>);
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        }
+        <span class="prelude-val">Some</span>(<span class="kw">_</span>) <span class="kw">if </span>!<a href="#90">tcx</a>.is_ctfe_mir_available(<a href="#91">def_id</a>) =&gt; {
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;no ctfe mir available&quot;</span>);
+            <span class="kw">return </span><span class="bool-val">false</span>;
+        }
+        <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
+    }
+}
+
+<span class="doccomment">/// Some parameters are considered used-by-default, such as non-generic parameters and the dummy
+/// generic parameters from closures, this function marks them as used. `leaf_is_closure` should
+/// be `true` if the item that `unused_generic_params` was invoked on is a closure.
+</span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(tcx, def_id, generics, unused_parameters))]
+</span><span class="kw">fn </span>mark_used_by_default_parameters&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    generics: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.Generics.html">ty::Generics</a>,
+    unused_parameters: <span class="kw-2">&amp;mut </span>FiniteBitSet&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt;,
+) {
+    <span class="kw">match </span>tcx.def_kind(def_id) {
+        DefKind::Closure | DefKind::Generator =&gt; {
+            <span class="kw">for </span>param <span class="kw">in </span><span class="kw-2">&amp;</span>generics.params {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>param, <span class="string">&quot;(closure/gen)&quot;</span>);
+                unused_parameters.clear(param.index);
+            }
+        }
+        DefKind::Mod
+        | DefKind::Struct
+        | DefKind::Union
+        | DefKind::Enum
+        | DefKind::Variant
+        | DefKind::Trait
+        | DefKind::TyAlias
+        | DefKind::ForeignTy
+        | DefKind::TraitAlias
+        | DefKind::AssocTy
+        | DefKind::TyParam
+        | DefKind::Fn
+        | DefKind::Const
+        | DefKind::ConstParam
+        | DefKind::Static(<span class="kw">_</span>)
+        | DefKind::Ctor(<span class="kw">_</span>, <span class="kw">_</span>)
+        | DefKind::AssocFn
+        | DefKind::AssocConst
+        | DefKind::Macro(<span class="kw">_</span>)
+        | DefKind::ExternCrate
+        | DefKind::Use
+        | DefKind::ForeignMod
+        | DefKind::AnonConst
+        | DefKind::InlineConst
+        | DefKind::OpaqueTy
+        | DefKind::ImplTraitPlaceholder
+        | DefKind::Field
+        | DefKind::LifetimeParam
+        | DefKind::GlobalAsm
+        | DefKind::Impl =&gt; {
+            <span class="kw">for </span>param <span class="kw">in </span><span class="kw-2">&amp;</span>generics.params {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>param, <span class="string">&quot;(other)&quot;</span>);
+                <span class="kw">if let </span>ty::GenericParamDefKind::Lifetime = param.kind {
+                    unused_parameters.clear(param.index);
+                }
+            }
+        }
+    }
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(parent) = generics.parent {
+        mark_used_by_default_parameters(tcx, parent, tcx.generics_of(parent), unused_parameters);
+    }
+}
+
+<span class="doccomment">/// Emit errors for the function annotated by `#[rustc_polymorphize_error]`, labelling each generic
+/// parameter which was unused.
+</span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(tcx, generics))]
+</span><span class="kw">fn </span>emit_unused_generic_params_error&lt;<span class="lifetime">&#39;tcx</span>&gt;(
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    generics: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.Generics.html">ty::Generics</a>,
+    unused_parameters: <span class="kw-2">&amp;</span>FiniteBitSet&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt;,
+) {
+    <span class="kw">let </span>base_def_id = tcx.typeck_root_def_id(def_id);
+    <span class="kw">if </span>!tcx.has_attr(base_def_id, sym::rustc_polymorphize_error) {
+        <span class="kw">return</span>;
+    }
+
+    <span class="kw">let </span>fn_span = <span class="kw">match </span>tcx.opt_item_ident(def_id) {
+        <span class="prelude-val">Some</span>(ident) =&gt; ident.span,
+        <span class="kw">_ </span>=&gt; tcx.def_span(def_id),
+    };
+
+    <span class="kw">let </span><span class="kw-2">mut </span>param_spans = Vec::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>param_names = Vec::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>next_generics = <span class="prelude-val">Some</span>(generics);
+    <span class="kw">while let </span><span class="prelude-val">Some</span>(generics) = next_generics {
+        <span class="kw">for </span>param <span class="kw">in </span><span class="kw-2">&amp;</span>generics.params {
+            <span class="kw">if </span>unused_parameters.contains(param.index).unwrap_or(<span class="bool-val">false</span>) {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>param);
+                <span class="kw">let </span>def_span = tcx.def_span(param.def_id);
+                param_spans.push(def_span);
+                param_names.push(param.name.to_string());
+            }
+        }
+
+        next_generics = generics.parent.map(|did| tcx.generics_of(did));
+    }
+
+    tcx.sess.emit_err(UnusedGenericParams { span: fn_span, param_spans, param_names });
+}
+
+<span class="doccomment">/// Visitor used to aggregate generic parameter uses.
+</span><span class="kw">struct </span>MarkUsedGenericParams&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+    unused_parameters: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>FiniteBitSet&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; MarkUsedGenericParams&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="doccomment">/// Invoke `unused_generic_params` on a body contained within the current item (e.g.
+    /// a closure, generator or constant).
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>, def_id, substs))]
+    </span><span class="kw">fn </span>visit_child_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, def_id: <a href="../../rustc_span/def_id/struct.DefId.html">DefId</a>, substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">let </span>instance = ty::InstanceDef::Item(ty::WithOptConstParam::unknown(def_id));
+        <span class="kw">let </span>unused = <span class="self">self</span>.tcx.unused_generic_params(instance);
+        <span class="macro">debug!</span>(<span class="question-mark">?</span><span class="self">self</span>.unused_parameters, <span class="question-mark">?</span>unused);
+        <span class="kw">for </span>(i, arg) <span class="kw">in </span>substs.iter().enumerate() {
+            <span class="kw">let </span>i = i.try_into().unwrap();
+            <span class="kw">if </span>!unused.contains(i).unwrap_or(<span class="bool-val">false</span>) {
+                arg.visit_with(<span class="self">self</span>);
+            }
+        }
+        <span class="macro">debug!</span>(<span class="question-mark">?</span><span class="self">self</span>.unused_parameters);
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>MarkUsedGenericParams&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>, local))]
+    </span><span class="kw">fn </span>visit_local_decl(<span class="kw-2">&amp;mut </span><span class="self">self</span>, local: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Local.html">Local</a>, local_decl: <span class="kw-2">&amp;</span>LocalDecl&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <span class="kw">if </span>local == Local::from_usize(<span class="number">1</span>) {
+            <span class="kw">let </span>def_kind = <span class="self">self</span>.tcx.def_kind(<span class="self">self</span>.def_id);
+            <span class="kw">if </span><span class="macro">matches!</span>(def_kind, DefKind::Closure | DefKind::Generator) {
+                <span class="comment">// Skip visiting the closure/generator that is currently being processed. This only
+                // happens because the first argument to the closure is a reference to itself and
+                // that will call `visit_substs`, resulting in each generic parameter captured being
+                // considered used by default.
+                </span><span class="macro">debug!</span>(<span class="string">&quot;skipping closure substs&quot;</span>);
+                <span class="kw">return</span>;
+            }
+        }
+
+        <span class="self">self</span>.super_local_decl(local, local_decl);
+    }
+
+    <span class="kw">fn </span>visit_constant(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ct: <span class="kw-2">&amp;</span>Constant&lt;<span class="lifetime">&#39;tcx</span>&gt;, location: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">match </span><a href="#273">ct</a>.literal {
+            ConstantKind::Ty(c) =&gt; {
+                <a href="#275">c</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#273">self</a>);
+            }
+            ConstantKind::Val(<span class="kw">_</span>, ty) | ConstantKind::Unevaluated(<span class="kw">_</span>, ty) =&gt; {
+                <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">Visitor::visit_ty</a>(<a class="self" href="#273">self</a>, <a href="#278">ty</a>, TyContext::Location(<a href="#273">location</a>))
+            }
+        }
+    }
+
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw">_</span>: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/enum.TyContext.html">TyContext</a>) {
+        <a href="#284">ty</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#284">self</a>);
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>MarkUsedGenericParams&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>visit_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">if </span>!c.has_param_types_or_consts() {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span>c.kind() {
+            ty::ConstKind::Param(param) =&gt; {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>param);
+                <span class="self">self</span>.unused_parameters.clear(param.index);
+                ControlFlow::CONTINUE
+            }
+            ty::ConstKind::Unevaluated(ty::Unevaluated { def, substs, promoted })
+                <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.tcx.def_kind(def.did), DefKind::AnonConst) =&gt;
+            {
+                <span class="macro">assert_eq!</span>(promoted, ());
+
+                <span class="self">self</span>.visit_child_body(def.did, substs);
+                ControlFlow::CONTINUE
+            }
+            <span class="kw">_ </span>=&gt; c.super_visit_with(<span class="self">self</span>),
+        }
+    }
+
+    <span class="kw">fn </span>visit_mir_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, constant: ConstantKind&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">if </span>!constant.has_param_types_or_consts() {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span><a href="#314">constant</a> {
+            ConstantKind::Ty(ct) =&gt; <a href="#320">ct</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">visit_with</a>(<a class="self" href="#314">self</a>),
+            ConstantKind::Unevaluated(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/consts/kind/struct.Unevaluated.html">ty::Unevaluated</a> { def, substs: <span class="kw">_</span>, promoted: <span class="prelude-val">Some</span>(p) }, <span class="kw">_</span>)
+                <span class="comment">// Avoid considering `T` unused when constants are of the form:
+                //   `&lt;Self as Foo&lt;T&gt;&gt;::foo::promoted[p]`
+                </span><span class="kw">if </span><a class="self" href="#314">self</a>.def_id == <a href="#321">def</a>.did &amp;&amp; !<a class="self" href="#314">self</a>.tcx.generics_of(<a href="#321">def</a>.did).has_self =&gt;
+            {
+                <span class="comment">// If there is a promoted, don&#39;t look at the substs - since it will always contain
+                // the generic parameters, instead, traverse the promoted MIR.
+                </span><span class="kw">let </span>promoted = <a class="self" href="#314">self</a>.tcx.promoted_mir(<a href="#321">def</a>.did);
+                <a class="self" href="#314">self</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/mir/visit/trait.Visitor.html">visit_body</a>(<span class="kw-2">&amp;</span><a href="#328">promoted</a>[<a href="#321">p</a>]);
+                ControlFlow::CONTINUE
+            }
+            ConstantKind::Val(..) | ConstantKind::Unevaluated(..) =&gt; {
+                <a href="#314">constant</a>.<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeSuperVisitable.html">super_visit_with</a>(<a class="self" href="#314">self</a>)
+            }
+        }
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">if </span>!ty.has_param_types_or_consts() {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span><span class="kw-2">*</span>ty.kind() {
+            ty::Closure(def_id, substs) | ty::Generator(def_id, substs, ..) =&gt; {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>def_id);
+                <span class="comment">// Avoid cycle errors with generators.
+                </span><span class="kw">if </span>def_id == <span class="self">self</span>.def_id {
+                    <span class="kw">return </span>ControlFlow::CONTINUE;
+                }
+
+                <span class="comment">// Consider any generic parameters used by any closures/generators as used in the
+                // parent.
+                </span><span class="self">self</span>.visit_child_body(def_id, substs);
+                ControlFlow::CONTINUE
+            }
+            ty::Param(param) =&gt; {
+                <span class="macro">debug!</span>(<span class="question-mark">?</span>param);
+                <span class="self">self</span>.unused_parameters.clear(param.index);
+                ControlFlow::CONTINUE
+            }
+            <span class="kw">_ </span>=&gt; ty.super_visit_with(<span class="self">self</span>),
+        }
+    }
+}
+
+<span class="doccomment">/// Visitor used to check if a generic parameter is used.
+</span><span class="kw">struct </span>HasUsedGenericParams&lt;<span class="lifetime">&#39;a</span>&gt; {
+    unused_parameters: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FiniteBitSet&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u32.html">u32</a>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; TypeVisitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>HasUsedGenericParams&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>BreakTy = ();
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>visit_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: Const&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">if </span>!c.has_param_types_or_consts() {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span>c.kind() {
+            ty::ConstKind::Param(param) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.unused_parameters.contains(param.index).unwrap_or(<span class="bool-val">false</span>) {
+                    ControlFlow::CONTINUE
+                } <span class="kw">else </span>{
+                    ControlFlow::BREAK
+                }
+            }
+            <span class="kw">_ </span>=&gt; c.super_visit_with(<span class="self">self</span>),
+        }
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ControlFlow&lt;<span class="self">Self</span>::BreakTy&gt; {
+        <span class="kw">if </span>!ty.has_param_types_or_consts() {
+            <span class="kw">return </span>ControlFlow::CONTINUE;
+        }
+
+        <span class="kw">match </span>ty.kind() {
+            ty::Param(param) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.unused_parameters.contains(param.index).unwrap_or(<span class="bool-val">false</span>) {
+                    ControlFlow::CONTINUE
+                } <span class="kw">else </span>{
+                    ControlFlow::BREAK
+                }
+            }
+            <span class="kw">_ </span>=&gt; ty.super_visit_with(<span class="self">self</span>),
+        }
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_monomorphize" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

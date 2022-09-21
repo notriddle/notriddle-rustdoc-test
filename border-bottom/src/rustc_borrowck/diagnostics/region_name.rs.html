@@ -1,0 +1,1786 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_borrowck/src/diagnostics/region_name.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>region_name.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_borrowck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_borrowck/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+</pre><pre class="rust"><code><span class="kw">use </span>std::fmt::{<a class="self" href="https://doc.rust-lang.org/nightly/alloc/fmt/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">Display</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+
+<span class="kw">use </span><a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">rustc_errors::Diagnostic</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span>rustc_hir::def::{<a href="../../../rustc_hir/def/enum.DefKind.html">DefKind</a>, <a href="../../../rustc_hir/def/enum.Res.html">Res</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/print/pretty/struct.RegionHighlightMode.html">rustc_middle::ty::print::RegionHighlightMode</a>;
+<span class="kw">use </span>rustc_middle::ty::subst::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/enum.GenericArgKind.html">GenericArgKind</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/type.SubstsRef.html">SubstsRef</a>};
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/trait.DefIdTree.html">DefIdTree</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../../rustc_span/symbol/kw/index.html">kw</a>, <a href="../../../rustc_span/symbol/sym/index.html">sym</a>, <a href="../../../rustc_span/symbol/struct.Ident.html">Ident</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span>rustc_span::{<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../rustc_span/span_encoding/constant.DUMMY_SP.html">DUMMY_SP</a>};
+
+<span class="kw">use crate</span>::{<a href="../nll.rs.html#445">nll::ToRegionVid</a>, <a href="../universal_regions.rs.html#86">universal_regions::DefiningTy</a>, <a href="../lib.rs.html#477">MirBorrowckCtxt</a>};
+
+<span class="doccomment">/// A name for a particular region used in emitting diagnostics. This name could be a generated
+/// name like `&#39;1`, a name used by the user like `&#39;a`, or a name like `&#39;static`.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RegionName {
+    <span class="doccomment">/// The name of the region (interned).
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) name: <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>,
+    <span class="doccomment">/// Where the region comes from.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) source: <a href="#29">RegionNameSource</a>,
+}
+
+<span class="doccomment">/// Denotes the source of a region that is named by a `RegionName`. For example, a free region that
+/// was named by the user would get `NamedFreeRegion` and `&#39;static` lifetime would get `Static`.
+/// This helps to print the right kinds of diagnostics.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>RegionNameSource {
+    <span class="doccomment">/// A bound (not free) region that was substituted at the def site (not an HRTB).
+    </span>NamedEarlyBoundRegion(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    <span class="doccomment">/// A free region that the user has a name (`&#39;a`) for.
+    </span>NamedFreeRegion(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    <span class="doccomment">/// The `&#39;static` region.
+    </span>Static,
+    <span class="doccomment">/// The free region corresponding to the environment of a closure.
+    </span>SynthesizedFreeEnvRegion(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>),
+    <span class="doccomment">/// The region corresponding to an argument.
+    </span>AnonRegionFromArgument(<a href="#55">RegionNameHighlight</a>),
+    <span class="doccomment">/// The region corresponding to a closure upvar.
+    </span>AnonRegionFromUpvar(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a>),
+    <span class="doccomment">/// The region corresponding to the return type of a closure.
+    </span>AnonRegionFromOutput(<a href="#55">RegionNameHighlight</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>),
+    <span class="doccomment">/// The region from a type yielded by a generator.
+    </span>AnonRegionFromYieldTy(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+    <span class="doccomment">/// An anonymous region from an async fn.
+    </span>AnonRegionFromAsyncFn(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    <span class="doccomment">/// An anonymous region from an impl self type or trait
+    </span>AnonRegionFromImplSignature(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>),
+}
+
+<span class="doccomment">/// Describes what to highlight to explain to the user that we&#39;re giving an anonymous region a
+/// synthesized name, and how to highlight it.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>RegionNameHighlight {
+    <span class="doccomment">/// The anonymous region corresponds to a reference that was found by traversing the type in the HIR.
+    </span>MatchedHirTy(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    <span class="doccomment">/// The anonymous region corresponds to a `&#39;_` in the generics list of a struct/enum/union.
+    </span>MatchedAdtAndSegment(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>),
+    <span class="doccomment">/// The anonymous region corresponds to a region where the type annotation is completely missing
+    /// from the code, e.g. in a closure arguments `|x| { ... }`, where `x` is a reference.
+    </span>CannotMatchHirTy(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+    <span class="doccomment">/// The anonymous region corresponds to a region where the type annotation is completely missing
+    /// from the code, and *even if* we print out the full name of the type, the region name won&#39;t
+    /// be included. This currently occurs for opaque types like `impl Future`.
+    </span>Occluded(<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>),
+}
+
+<span class="kw">impl </span><a href="#18">RegionName</a> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>was_named(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="kw">match </span><a class="self" href="#70">self</a>.source {
+            <a href="#31">RegionNameSource::NamedEarlyBoundRegion</a>(..)
+            | <a href="#33">RegionNameSource::NamedFreeRegion</a>(..)
+            | <a href="#35">RegionNameSource::Static</a> =&gt; <span class="bool-val">true</span>,
+            <a href="#37">RegionNameSource::SynthesizedFreeEnvRegion</a>(..)
+            | <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(..)
+            | <a href="#41">RegionNameSource::AnonRegionFromUpvar</a>(..)
+            | <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(..)
+            | <a href="#45">RegionNameSource::AnonRegionFromYieldTy</a>(..)
+            | <a href="#47">RegionNameSource::AnonRegionFromAsyncFn</a>(..)
+            | <a href="#49">RegionNameSource::AnonRegionFromImplSignature</a>(..) =&gt; <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>span(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt; {
+        <span class="kw">match </span><a class="self" href="#85">self</a>.source {
+            <a href="#35">RegionNameSource::Static</a> =&gt; <span class="prelude-val">None</span>,
+            <a href="#31">RegionNameSource::NamedEarlyBoundRegion</a>(span)
+            | <a href="#33">RegionNameSource::NamedFreeRegion</a>(span)
+            | <a href="#37">RegionNameSource::SynthesizedFreeEnvRegion</a>(span, <span class="kw">_</span>)
+            | <a href="#41">RegionNameSource::AnonRegionFromUpvar</a>(span, <span class="kw">_</span>)
+            | <a href="#45">RegionNameSource::AnonRegionFromYieldTy</a>(span, <span class="kw">_</span>)
+            | <a href="#47">RegionNameSource::AnonRegionFromAsyncFn</a>(span)
+            | <a href="#49">RegionNameSource::AnonRegionFromImplSignature</a>(span, <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(<a href="#88">span</a>),
+            <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(<span class="kw-2">ref </span>highlight)
+            | <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(<span class="kw-2">ref </span>highlight, <span class="kw">_</span>) =&gt; <span class="kw">match </span><span class="kw-2">*</span><a href="#95">highlight</a> {
+                <a href="#57">RegionNameHighlight::MatchedHirTy</a>(span)
+                | <a href="#59">RegionNameHighlight::MatchedAdtAndSegment</a>(span)
+                | <a href="#62">RegionNameHighlight::CannotMatchHirTy</a>(span, <span class="kw">_</span>)
+                | <a href="#66">RegionNameHighlight::Occluded</a>(span, <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(<a href="#97">span</a>),
+            },
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>highlight_region_name(<span class="kw-2">&amp;</span><span class="self">self</span>, diag: <span class="kw-2">&amp;mut </span><a href="../../../rustc_errors/diagnostic/struct.Diagnostic.html">Diagnostic</a>) {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><a class="self" href="#105">self</a>.source {
+            <a href="#33">RegionNameSource::NamedFreeRegion</a>(span)
+            | <a href="#31">RegionNameSource::NamedEarlyBoundRegion</a>(span) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#107">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{self}` defined here&quot;</span>));
+            }
+            <a href="#37">RegionNameSource::SynthesizedFreeEnvRegion</a>(span, note) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#111">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{self}` represents this closure&#39;s body&quot;</span>));
+                <a href="#105">diag</a>.note(<span class="kw-2">*</span><a href="#111">note</a>);
+            }
+            <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(<a href="#62">RegionNameHighlight::CannotMatchHirTy</a>(
+                span,
+                type_name,
+            )) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#116">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;has type `{type_name}`&quot;</span>));
+            }
+            <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(<a href="#57">RegionNameHighlight::MatchedHirTy</a>(span))
+            | <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(<a href="#57">RegionNameHighlight::MatchedHirTy</a>(span), <span class="kw">_</span>)
+            | <a href="#47">RegionNameSource::AnonRegionFromAsyncFn</a>(span) =&gt; {
+                <a href="#105">diag</a>.span_label(
+                    <span class="kw-2">*</span><a href="#121">span</a>,
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;let&#39;s call the lifetime of this reference `{self}`&quot;</span>),
+                );
+            }
+            <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(
+                <a href="#59">RegionNameHighlight::MatchedAdtAndSegment</a>(span),
+            )
+            | <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(
+                <a href="#59">RegionNameHighlight::MatchedAdtAndSegment</a>(span),
+                <span class="kw">_</span>,
+            ) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#130">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;let&#39;s call this `{self}`&quot;</span>));
+            }
+            <a href="#39">RegionNameSource::AnonRegionFromArgument</a>(<a href="#66">RegionNameHighlight::Occluded</a>(
+                span,
+                type_name,
+            )) =&gt; {
+                <a href="#105">diag</a>.span_label(
+                    <span class="kw-2">*</span><a href="#139">span</a>,
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{self}` appears in the type {type_name}&quot;</span>),
+                );
+            }
+            <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(
+                <a href="#66">RegionNameHighlight::Occluded</a>(span, type_name),
+                mir_description,
+            ) =&gt; {
+                <a href="#105">diag</a>.span_label(
+                    <span class="kw-2">*</span><a href="#148">span</a>,
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(
+                        <span class="string">&quot;return type{mir_description} `{type_name}` contains a lifetime `{self}`&quot;
+                    </span>),
+                );
+            }
+            <a href="#41">RegionNameSource::AnonRegionFromUpvar</a>(span, upvar_name) =&gt; {
+                <a href="#105">diag</a>.span_label(
+                    <span class="kw-2">*</span><a href="#158">span</a>,
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{self}` appears in the type of `{upvar_name}`&quot;</span>),
+                );
+            }
+            <a href="#43">RegionNameSource::AnonRegionFromOutput</a>(
+                <a href="#62">RegionNameHighlight::CannotMatchHirTy</a>(span, type_name),
+                mir_description,
+            ) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#165">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;return type{mir_description} is {type_name}&quot;</span>));
+            }
+            <a href="#45">RegionNameSource::AnonRegionFromYieldTy</a>(span, type_name) =&gt; {
+                <a href="#105">diag</a>.span_label(<span class="kw-2">*</span><a href="#170">span</a>, <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;yield type is {type_name}&quot;</span>));
+            }
+            <a href="#49">RegionNameSource::AnonRegionFromImplSignature</a>(span, location) =&gt; {
+                <a href="#105">diag</a>.span_label(
+                    <span class="kw-2">*</span><a href="#173">span</a>,
+                    <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;lifetime `{self}` appears in the `impl`&#39;s {location}&quot;</span>),
+                );
+            }
+            <a href="#35">RegionNameSource::Static</a> =&gt; {}
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html">Display</a> <span class="kw">for </span><a href="#18">RegionName</a> {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">fmt::Result</a> {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.write.html">write!</a>(<a href="#185">f</a>, <span class="string">&quot;{}&quot;</span>, <span class="self">self</span>.name)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; MirBorrowckCtxt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mir_def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../../rustc_span/def_id/struct.LocalDefId.html">hir::def_id::LocalDefId</a> {
+        <a class="self" href="#191">self</a>.body.source.def_id().expect_local()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mir_hir_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a> {
+        <a class="self" href="#195">self</a>.infcx.tcx.hir().local_def_id_to_hir_id(<a class="self" href="#195">self</a>.<a href="#191">mir_def_id</a>())
+    }
+
+    <span class="doccomment">/// Generate a synthetic region named `&#39;N`, where `N` is the next value of the counter. Then,
+    /// increment the counter.
+    ///
+    /// This is _not_ idempotent. Call `give_region_a_name` when possible.
+    </span><span class="kw">fn </span>synthesize_region_name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="../../../rustc_span/symbol/struct.Symbol.html">Symbol</a> {
+        <span class="kw">let </span>c = <a class="self" href="#203">self</a>.next_region_name.replace_with(|counter| <span class="kw-2">*</span><a href="#204">counter</a> + <span class="number">1</span>);
+        Symbol::intern(<span class="kw-2">&amp;</span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;&#39;{:?}&quot;</span>, c))
+    }
+
+    <span class="doccomment">/// Maps from an internal MIR region vid to something that we can
+    /// report to the user. In some cases, the region vids will map
+    /// directly to lifetimes that the user has a name for (e.g.,
+    /// `&#39;static`). But frequently they will not, in which case we
+    /// have to find some way to identify the lifetime to the user. To
+    /// that end, this function takes a &quot;diagnostic&quot; so that it can
+    /// create auxiliary notes as needed.
+    ///
+    /// The names are memoized, so this is both cheap to recompute and idempotent.
+    ///
+    /// Example (function arguments):
+    ///
+    /// Suppose we are trying to give a name to the lifetime of the
+    /// reference `x`:
+    ///
+    /// ```ignore (pseudo-rust)
+    /// fn foo(x: &amp;u32) { .. }
+    /// ```
+    ///
+    /// This function would create a label like this:
+    ///
+    /// ```text
+    ///  | fn foo(x: &amp;u32) { .. }
+    ///           ------- fully elaborated type of `x` is `&amp;&#39;1 u32`
+    /// ```
+    ///
+    /// and then return the name `&#39;1` for us to use.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>give_region_a_name(<span class="kw-2">&amp;</span><span class="self">self</span>, fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;give_region_a_name(fr={:?}, counter={:?})&quot;</span>,
+            fr,
+            <span class="self">self</span>.next_region_name.try_borrow().unwrap()
+        );
+
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(<span class="self">self</span>.regioncx.universal_regions().is_universal_region(fr));
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <a class="self" href="#235">self</a>.region_names.try_borrow_mut().unwrap().get(<span class="kw-2">&amp;</span><a href="#235">fr</a>) {
+            <span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#244">value</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>());
+        }
+
+        <span class="kw">let </span>value = <span class="self"><a href="#235">self</a>
+            </span>.<a href="#268">give_name_from_error_region</a>(<a href="#235">fr</a>)
+            .or_else(|| <a class="self" href="#235">self</a>.<a href="#372">give_name_if_anonymous_region_appears_in_arguments</a>(<a href="#235">fr</a>))
+            .or_else(|| <a class="self" href="#235">self</a>.<a href="#661">give_name_if_anonymous_region_appears_in_upvars</a>(<a href="#235">fr</a>))
+            .or_else(|| <a class="self" href="#235">self</a>.<a href="#681">give_name_if_anonymous_region_appears_in_output</a>(<a href="#235">fr</a>))
+            .or_else(|| <a class="self" href="#235">self</a>.<a href="#813">give_name_if_anonymous_region_appears_in_yield_ty</a>(<a href="#235">fr</a>))
+            .or_else(|| <a class="self" href="#235">self</a>.<a href="#854-857">give_name_if_anonymous_region_appears_in_impl_signature</a>(<a href="#235">fr</a>));
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>value) = <a href="#248">value</a> {
+            <a class="self" href="#235">self</a>.region_names.try_borrow_mut().unwrap().insert(<a href="#235">fr</a>, <a href="#256">value</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>());
+        }
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;give_region_a_name: gave name {:?}&quot;</span>, value);
+        <a href="#248">value</a>
+    }
+
+    <span class="doccomment">/// Checks for the case where `fr` maps to something that the
+    /// *user* has a name for. In that case, we&#39;ll be able to map
+    /// `fr` to a `Region&lt;&#39;tcx&gt;`, and that region will be one of
+    /// named variants.
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>give_name_from_error_region(<span class="kw-2">&amp;</span><span class="self">self</span>, fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="kw">let </span>error_region = <span class="self">self</span>.to_error_region(fr)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>tcx = <span class="self">self</span>.infcx.tcx;
+
+        <span class="macro">debug!</span>(<span class="string">&quot;give_region_a_name: error_region = {:?}&quot;</span>, error_region);
+        <span class="kw">match </span><span class="kw-2">*</span>error_region {
+            ty::ReEarlyBound(ebr) =&gt; {
+                <span class="kw">if </span>ebr.has_name() {
+                    <span class="kw">let </span>span = tcx.hir().span_if_local(ebr.def_id).unwrap_or(DUMMY_SP);
+                    <span class="prelude-val">Some</span>(RegionName {
+                        name: ebr.name,
+                        source: RegionNameSource::NamedEarlyBoundRegion(span),
+                    })
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            }
+
+            ty::ReStatic =&gt; {
+                <span class="prelude-val">Some</span>(RegionName { name: kw::StaticLifetime, source: RegionNameSource::Static })
+            }
+
+            ty::ReFree(free_region) =&gt; <span class="kw">match </span>free_region.bound_region {
+                ty::BoundRegionKind::BrNamed(region_def_id, name) =&gt; {
+                    <span class="comment">// Get the span to point to, even if we don&#39;t use the name.
+                    </span><span class="kw">let </span>span = tcx.hir().span_if_local(region_def_id).unwrap_or(DUMMY_SP);
+                    <span class="macro">debug!</span>(
+                        <span class="string">&quot;bound region named: {:?}, is_named: {:?}&quot;</span>,
+                        name,
+                        free_region.bound_region.is_named()
+                    );
+
+                    <span class="kw">if </span>free_region.bound_region.is_named() {
+                        <span class="comment">// A named region that is actually named.
+                        </span><span class="prelude-val">Some</span>(RegionName { name, source: RegionNameSource::NamedFreeRegion(span) })
+                    } <span class="kw">else if let </span>hir::IsAsync::Async = tcx.asyncness(<span class="self">self</span>.mir_hir_id().owner) {
+                        <span class="comment">// If we spuriously thought that the region is named, we should let the
+                        // system generate a true name for error messages. Currently this can
+                        // happen if we have an elided name in an async fn for example: the
+                        // compiler will generate a region named `&#39;_`, but reporting such a name is
+                        // not actually useful, so we synthesize a name for it instead.
+                        </span><span class="kw">let </span>name = <span class="self">self</span>.synthesize_region_name();
+                        <span class="prelude-val">Some</span>(RegionName {
+                            name,
+                            source: RegionNameSource::AnonRegionFromAsyncFn(span),
+                        })
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">None
+                    </span>}
+                }
+
+                ty::BoundRegionKind::BrEnv =&gt; {
+                    <span class="kw">let </span>def_ty = <span class="self">self</span>.regioncx.universal_regions().defining_ty;
+
+                    <span class="kw">let </span>DefiningTy::Closure(<span class="kw">_</span>, substs) = def_ty <span class="kw">else </span>{
+                        <span class="comment">// Can&#39;t have BrEnv in functions, constants or generators.
+                        </span><span class="macro">bug!</span>(<span class="string">&quot;BrEnv outside of closure.&quot;</span>);
+                    };
+                    <span class="kw">let </span>hir::ExprKind::Closure(<span class="kw-2">&amp;</span>hir::Closure { fn_decl_span, .. })
+                        = tcx.hir().expect_expr(<span class="self">self</span>.mir_hir_id()).kind
+                    <span class="kw">else </span>{
+                        <span class="macro">bug!</span>(<span class="string">&quot;Closure is not defined by a closure expr&quot;</span>);
+                    };
+                    <span class="kw">let </span>region_name = <span class="self">self</span>.synthesize_region_name();
+
+                    <span class="kw">let </span>closure_kind_ty = substs.as_closure().kind_ty();
+                    <span class="kw">let </span>note = <span class="kw">match </span>closure_kind_ty.to_opt_closure_kind() {
+                        <span class="prelude-val">Some</span>(ty::ClosureKind::Fn) =&gt; {
+                            <span class="string">&quot;closure implements `Fn`, so references to captured variables \
+                                can&#39;t escape the closure&quot;
+                        </span>}
+                        <span class="prelude-val">Some</span>(ty::ClosureKind::FnMut) =&gt; {
+                            <span class="string">&quot;closure implements `FnMut`, so references to captured variables \
+                                can&#39;t escape the closure&quot;
+                        </span>}
+                        <span class="prelude-val">Some</span>(ty::ClosureKind::FnOnce) =&gt; {
+                            <span class="macro">bug!</span>(<span class="string">&quot;BrEnv in a `FnOnce` closure&quot;</span>);
+                        }
+                        <span class="prelude-val">None </span>=&gt; <span class="macro">bug!</span>(<span class="string">&quot;Closure kind not inferred in borrow check&quot;</span>),
+                    };
+
+                    <span class="prelude-val">Some</span>(RegionName {
+                        name: region_name,
+                        source: RegionNameSource::SynthesizedFreeEnvRegion(fn_decl_span, note),
+                    })
+                }
+
+                ty::BoundRegionKind::BrAnon(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            },
+
+            ty::ReLateBound(..) | ty::ReVar(..) | ty::RePlaceholder(..) | ty::ReErased =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Finds an argument that contains `fr` and label it with a fully
+    /// elaborated type, returning something like `&#39;1`. Result looks
+    /// like:
+    ///
+    /// ```text
+    ///  | fn foo(x: &amp;u32) { .. }
+    ///           ------- fully elaborated type of `x` is `&amp;&#39;1 u32`
+    /// ```
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>give_name_if_anonymous_region_appears_in_arguments(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="kw">let </span>implicit_inputs = <span class="self">self</span>.regioncx.universal_regions().defining_ty.implicit_inputs();
+        <span class="kw">let </span>argument_index = <span class="self">self</span>.regioncx.get_argument_index_for_region(<span class="self">self</span>.infcx.tcx, fr)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>arg_ty = <span class="self">self</span>.regioncx.universal_regions().unnormalized_input_tys
+            [implicit_inputs + argument_index];
+        <span class="kw">let </span>(<span class="kw">_</span>, span) = <span class="self">self</span>.regioncx.get_argument_name_and_span_for_region(
+            <span class="kw-2">&amp;</span><span class="self">self</span>.body,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.local_names,
+            argument_index,
+        );
+
+        <span class="kw">let </span>highlight = <span class="self">self
+            </span>.get_argument_hir_ty_for_highlighting(argument_index)
+            .and_then(|arg_hir_ty| <span class="self">self</span>.highlight_if_we_can_match_hir_ty(fr, arg_ty, arg_hir_ty))
+            .unwrap_or_else(|| {
+                <span class="comment">// `highlight_if_we_cannot_match_hir_ty` needs to know the number we will give to
+                // the anonymous region. If it succeeds, the `synthesize_region_name` call below
+                // will increment the counter, &quot;reserving&quot; the number we just used.
+                </span><span class="kw">let </span>counter = <span class="kw-2">*</span><span class="self">self</span>.next_region_name.try_borrow().unwrap();
+                <span class="self">self</span>.highlight_if_we_cannot_match_hir_ty(fr, arg_ty, span, counter)
+            });
+
+        <span class="prelude-val">Some</span>(RegionName {
+            name: <span class="self">self</span>.synthesize_region_name(),
+            source: RegionNameSource::AnonRegionFromArgument(highlight),
+        })
+    }
+
+    <span class="kw">fn </span>get_argument_hir_ty_for_highlighting(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        argument_index: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>fn_decl = <span class="self">self</span>.infcx.tcx.hir().fn_decl_by_hir_id(<span class="self">self</span>.mir_hir_id())<span class="question-mark">?</span>;
+        <span class="kw">let </span>argument_hir_ty: <span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt; = fn_decl.inputs.get(argument_index)<span class="question-mark">?</span>;
+        <span class="kw">match </span><a href="#410">argument_hir_ty</a>.kind {
+            <span class="comment">// This indicates a variable with no type annotation, like
+            // `|x|`... in that case, we can&#39;t highlight the type but
+            // must highlight the variable.
+            // NOTE(eddyb) this is handled in/by the sole caller
+            // (`give_name_if_anonymous_region_appears_in_arguments`).
+            </span>hir::TyKind::Infer =&gt; <span class="prelude-val">None</span>,
+
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Some</span>(<a href="#410">argument_hir_ty</a>),
+        }
+    }
+
+    <span class="doccomment">/// Attempts to highlight the specific part of a type in an argument
+    /// that has no type annotation.
+    /// For example, we might produce an annotation like this:
+    ///
+    /// ```text
+    ///  |     foo(|a, b| b)
+    ///  |          -  -
+    ///  |          |  |
+    ///  |          |  has type `&amp;&#39;1 u32`
+    ///  |          has type `&amp;&#39;2 u32`
+    /// ```
+    </span><span class="kw">fn </span>highlight_if_we_cannot_match_hir_ty(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        needle_fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        span: <a href="../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        counter: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    ) -&gt; <a href="#55">RegionNameHighlight</a> {
+        <span class="kw">let </span><span class="kw-2">mut </span>highlight = RegionHighlightMode::new(<a class="self" href="#435">self</a>.infcx.tcx);
+        <a href="#441">highlight</a>.highlighting_region_vid(<a href="#436">needle_fr</a>, <a href="#439">counter</a>);
+        <span class="kw">let </span>type_name =
+            <a class="self" href="#435">self</a>.infcx.extract_inference_diagnostics_data(<a href="#437">ty</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html">into</a>(), <span class="prelude-val">Some</span>(<a href="#441">highlight</a>)).name;
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(
+            <span class="string">&quot;highlight_if_we_cannot_match_hir_ty: type_name={:?} needle_fr={:?}&quot;</span>,
+            type_name, needle_fr
+        );
+        <span class="kw">if </span>type_name.contains(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;&#39;{counter}&quot;</span>)) {
+            <span class="comment">// Only add a label if we can confirm that a region was labelled.
+            </span><a href="#62">RegionNameHighlight::CannotMatchHirTy</a>(<a href="#438">span</a>, <a href="#443">type_name</a>)
+        } <span class="kw">else </span>{
+            <a href="#66">RegionNameHighlight::Occluded</a>(<a href="#438">span</a>, <a href="#443">type_name</a>)
+        }
+    }
+
+    <span class="doccomment">/// Attempts to highlight the specific part of a type annotation
+    /// that contains the anonymous reference we want to give a name
+    /// to. For example, we might produce an annotation like this:
+    ///
+    /// ```text
+    ///  | fn a&lt;T&gt;(items: &amp;[T]) -&gt; Box&lt;dyn Iterator&lt;Item = &amp;T&gt;&gt; {
+    ///  |                - let&#39;s call the lifetime of this reference `&#39;1`
+    /// ```
+    ///
+    /// the way this works is that we match up `ty`, which is
+    /// a `Ty&lt;&#39;tcx&gt;` (the internal form of the type) with
+    /// `hir_ty`, a `hir::Ty` (the syntax of the type
+    /// annotation). We are descending through the types stepwise,
+    /// looking in to find the region `needle_fr` in the internal
+    /// type. Once we find that, we can use the span of the `hir::Ty`
+    /// to add the highlight.
+    ///
+    /// This is a somewhat imperfect process, so along the way we also
+    /// keep track of the **closest** type we&#39;ve found. If we fail to
+    /// find the exact `&amp;` or `&#39;_` to highlight, then we may fall back
+    /// to highlighting that closest type instead.
+    </span><span class="kw">fn </span>highlight_if_we_can_match_hir_ty(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        needle_fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        hir_ty: <span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#55">RegionNameHighlight</a>&gt; {
+        <span class="kw">let </span>search_stack: <span class="kw-2">&amp;mut </span>Vec&lt;(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span>hir::Ty&lt;<span class="lifetime">&#39;_</span>&gt;)&gt; = <span class="kw-2">&amp;mut </span><a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[(ty, hir_ty)];
+
+        <span class="kw">while let </span><span class="prelude-val">Some</span>((ty, hir_ty)) = search_stack.pop() {
+            <span class="kw">match </span>(ty.kind(), <span class="kw-2">&amp;</span>hir_ty.kind) {
+                <span class="comment">// Check if the `ty` is `&amp;&#39;X ..` where `&#39;X`
+                // is the region we are looking for -- if so, and we have a `&amp;T`
+                // on the RHS, then we want to highlight the `&amp;` like so:
+                //
+                //     &amp;
+                //     - let&#39;s call the lifetime of this reference `&#39;1`
+                </span>(
+                    ty::Ref(region, referent_ty, <span class="kw">_</span>),
+                    hir::TyKind::Rptr(_lifetime, referent_hir_ty),
+                ) =&gt; {
+                    <span class="kw">if </span>region.to_region_vid() == needle_fr {
+                        <span class="comment">// Just grab the first character, the `&amp;`.
+                        </span><span class="kw">let </span>source_map = <span class="self">self</span>.infcx.tcx.sess.source_map();
+                        <span class="kw">let </span>ampersand_span = source_map.start_point(hir_ty.span);
+
+                        <span class="kw">return </span><span class="prelude-val">Some</span>(RegionNameHighlight::MatchedHirTy(ampersand_span));
+                    }
+
+                    <span class="comment">// Otherwise, let&#39;s descend into the referent types.
+                    </span>search_stack.push((<span class="kw-2">*</span>referent_ty, <span class="kw-2">&amp;</span>referent_hir_ty.ty));
+                }
+
+                <span class="comment">// Match up something like `Foo&lt;&#39;1&gt;`
+                </span>(
+                    ty::Adt(_adt_def, substs),
+                    hir::TyKind::Path(hir::QPath::Resolved(<span class="prelude-val">None</span>, path)),
+                ) =&gt; {
+                    <span class="kw">match </span>path.res {
+                        <span class="comment">// Type parameters of the type alias have no reason to
+                        // be the same as those of the ADT.
+                        // FIXME: We should be able to do something similar to
+                        // match_adt_and_segment in this case.
+                        </span>Res::Def(DefKind::TyAlias, <span class="kw">_</span>) =&gt; (),
+                        <span class="kw">_ </span>=&gt; {
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(last_segment) = path.segments.last() {
+                                <span class="kw">if let </span><span class="prelude-val">Some</span>(highlight) = <span class="self">self</span>.match_adt_and_segment(
+                                    substs,
+                                    needle_fr,
+                                    last_segment,
+                                    search_stack,
+                                ) {
+                                    <span class="kw">return </span><span class="prelude-val">Some</span>(highlight);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                <span class="comment">// The following cases don&#39;t have lifetimes, so we
+                // just worry about trying to match up the rustc type
+                // with the HIR types:
+                </span>(<span class="kw-2">&amp;</span>ty::Tuple(elem_tys), hir::TyKind::Tup(elem_hir_tys)) =&gt; {
+                    search_stack.extend(iter::zip(elem_tys, <span class="kw-2">*</span>elem_hir_tys));
+                }
+
+                (ty::Slice(elem_ty), hir::TyKind::Slice(elem_hir_ty))
+                | (ty::Array(elem_ty, <span class="kw">_</span>), hir::TyKind::Array(elem_hir_ty, <span class="kw">_</span>)) =&gt; {
+                    search_stack.push((<span class="kw-2">*</span>elem_ty, elem_hir_ty));
+                }
+
+                (ty::RawPtr(mut_ty), hir::TyKind::Ptr(mut_hir_ty)) =&gt; {
+                    search_stack.push((mut_ty.ty, <span class="kw-2">&amp;</span>mut_hir_ty.ty));
+                }
+
+                <span class="kw">_ </span>=&gt; {
+                    <span class="comment">// FIXME there are other cases that we could trace
+                </span>}
+            }
+        }
+
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="doccomment">/// We&#39;ve found an enum/struct/union type with the substitutions
+    /// `substs` and -- in the HIR -- a path type with the final
+    /// segment `last_segment`. Try to find a `&#39;_` to highlight in
+    /// the generic args (or, if not, to produce new zipped pairs of
+    /// types+hir to search through).
+    </span><span class="kw">fn </span>match_adt_and_segment&lt;<span class="lifetime">&#39;hir</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        needle_fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+        last_segment: <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::PathSegment&lt;<span class="lifetime">&#39;hir</span>&gt;,
+        search_stack: <span class="kw-2">&amp;mut </span>Vec&lt;(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Ty&lt;<span class="lifetime">&#39;hir</span>&gt;)&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#55">RegionNameHighlight</a>&gt; {
+        <span class="comment">// Did the user give explicit arguments? (e.g., `Foo&lt;..&gt;`)
+        </span><span class="kw">let </span>args = last_segment.args.as_ref()<span class="question-mark">?</span>;
+        <span class="kw">let </span>lifetime =
+            <span class="self">self</span>.try_match_adt_and_generic_args(substs, needle_fr, args, search_stack)<span class="question-mark">?</span>;
+        <span class="kw">match </span><a href="#576">lifetime</a>.name {
+            hir::LifetimeName::Param(<span class="kw">_</span>, hir::ParamName::Plain(<span class="kw">_</span>) | hir::ParamName::Error)
+            | hir::LifetimeName::Error
+            | hir::LifetimeName::Static =&gt; {
+                <span class="kw">let </span>lifetime_span = <a href="#576">lifetime</a>.span;
+                <span class="prelude-val">Some</span>(<a href="#59">RegionNameHighlight::MatchedAdtAndSegment</a>(<a href="#582">lifetime_span</a>))
+            }
+
+            hir::LifetimeName::Param(<span class="kw">_</span>, hir::ParamName::Fresh)
+            | hir::LifetimeName::ImplicitObjectLifetimeDefault
+            | hir::LifetimeName::Infer =&gt; {
+                <span class="comment">// In this case, the user left off the lifetime; so
+                // they wrote something like:
+                //
+                // ```
+                // x: Foo&lt;T&gt;
+                // ```
+                //
+                // where the fully elaborated form is `Foo&lt;&#39;_, &#39;1,
+                // T&gt;`. We don&#39;t consider this a match; instead we let
+                // the &quot;fully elaborated&quot; type fallback above handle
+                // it.
+                </span><span class="prelude-val">None
+            </span>}
+        }
+    }
+
+    <span class="doccomment">/// We&#39;ve found an enum/struct/union type with the substitutions
+    /// `substs` and -- in the HIR -- a path with the generic
+    /// arguments `args`. If `needle_fr` appears in the args, return
+    /// the `hir::Lifetime` that corresponds to it. If not, push onto
+    /// `search_stack` the types+hir to search through.
+    </span><span class="kw">fn </span>try_match_adt_and_generic_args&lt;<span class="lifetime">&#39;hir</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        substs: SubstsRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        needle_fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+        args: <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::GenericArgs&lt;<span class="lifetime">&#39;hir</span>&gt;,
+        search_stack: <span class="kw-2">&amp;mut </span>Vec&lt;(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>hir::Ty&lt;<span class="lifetime">&#39;hir</span>&gt;)&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span><a href="../../../rustc_hir/hir/struct.Lifetime.html">hir::Lifetime</a>&gt; {
+        <span class="kw">for </span>(kind, hir_arg) <span class="kw">in </span>iter::zip(substs, args.args) {
+            <span class="kw">match </span>(kind.unpack(), hir_arg) {
+                (GenericArgKind::Lifetime(r), hir::GenericArg::Lifetime(lt)) =&gt; {
+                    <span class="kw">if </span>r.to_region_vid() == needle_fr {
+                        <span class="kw">return </span><span class="prelude-val">Some</span>(lt);
+                    }
+                }
+
+                (GenericArgKind::Type(ty), hir::GenericArg::Type(hir_ty)) =&gt; {
+                    search_stack.push((ty, hir_ty));
+                }
+
+                (GenericArgKind::Const(_ct), hir::GenericArg::Const(_hir_ct)) =&gt; {
+                    <span class="comment">// Lifetimes cannot be found in consts, so we don&#39;t need
+                    // to search anything here.
+                </span>}
+
+                (
+                    GenericArgKind::Lifetime(<span class="kw">_</span>)
+                    | GenericArgKind::Type(<span class="kw">_</span>)
+                    | GenericArgKind::Const(<span class="kw">_</span>),
+                    <span class="kw">_</span>,
+                ) =&gt; {
+                    <span class="comment">// HIR lowering sometimes doesn&#39;t catch this in erroneous
+                    // programs, so we need to use delay_span_bug here. See #82126.
+                    </span><span class="self">self</span>.infcx.tcx.sess.delay_span_bug(
+                        hir_arg.span(),
+                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;unmatched subst and hir arg: found {:?} vs {:?}&quot;</span>, kind, hir_arg),
+                    );
+                }
+            }
+        }
+
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="doccomment">/// Finds a closure upvar that contains `fr` and label it with a
+    /// fully elaborated type, returning something like `&#39;1`. Result
+    /// looks like:
+    ///
+    /// ```text
+    ///  | let x = Some(&amp;22);
+    ///        - fully elaborated type of `x` is `Option&lt;&amp;&#39;1 u32&gt;`
+    /// ```
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>give_name_if_anonymous_region_appears_in_upvars(<span class="kw-2">&amp;</span><span class="self">self</span>, fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="kw">let </span>upvar_index = <span class="self">self</span>.regioncx.get_upvar_index_for_region(<span class="self">self</span>.infcx.tcx, fr)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(upvar_name, upvar_span) = <span class="self">self</span>.regioncx.get_upvar_name_and_span_for_region(
+            <span class="self">self</span>.infcx.tcx,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.upvars,
+            upvar_index,
+        );
+        <span class="kw">let </span>region_name = <span class="self">self</span>.synthesize_region_name();
+
+        <span class="prelude-val">Some</span>(RegionName {
+            name: region_name,
+            source: RegionNameSource::AnonRegionFromUpvar(upvar_span, upvar_name),
+        })
+    }
+
+    <span class="doccomment">/// Checks for arguments appearing in the (closure) return type. It
+    /// must be a closure since, in a free fn, such an argument would
+    /// have to either also appear in an argument (if using elision)
+    /// or be early bound (named, not in argument).
+    </span><span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>give_name_if_anonymous_region_appears_in_output(<span class="kw-2">&amp;</span><span class="self">self</span>, fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="kw">let </span>tcx = <span class="self">self</span>.infcx.tcx;
+        <span class="kw">let </span>hir = tcx.hir();
+
+        <span class="kw">let </span>return_ty = <span class="self">self</span>.regioncx.universal_regions().unnormalized_output_ty;
+        <span class="macro">debug!</span>(<span class="string">&quot;give_name_if_anonymous_region_appears_in_output: return_ty = {:?}&quot;</span>, return_ty);
+        <span class="kw">if </span>!tcx.any_free_region_meets(<span class="kw-2">&amp;</span>return_ty, |r| r.to_region_vid() == fr) {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="kw">let </span>mir_hir_id = <span class="self">self</span>.mir_hir_id();
+
+        <span class="kw">let </span>(return_span, mir_description, hir_ty) = <span class="kw">match </span>hir.get(mir_hir_id) {
+            hir::Node::Expr(hir::Expr {
+                kind: hir::ExprKind::Closure(<span class="kw-2">&amp;</span>hir::Closure { fn_decl, body, fn_decl_span, .. }),
+                ..
+            }) =&gt; {
+                <span class="kw">let </span>(<span class="kw-2">mut </span>span, <span class="kw-2">mut </span>hir_ty) = <span class="kw">match </span>fn_decl.output {
+                    hir::FnRetTy::DefaultReturn(<span class="kw">_</span>) =&gt; {
+                        (tcx.sess.source_map().end_point(fn_decl_span), <span class="prelude-val">None</span>)
+                    }
+                    hir::FnRetTy::Return(hir_ty) =&gt; (fn_decl.output.span(), <span class="prelude-val">Some</span>(hir_ty)),
+                };
+                <span class="kw">let </span>mir_description = <span class="kw">match </span>hir.body(body).generator_kind {
+                    <span class="prelude-val">Some</span>(hir::GeneratorKind::Async(gen)) =&gt; <span class="kw">match </span>gen {
+                        hir::AsyncGeneratorKind::Block =&gt; <span class="string">&quot; of async block&quot;</span>,
+                        hir::AsyncGeneratorKind::Closure =&gt; <span class="string">&quot; of async closure&quot;</span>,
+                        hir::AsyncGeneratorKind::Fn =&gt; {
+                            <span class="kw">let </span>parent_item = hir.get_by_def_id(hir.get_parent_item(mir_hir_id));
+                            <span class="kw">let </span>output = <span class="kw-2">&amp;</span>parent_item
+                                .fn_decl()
+                                .expect(<span class="string">&quot;generator lowered from async fn should be in fn&quot;</span>)
+                                .output;
+                            span = output.span();
+                            <span class="kw">if let </span>hir::FnRetTy::Return(ret) = output {
+                                hir_ty = <span class="prelude-val">Some</span>(<span class="self">self</span>.get_future_inner_return_ty(<span class="kw-2">*</span>ret));
+                            }
+                            <span class="string">&quot; of async function&quot;
+                        </span>}
+                    },
+                    <span class="prelude-val">Some</span>(hir::GeneratorKind::Gen) =&gt; <span class="string">&quot; of generator&quot;</span>,
+                    <span class="prelude-val">None </span>=&gt; <span class="string">&quot; of closure&quot;</span>,
+                };
+                (span, mir_description, hir_ty)
+            }
+            node =&gt; <span class="kw">match </span>node.fn_decl() {
+                <span class="prelude-val">Some</span>(fn_decl) =&gt; {
+                    <span class="kw">let </span>hir_ty = <span class="kw">match </span>fn_decl.output {
+                        hir::FnRetTy::DefaultReturn(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+                        hir::FnRetTy::Return(ty) =&gt; <span class="prelude-val">Some</span>(ty),
+                    };
+                    (fn_decl.output.span(), <span class="string">&quot;&quot;</span>, hir_ty)
+                }
+                <span class="prelude-val">None </span>=&gt; (<span class="self">self</span>.body.span, <span class="string">&quot;&quot;</span>, <span class="prelude-val">None</span>),
+            },
+        };
+
+        <span class="kw">let </span>highlight = hir_ty
+            .and_then(|hir_ty| <span class="self">self</span>.highlight_if_we_can_match_hir_ty(fr, return_ty, hir_ty))
+            .unwrap_or_else(|| {
+                <span class="comment">// `highlight_if_we_cannot_match_hir_ty` needs to know the number we will give to
+                // the anonymous region. If it succeeds, the `synthesize_region_name` call below
+                // will increment the counter, &quot;reserving&quot; the number we just used.
+                </span><span class="kw">let </span>counter = <span class="kw-2">*</span><span class="self">self</span>.next_region_name.try_borrow().unwrap();
+                <span class="self">self</span>.highlight_if_we_cannot_match_hir_ty(fr, return_ty, return_span, counter)
+            });
+
+        <span class="prelude-val">Some</span>(RegionName {
+            name: <span class="self">self</span>.synthesize_region_name(),
+            source: RegionNameSource::AnonRegionFromOutput(highlight, mir_description),
+        })
+    }
+
+    <span class="doccomment">/// From the [`hir::Ty`] of an async function&#39;s lowered return type,
+    /// retrieve the `hir::Ty` representing the type the user originally wrote.
+    ///
+    /// e.g. given the function:
+    ///
+    /// ```
+    /// async fn foo() -&gt; i32 { 2 }
+    /// ```
+    ///
+    /// this function, given the lowered return type of `foo`, an [`OpaqueDef`] that implements `Future&lt;Output=i32&gt;`,
+    /// returns the `i32`.
+    ///
+    /// [`OpaqueDef`]: hir::TyKind::OpaqueDef
+    </span><span class="kw">fn </span>get_future_inner_return_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;tcx </span>hir::Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>hir = <a class="self" href="#768">self</a>.infcx.tcx.hir();
+
+        <span class="kw">let </span>hir::TyKind::OpaqueDef(id, <span class="kw">_</span>, <span class="kw">_</span>) = <a href="#768">hir_ty</a>.kind <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                hir_ty.span,
+                <span class="string">&quot;lowered return type of async fn is not OpaqueDef: {:?}&quot;</span>,
+                hir_ty
+            );
+        };
+        <span class="kw">let </span>opaque_ty = <a href="#769">hir</a>.item(<a href="#771">id</a>);
+        <span class="kw">if let </span>hir::ItemKind::OpaqueTy(<a href="../../../rustc_hir/hir/struct.OpaqueTy.html">hir::OpaqueTy</a> {
+            bounds:
+                [
+                    hir::GenericBound::LangItemTrait(
+                        hir::LangItem::Future,
+                        <span class="kw">_</span>,
+                        <span class="kw">_</span>,
+                        <a href="../../../rustc_hir/hir/struct.GenericArgs.html">hir::GenericArgs</a> {
+                            bindings:
+                                [
+                                    <a href="../../../rustc_hir/hir/struct.TypeBinding.html">hir::TypeBinding</a> {
+                                        ident: <a href="../../../rustc_span/symbol/struct.Ident.html">Ident</a> { name: sym::Output, .. },
+                                        kind:
+                                            <a href="../../../rustc_hir/hir/enum.TypeBindingKind.html">hir::TypeBindingKind::Equality</a> { term: hir::Term::Ty(ty) },
+                                        ..
+                                    },
+                                ],
+                            ..
+                        },
+                    ),
+                ],
+            ..
+        }) = <a href="#778">opaque_ty</a>.kind
+        {
+            <a href="#792">ty</a>
+        } <span class="kw">else </span>{
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.span_bug.html">span_bug!</a>(
+                hir_ty.span,
+                <span class="string">&quot;bounds from lowered return type of async fn did not match expected format: {:?}&quot;</span>,
+                opaque_ty
+            );
+        }
+    }
+
+    <span class="attribute">#[instrument(level = <span class="string">&quot;trace&quot;</span>, skip(<span class="self">self</span>))]
+    </span><span class="kw">fn </span>give_name_if_anonymous_region_appears_in_yield_ty(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="comment">// Note: generators from `async fn` yield `()`, so we don&#39;t have to
+        // worry about them here.
+        </span><span class="kw">let </span>yield_ty = <span class="self">self</span>.regioncx.universal_regions().yield_ty<span class="question-mark">?</span>;
+        <span class="macro">debug!</span>(<span class="string">&quot;give_name_if_anonymous_region_appears_in_yield_ty: yield_ty = {:?}&quot;</span>, yield_ty);
+
+        <span class="kw">let </span>tcx = <span class="self">self</span>.infcx.tcx;
+
+        <span class="kw">if </span>!tcx.any_free_region_meets(<span class="kw-2">&amp;</span>yield_ty, |r| r.to_region_vid() == fr) {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>highlight = RegionHighlightMode::new(tcx);
+        highlight.highlighting_region_vid(fr, <span class="kw-2">*</span><span class="self">self</span>.next_region_name.try_borrow().unwrap());
+        <span class="kw">let </span>type_name =
+            <span class="self">self</span>.infcx.extract_inference_diagnostics_data(yield_ty.into(), <span class="prelude-val">Some</span>(highlight)).name;
+
+        <span class="kw">let </span>yield_span = <span class="kw">match </span>tcx.hir().get(<span class="self">self</span>.mir_hir_id()) {
+            hir::Node::Expr(hir::Expr {
+                kind: hir::ExprKind::Closure(<span class="kw-2">&amp;</span>hir::Closure { fn_decl_span, .. }),
+                ..
+            }) =&gt; tcx.sess.source_map().end_point(fn_decl_span),
+            <span class="kw">_ </span>=&gt; <span class="self">self</span>.body.span,
+        };
+
+        <span class="macro">debug!</span>(
+            <span class="string">&quot;give_name_if_anonymous_region_appears_in_yield_ty: \
+             type_name = {:?}, yield_span = {:?}&quot;</span>,
+            yield_span, type_name,
+        );
+
+        <span class="prelude-val">Some</span>(RegionName {
+            name: <span class="self">self</span>.synthesize_region_name(),
+            source: RegionNameSource::AnonRegionFromYieldTy(yield_span, type_name),
+        })
+    }
+
+    <span class="kw">fn </span>give_name_if_anonymous_region_appears_in_impl_signature(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        fr: <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/sty/struct.RegionVid.html">RegionVid</a>,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#18">RegionName</a>&gt; {
+        <span class="kw">let </span>ty::ReEarlyBound(region) = <span class="kw-2">*</span><span class="self">self</span>.to_error_region(fr)<span class="question-mark">? </span><span class="kw">else </span>{
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        };
+        <span class="kw">if </span>region.has_name() {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        };
+
+        <span class="kw">let </span>tcx = <a class="self" href="#855">self</a>.infcx.tcx;
+        <span class="kw">let </span>body_parent_did = tcx.opt_parent(<span class="self">self</span>.mir_def_id().to_def_id())<span class="question-mark">?</span>;
+        <span class="kw">if </span>tcx.parent(region.def_id) != body_parent_did
+            || tcx.def_kind(body_parent_did) != DefKind::Impl
+        {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="bool-val">false</span>;
+        <a href="#865">tcx</a>.fold_regions(<a href="#865">tcx</a>.type_of(<a href="#866">body_parent_did</a>), |r: ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;, <span class="kw">_</span>| {
+            <span class="kw">if </span><span class="kw-2">*</span>r == ty::ReEarlyBound(region) {
+                <a href="#873">found</a> = <span class="bool-val">true</span>;
+            }
+            <a href="#874">r</a>
+        });
+
+        <span class="prelude-val">Some</span>(<a href="#18">RegionName</a> {
+            name: <a class="self" href="#855">self</a>.<a href="#203">synthesize_region_name</a>(),
+            source: <a href="#49">RegionNameSource::AnonRegionFromImplSignature</a>(
+                <a href="#865">tcx</a>.def_span(<a href="#858">region</a>.def_id),
+                <span class="comment">// FIXME(compiler-errors): Does this ever actually show up
+                // anywhere other than the self type? I couldn&#39;t create an
+                // example of a `&#39;_` in the impl&#39;s trait being referenceable.
+                </span><span class="kw">if </span>found { <span class="string">&quot;self type&quot; </span>} <span class="kw">else </span>{ <span class="string">&quot;header&quot; </span>},
+            ),
+        })
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_borrowck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

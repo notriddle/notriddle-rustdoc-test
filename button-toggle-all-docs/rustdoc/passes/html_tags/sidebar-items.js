@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["ALLOWED_UNCLOSED",""],["CHECK_INVALID_HTML_TAGS",""]],"fn":[["check_invalid_html_tags",""],["drop_tag",""],["extract_html_tag",""],["extract_path_backwards",""],["extract_path_forward",""],["extract_tags",""],["is_valid_for_html_tag_name",""]],"struct":[["InvalidHtmlTagsLinter",""]]};

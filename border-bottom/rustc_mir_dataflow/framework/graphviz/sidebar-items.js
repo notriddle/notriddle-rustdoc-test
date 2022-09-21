@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Background","The background color used for zebra-striping the table."],["OutputStyle",""]],"fn":[["dataflow_successors",""],["diff_pretty",""]],"macro":[["regex",""]],"struct":[["BlockFormatter",""],["CfgEdge","A pair of a basic block and an index into that basic blocks `successors`."],["Formatter",""],["StateDiffCollector",""]]};

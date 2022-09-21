@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["PERM_MASK",""],["PERM_SHIFT",""],["PROTECTED_MASK",""],["PROTECTED_SHIFT",""],["TAG_MASK",""]],"enum":[["Permission","Indicates which permission is granted (by this item to some pointers)"]],"struct":[["Item","An item in the per-location borrow stack."]]};

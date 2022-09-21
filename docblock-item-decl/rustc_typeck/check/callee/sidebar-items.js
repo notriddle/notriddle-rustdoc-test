@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["CallStep",""]],"fn":[["check_legal_trait_for_method_call","Checks that it is legal to call methods of the trait corresponding to `trait_id` (this only cares about the trait, not the specific method that is called)."]],"struct":[["DeferredCallResolution",""]]};

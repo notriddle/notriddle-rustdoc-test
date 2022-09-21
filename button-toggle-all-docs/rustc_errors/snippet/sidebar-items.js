@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["AnnotationType",""],["Style",""]],"struct":[["Annotation",""],["Line",""],["MultilineAnnotation",""],["StyledString",""]]};

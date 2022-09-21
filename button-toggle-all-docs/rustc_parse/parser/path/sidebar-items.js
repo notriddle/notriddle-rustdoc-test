@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["PathStyle","Specifies how to parse a path."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":[["LICENSE","The file `FiraSans-LICENSE.txt`, the license text for the Fira Sans font."],["MEDIUM","The file `FiraSans-Medium.woff2`, the Medium variant of the Fira Sans font in woff2."],["REGULAR","The file `FiraSans-Regular.woff2`, the Regular variant of the Fira Sans font in woff2."]]};

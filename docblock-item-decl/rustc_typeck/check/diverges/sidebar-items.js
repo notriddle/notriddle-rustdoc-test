@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Diverges","Tracks whether executing a node may exit normally (versus return/break/panic, which “diverge”, leaving dead code in their wake). Tracked semi-automatically (through type variables marked as diverging), with some manual adjustments for control-flow primitives (approximating a CFG)."]]};

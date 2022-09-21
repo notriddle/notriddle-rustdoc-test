@@ -1,0 +1,974 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_const_eval/src/interpret/intern.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intern.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_const_eval/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_const_eval/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+</pre><pre class="rust"><code><span class="doccomment">//! This module specifies the type based interner for constants.
+//!
+//! After a const evaluation has computed a value, before we destroy the const evaluator&#39;s session
+//! memory, we need to extract all memory allocations to the global memory pool so they stay around.
+//!
+//! In principle, this is not very complicated: we recursively walk the final value, follow all the
+//! pointers, and move all reachable allocations to the global `tcx` memory. The only complication
+//! is picking the right mutability for the allocations in a `static` initializer: we want to make
+//! as many allocations as possible immutable so LLVM can put them into read-only memory. At the
+//! same time, we need to make memory that could be mutated by the program mutable to avoid
+//! incorrect compilations. To achieve this, we do a type-based traversal of the final value,
+//! tracking mutable and shared references and `UnsafeCell` to determine the current mutability.
+//! (In principle, we could skip this type-based part for `const` and promoteds, as they need to be
+//! always immutable. At least for `const` however we use this opportunity to reject any `const`
+//! that contains allocations whose mutability we cannot identify.)
+
+</span><span class="kw">use </span><a href="validity.rs.html#137"><span class="kw">super</span>::validity::RefTracking</a>;
+<span class="kw">use </span>rustc_data_structures::fx::{FxHashMap, FxHashSet};
+<span class="kw">use </span><a href="../../../rustc_errors/struct.ErrorGuaranteed.html">rustc_errors::ErrorGuaranteed</a>;
+<span class="kw">use </span><a href="../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../rustc_const_eval/interpret/type.InterpResult.html">rustc_middle::mir::interpret::InterpResult</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/layout/type.TyAndLayout.html">layout::TyAndLayout</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>};
+
+<span class="kw">use </span><a href="../../../rustc_ast/ast/enum.Mutability.html">rustc_ast::Mutability</a>;
+
+<span class="kw">use super</span>::{
+    AllocId, <a href="../../../rustc_const_eval/interpret/struct.Allocation.html">Allocation</a>, ConstAllocation, <a href="eval_context.rs.html#28">InterpCx</a>, <a href="place.rs.html#56">MPlaceTy</a>, <a href="machine.rs.html#84">Machine</a>, <a href="memory.rs.html#27">MemoryKind</a>, <a href="place.rs.html#77">PlaceTy</a>,
+    <a href="visitor.rs.html#533">ValueVisitor</a>,
+};
+<span class="kw">use </span><a href="../lib.rs.html#33"><span class="kw">crate</span>::const_eval</a>;
+
+<span class="kw">pub trait </span>CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, T&gt; = Machine&lt;
+    <span class="lifetime">&#39;mir</span>,
+    <span class="lifetime">&#39;tcx</span>,
+    MemoryKind = T,
+    Provenance = <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>,
+    ExtraFnVal = !,
+    FrameExtra = (),
+    AllocExtra = (),
+    MemoryMap = FxHashMap&lt;<a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>, (MemoryKind&lt;T&gt;, <a href="../../../rustc_const_eval/interpret/struct.Allocation.html">Allocation</a>)&gt;,
+&gt;;
+
+<span class="kw">struct </span>InternVisitor&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M: CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, <a href="../const_eval/machine.rs.html#164">const_eval::MemoryKind</a>&gt;&gt; {
+    <span class="doccomment">/// The ectx from which we intern.
+    </span>ecx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;rt </span><span class="kw-2">mut </span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;,
+    <span class="doccomment">/// Previously encountered safe references.
+    </span>ref_tracking: <span class="kw-2">&amp;</span><span class="lifetime">&#39;rt </span><span class="kw-2">mut </span>RefTracking&lt;(MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;, <a href="#61">InternMode</a>)&gt;,
+    <span class="doccomment">/// A list of all encountered allocations. After type-based interning, we traverse this list to
+    /// also intern allocations that are only referenced by a raw pointer or inside a union.
+    </span>leftover_allocations: <span class="kw-2">&amp;</span><span class="lifetime">&#39;rt </span><span class="kw-2">mut </span>FxHashSet&lt;<a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt;,
+    <span class="doccomment">/// The root kind of the value that we&#39;re looking at. This field is never mutated for a
+    /// particular allocation. It is primarily used to make as many allocations as possible
+    /// read-only so LLVM can place them in const memory.
+    </span>mode: <a href="#61">InternMode</a>,
+    <span class="doccomment">/// This field stores whether we are *currently* inside an `UnsafeCell`. This can affect
+    /// the intern mode of references we encounter.
+    </span>inside_unsafe_cell: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Hash, Eq)]
+</span><span class="kw">enum </span>InternMode {
+    <span class="doccomment">/// A static and its current mutability.  Below shared references inside a `static mut`,
+    /// this is *immutable*, and below mutable references inside an `UnsafeCell`, this
+    /// is *mutable*.
+    </span>Static(<a href="../../../rustc_ast/ast/enum.Mutability.html">hir::Mutability</a>),
+    <span class="doccomment">/// A `const`.
+    </span>Const,
+}
+
+<span class="doccomment">/// Signalling data structure to ensure we don&#39;t recurse
+/// into the memory of other constants or statics
+</span><span class="kw">struct </span>IsStaticOrFn;
+
+<span class="doccomment">/// Intern an allocation without looking at its children.
+/// `mode` is the mode of the environment where we found this pointer.
+/// `mutability` is the mutability of the place to be interned; even if that says
+/// `immutable` things might become mutable if `ty` is not frozen.
+/// `ty` can be `None` if there is no potential interior mutability
+/// to account for (e.g. for vtables).
+</span><span class="kw">fn </span>intern_shallow&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M: CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, <a href="../const_eval/machine.rs.html#164">const_eval::MemoryKind</a>&gt;&gt;(
+    ecx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;rt </span><span class="kw-2">mut </span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;,
+    leftover_allocations: <span class="kw-2">&amp;</span><span class="lifetime">&#39;rt </span><span class="kw-2">mut </span>FxHashSet&lt;<a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>&gt;,
+    alloc_id: <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>,
+    mode: <a href="#61">InternMode</a>,
+    ty: <span class="prelude-ty">Option</span>&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#72">IsStaticOrFn</a>&gt; {
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;intern_shallow {:?} with {:?}&quot;</span>, alloc_id, mode);
+    <span class="comment">// remove allocation
+    </span><span class="kw">let </span>tcx = <a href="#81">ecx</a>.tcx;
+    <span class="kw">let </span><span class="prelude-val">Some</span>((kind, <span class="kw-2">mut </span>alloc)) = <a href="#81">ecx</a>.memory.alloc_map.remove(<span class="kw-2">&amp;</span><a href="#83">alloc_id</a>) <span class="kw">else </span>{
+        <span class="comment">// Pointer not found in local memory map. It is either a pointer to the global
+        // map, or dangling.
+        // If the pointer is dangling (neither in local nor global memory), we leave it
+        // to validation to error -- it has the much better error messages, pointing out where
+        // in the value the dangling reference lies.
+        // The `delay_span_bug` ensures that we don&#39;t forget such a check in validation.
+        </span><span class="kw">if </span>tcx.try_get_global_alloc(alloc_id).is_none() {
+            <a href="#89">tcx</a>.sess.delay_span_bug(<a href="#81">ecx</a>.tcx.span, <span class="string">&quot;tried to intern dangling pointer&quot;</span>);
+        }
+        <span class="comment">// treat dangling pointers like other statics
+        // just to stop trying to recurse into them
+        </span><span class="kw">return </span><span class="prelude-val">Some</span>(<a href="#72">IsStaticOrFn</a>);
+    };
+    <span class="comment">// This match is just a canary for future changes to `MemoryKind`, which most likely need
+    // changes in this function.
+    </span><span class="kw">match </span><a href="#90">kind</a> {
+        <a href="memory.rs.html#29">MemoryKind::Stack</a>
+        | <a href="memory.rs.html#33">MemoryKind::Machine</a>(<a href="../const_eval/machine.rs.html#165">const_eval::MemoryKind::Heap</a>)
+        | <a href="memory.rs.html#31">MemoryKind::CallerLocation</a> =&gt; {}
+    }
+    <span class="comment">// Set allocation mutability as appropriate. This is used by LLVM to put things into
+    // read-only memory, and also by Miri when evaluating other globals that
+    // access this one.
+    </span><span class="kw">if let </span><a href="#65">InternMode::Static</a>(mutability) = <a href="#84">mode</a> {
+        <span class="comment">// For this, we need to take into account `UnsafeCell`. When `ty` is `None`, we assume
+        // no interior mutability.
+        </span><span class="kw">let </span>frozen = <a href="#85">ty</a>.map_or(<span class="bool-val">true</span>, |ty| <a href="#117">ty</a>.is_freeze(<a href="#81">ecx</a>.tcx, <a href="#81">ecx</a>.param_env));
+        <span class="comment">// For statics, allocation mutability is the combination of place mutability and
+        // type mutability.
+        // The entire allocation needs to be mutable if it contains an `UnsafeCell` anywhere.
+        </span><span class="kw">let </span>immutable = <a href="#114">mutability</a> == Mutability::Not &amp;&amp; <a href="#117">frozen</a>;
+        <span class="kw">if </span>immutable {
+            <a href="#90">alloc</a>.mutability = Mutability::Not;
+        } <span class="kw">else </span>{
+            <span class="comment">// Just making sure we are not &quot;upgrading&quot; an immutable allocation to mutable.
+            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(alloc.mutability, Mutability::Mut);
+        }
+    } <span class="kw">else </span>{
+        <span class="comment">// No matter what, *constants are never mutable*. Mutating them is UB.
+        // See const_eval::machine::MemoryExtra::can_access_statics for why
+        // immutability is so important.
+
+        // Validation will ensure that there is no `UnsafeCell` on an immutable allocation.
+        </span><a href="#90">alloc</a>.mutability = Mutability::Not;
+    };
+    <span class="comment">// link the alloc id to the actual allocation
+    </span><a href="#82">leftover_allocations</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#90">alloc</a>.provenance().iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, alloc_id)| <a href="#137">alloc_id</a>));
+    <span class="kw">let </span>alloc = <a href="#89">tcx</a>.intern_const_alloc(<a href="#90">alloc</a>);
+    <a href="#89">tcx</a>.set_alloc_id_memory(<a href="#83">alloc_id</a>, <a href="#138">alloc</a>);
+    <span class="prelude-val">None
+</span>}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M: CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, <a href="../const_eval/machine.rs.html#164">const_eval::MemoryKind</a>&gt;&gt;
+    InternVisitor&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;
+{
+    <span class="kw">fn </span>intern_shallow(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        alloc_id: <a href="../../../rustc_const_eval/interpret/struct.AllocId.html">AllocId</a>,
+        mode: <a href="#61">InternMode</a>,
+        ty: <span class="prelude-ty">Option</span>&lt;Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="#72">IsStaticOrFn</a>&gt; {
+        <a href="#80-86">intern_shallow</a>(<a class="self" href="#147">self</a>.ecx, <a class="self" href="#147">self</a>.leftover_allocations, <a href="#148">alloc_id</a>, <a href="#149">mode</a>, <a href="#150">ty</a>)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, M: CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, <a href="../const_eval/machine.rs.html#164">const_eval::MemoryKind</a>&gt;&gt;
+    ValueVisitor&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt; <span class="kw">for </span>InternVisitor&lt;<span class="lifetime">&#39;rt</span>, <span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;
+{
+    <span class="kw">type </span>V = MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;;
+
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>ecx(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt; {
+        <span class="kw-2">&amp;</span><a class="self" href="#162">self</a>.ecx
+    }
+
+    <span class="kw">fn </span>visit_aggregate(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        fields: <span class="kw">impl </span>Iterator&lt;Item = InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <span class="self">Self</span>::V&gt;&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// We want to walk the aggregate to look for references to intern. While doing that we
+        // also need to take special care of interior mutability.
+        //
+        // As an optimization, however, if the allocation does not contain any references: we don&#39;t
+        // need to do the walk. It can be costly for big arrays for example (e.g. issue #93215).
+        </span><span class="kw">let </span>is_walk_needed = |mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;| -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt; {
+            <span class="comment">// ZSTs cannot contain pointers, we can avoid the interning walk.
+            </span><span class="kw">if </span>mplace.layout.is_zst() {
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">false</span>);
+            }
+
+            <span class="comment">// Now, check whether this allocation could contain references.
+            //
+            // Note, this check may sometimes not be cheap, so we only do it when the walk we&#39;d like
+            // to avoid could be expensive: on the potentially larger types, arrays and slices,
+            // rather than on all aggregates unconditionally.
+            </span><span class="kw">if </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.matches.html">matches!</a>(mplace.layout.ty.kind(), ty::Array(..) | ty::Slice(..)) {
+                <span class="kw">let </span><span class="prelude-val">Some</span>((size, align)) = <span class="self">self</span>.ecx.size_and_align_of_mplace(<span class="kw-2">&amp;</span>mplace)<span class="question-mark">? </span><span class="kw">else </span>{
+                    <span class="comment">// We do the walk if we can&#39;t determine the size of the mplace: we may be
+                    // dealing with extern types here in the future.
+                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">true</span>);
+                };
+
+                <span class="comment">// If there is no provenance in this allocation, it does not contain references
+                // that point to another allocation, and we can avoid the interning walk.
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(alloc) = <span class="self">self</span>.ecx.get_ptr_alloc(mplace.ptr, size, align)<span class="question-mark">? </span>{
+                    <span class="kw">if </span>!alloc.has_provenance() {
+                        <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">false</span>);
+                    }
+                } <span class="kw">else </span>{
+                    <span class="comment">// We&#39;re encountering a ZST here, and can avoid the walk as well.
+                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="bool-val">false</span>);
+                }
+            }
+
+            <span class="comment">// In the general case, we do the walk.
+            </span><span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
+        };
+
+        <span class="comment">// If this allocation contains no references to intern, we avoid the potentially costly
+        // walk.
+        //
+        // We can do this before the checks for interior mutability below, because only references
+        // are relevant in that situation, and we&#39;re checking if there are any here.
+        </span><span class="kw">if </span>!is_walk_needed(mplace)<span class="question-mark">? </span>{
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(def) = <a href="#168">mplace</a>.layout.ty.ty_adt_def() {
+            <span class="kw">if </span>def.is_unsafe_cell() {
+                <span class="comment">// We are crossing over an `UnsafeCell`, we can mutate again. This means that
+                // References we encounter inside here are interned as pointing to mutable
+                // allocations.
+                // Remember the `old` value to handle nested `UnsafeCell`.
+                </span><span class="kw">let </span>old = std::mem::replace(<span class="kw-2">&amp;mut </span><a class="self" href="#167">self</a>.inside_unsafe_cell, <span class="bool-val">true</span>);
+                <span class="kw">let </span>walked = <a class="self" href="#167">self</a>.<a href="visitor.rs.html#533">walk_aggregate</a>(<a href="#168">mplace</a>, <a href="#169">fields</a>);
+                <a class="self" href="#167">self</a>.inside_unsafe_cell = <a href="#225">old</a>;
+                <span class="kw">return </span><a href="#226">walked</a>;
+            }
+        }
+
+        <a class="self" href="#167">self</a>.<a href="visitor.rs.html#533">walk_aggregate</a>(<a href="#168">mplace</a>, <a href="#169">fields</a>)
+    }
+
+    <span class="kw">fn </span>visit_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, mplace: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="comment">// Handle Reference types, as these are the only types with provenance supported by const eval.
+        // Raw pointers (and boxes) are handled by the `leftover_allocations` logic.
+        </span><span class="kw">let </span>tcx = <a class="self" href="#235">self</a>.ecx.tcx;
+        <span class="kw">let </span>ty = <a href="#235">mplace</a>.layout.ty;
+        <span class="kw">if let </span>ty::Ref(<span class="kw">_</span>, referenced_ty, ref_mutability) = <span class="kw-2">*</span><a href="#239">ty</a>.kind() {
+            <span class="kw">let </span>value = <span class="self">self</span>.ecx.read_immediate(<span class="kw-2">&amp;</span>mplace.into())<span class="question-mark">?</span>;
+            <span class="kw">let </span>mplace = <span class="self">self</span>.ecx.ref_to_mplace(<span class="kw-2">&amp;</span>value)<span class="question-mark">?</span>;
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(mplace.layout.ty, referenced_ty);
+            <span class="comment">// Handle trait object vtables.
+            </span><span class="kw">if let </span>ty::Dynamic(..) =
+                <a href="#238">tcx</a>.struct_tail_erasing_lifetimes(<a href="#240">referenced_ty</a>, <a class="self" href="#235">self</a>.ecx.param_env).kind()
+            {
+                <span class="kw">let </span>ptr = mplace.meta.unwrap_meta().to_pointer(<span class="kw-2">&amp;</span>tcx)<span class="question-mark">?</span>;
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(alloc_id) = <a href="#248">ptr</a>.provenance {
+                    <span class="comment">// Explicitly choose const mode here, since vtables are immutable, even
+                    // if the reference of the fat pointer is mutable.
+                    </span><a class="self" href="#235">self</a>.<a href="#146-151">intern_shallow</a>(<a href="#249">alloc_id</a>, <a href="#67">InternMode::Const</a>, <span class="prelude-val">None</span>);
+                } <span class="kw">else </span>{
+                    <span class="comment">// Validation will error (with a better message) on an invalid vtable pointer.
+                    // Let validation show the error message, but make sure it *does* error.
+                    </span><a href="#238">tcx</a>.sess
+                        .delay_span_bug(<a href="#238">tcx</a>.span, <span class="string">&quot;vtables pointers cannot be integer pointers&quot;</span>);
+                }
+            }
+            <span class="comment">// Check if we have encountered this pointer+layout combination before.
+            // Only recurse for allocation-backed pointers.
+            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(alloc_id) = <a href="#242">mplace</a>.ptr.provenance {
+                <span class="comment">// Compute the mode with which we intern this. Our goal here is to make as many
+                // statics as we can immutable so they can be placed in read-only memory by LLVM.
+                </span><span class="kw">let </span>ref_mode = <span class="kw">match </span><a class="self" href="#235">self</a>.mode {
+                    <a href="#65">InternMode::Static</a>(mutbl) =&gt; {
+                        <span class="comment">// In statics, merge outer mutability with reference mutability and
+                        // take into account whether we are in an `UnsafeCell`.
+
+                        // The only way a mutable reference actually works as a mutable reference is
+                        // by being in a `static mut` directly or behind another mutable reference.
+                        // If there&#39;s an immutable reference or we are inside a `static`, then our
+                        // mutable reference is equivalent to an immutable one. As an example:
+                        // `&amp;&amp;mut Foo` is semantically equivalent to `&amp;&amp;Foo`
+                        </span><span class="kw">match </span><a href="#240">ref_mutability</a> {
+                            <span class="kw">_ if </span><a class="self" href="#235">self</a>.inside_unsafe_cell =&gt; {
+                                <span class="comment">// Inside an `UnsafeCell` is like inside a `static mut`, the &quot;outer&quot;
+                                // mutability does not matter.
+                                </span><a href="#65">InternMode::Static</a>(<a href="#240">ref_mutability</a>)
+                            }
+                            Mutability::Not =&gt; {
+                                <span class="comment">// A shared reference, things become immutable.
+                                // We do *not* consider `freeze` here: `intern_shallow` considers
+                                // `freeze` for the actual mutability of this allocation; the intern
+                                // mode for references contained in this allocation is tracked more
+                                // precisely when traversing the referenced data (by tracking
+                                // `UnsafeCell`). This makes sure that `&amp;(&amp;i32, &amp;Cell&lt;i32&gt;)` still
+                                // has the left inner reference interned into a read-only
+                                // allocation.
+                                </span><a href="#65">InternMode::Static</a>(Mutability::Not)
+                            }
+                            Mutability::Mut =&gt; {
+                                <span class="comment">// Mutable reference.
+                                </span><a href="#65">InternMode::Static</a>(<a href="#266">mutbl</a>)
+                            }
+                        }
+                    }
+                    <a href="#67">InternMode::Const</a> =&gt; {
+                        <span class="comment">// Ignore `UnsafeCell`, everything is immutable.  Validity does some sanity
+                        // checking for mutable references that we encounter -- they must all be
+                        // ZST.
+                        </span><a href="#67">InternMode::Const</a>
+                    }
+                };
+                <span class="kw">match </span><a class="self" href="#235">self</a>.<a href="#146-151">intern_shallow</a>(<a href="#262">alloc_id</a>, <a href="#265">ref_mode</a>, <span class="prelude-val">Some</span>(<a href="#240">referenced_ty</a>)) {
+                    <span class="comment">// No need to recurse, these are interned already and statics may have
+                    // cycles, so we don&#39;t want to recurse there
+                    </span><span class="prelude-val">Some</span>(<a href="#72">IsStaticOrFn</a>) =&gt; {}
+                    <span class="comment">// intern everything referenced by this value. The mutability is taken from the
+                    // reference. It is checked above that mutable references only happen in
+                    // `static mut`
+                    </span><span class="prelude-val">None </span>=&gt; <a class="self" href="#235">self</a>.ref_tracking.<a href="validity.rs.html#153">track</a>((<a href="#242">mplace</a>, <a href="#265">ref_mode</a>), || ()),
+                }
+            }
+            <span class="prelude-val">Ok</span>(())
+        } <span class="kw">else </span>{
+            <span class="comment">// Not a reference -- proceed recursively.
+            </span><a class="self" href="#235">self</a>.<a href="visitor.rs.html#533">walk_value</a>(<a href="#235">mplace</a>)
+        }
+    }
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug, PartialEq, Hash, Eq)]
+</span><span class="kw">pub enum </span>InternKind {
+    <span class="doccomment">/// The `mutability` of the static, ignoring the type which may have interior mutability.
+    </span>Static(<a href="../../../rustc_ast/ast/enum.Mutability.html">hir::Mutability</a>),
+    Constant,
+    Promoted,
+}
+
+<span class="doccomment">/// Intern `ret` and everything it references.
+///
+/// This *cannot raise an interpreter error*.  Doing so is left to validation, which
+/// tracks where in the value we are and thus can show much better error messages.
+/// Any errors here would anyway be turned into `const_err` lints, whereas validation failures
+/// are hard errors.
+</span><span class="attribute">#[instrument(level = <span class="string">&quot;debug&quot;</span>, skip(ecx))]
+</span><span class="kw">pub fn </span>intern_const_alloc_recursive&lt;
+    <span class="lifetime">&#39;mir</span>,
+    <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>,
+    M: CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, <a href="../const_eval/machine.rs.html#164">const_eval::MemoryKind</a>&gt;,
+&gt;(
+    ecx: <span class="kw-2">&amp;mut </span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;,
+    intern_kind: <a href="#324">InternKind</a>,
+    ret: <span class="kw-2">&amp;</span>MPlaceTy&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), <a href="../../../rustc_errors/struct.ErrorGuaranteed.html">ErrorGuaranteed</a>&gt; {
+    <span class="kw">let </span>tcx = ecx.tcx;
+    <span class="kw">let </span>base_intern_mode = <span class="kw">match </span>intern_kind {
+        InternKind::Static(mutbl) =&gt; InternMode::Static(mutbl),
+        <span class="comment">// `Constant` includes array lengths.
+        </span>InternKind::Constant | InternKind::Promoted =&gt; InternMode::Const,
+    };
+
+    <span class="comment">// Type based interning.
+    // `ref_tracking` tracks typed references we have already interned and still need to crawl for
+    // more typed information inside them.
+    // `leftover_allocations` collects *all* allocations we see, because some might not
+    // be available in a typed way. They get interned at the end.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>ref_tracking = RefTracking::empty();
+    <span class="kw">let </span>leftover_allocations = <span class="kw-2">&amp;mut </span>FxHashSet::default();
+
+    <span class="comment">// start with the outermost allocation
+    </span>intern_shallow(
+        ecx,
+        leftover_allocations,
+        <span class="comment">// The outermost allocation must exist, because we allocated it with
+        // `Memory::allocate`.
+        </span>ret.ptr.provenance.unwrap(),
+        base_intern_mode,
+        <span class="prelude-val">Some</span>(ret.layout.ty),
+    );
+
+    ref_tracking.track((<span class="kw-2">*</span>ret, base_intern_mode), || ());
+
+    <span class="kw">while let </span><span class="prelude-val">Some</span>(((mplace, mode), <span class="kw">_</span>)) = ref_tracking.todo.pop() {
+        <span class="kw">let </span>res = InternVisitor {
+            ref_tracking: <span class="kw-2">&amp;mut </span>ref_tracking,
+            ecx,
+            mode,
+            leftover_allocations,
+            inside_unsafe_cell: <span class="bool-val">false</span>,
+        }
+        .visit_value(<span class="kw-2">&amp;</span>mplace);
+        <span class="comment">// We deliberately *ignore* interpreter errors here.  When there is a problem, the remaining
+        // references are &quot;leftover&quot;-interned, and later validation will show a proper error
+        // and point at the right part of the value causing the problem.
+        </span><span class="kw">match </span>res {
+            <span class="prelude-val">Ok</span>(()) =&gt; {}
+            <span class="prelude-val">Err</span>(error) =&gt; {
+                ecx.tcx.sess.delay_span_bug(
+                    ecx.tcx.span,
+                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                        <span class="string">&quot;error during interning should later cause validation failure: {}&quot;</span>,
+                        error
+                    ),
+                );
+            }
+        }
+    }
+
+    <span class="comment">// Intern the rest of the allocations as mutable. These might be inside unions, padding, raw
+    // pointers, ... So we can&#39;t intern them according to their type rules
+
+    </span><span class="kw">let </span><span class="kw-2">mut </span>todo: Vec&lt;<span class="kw">_</span>&gt; = leftover_allocations.iter().cloned().collect();
+    <span class="macro">debug!</span>(<span class="question-mark">?</span>todo);
+    <span class="macro">debug!</span>(<span class="string">&quot;dead_alloc_map: {:#?}&quot;</span>, ecx.memory.dead_alloc_map);
+    <span class="kw">while let </span><span class="prelude-val">Some</span>(alloc_id) = todo.pop() {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, <span class="kw-2">mut </span>alloc)) = ecx.memory.alloc_map.remove(<span class="kw-2">&amp;</span>alloc_id) {
+            <span class="comment">// We can&#39;t call the `intern_shallow` method here, as its logic is tailored to safe
+            // references and a `leftover_allocations` set (where we only have a todo-list here).
+            // So we hand-roll the interning logic here again.
+            </span><span class="kw">match </span>intern_kind {
+                <span class="comment">// Statics may point to mutable allocations.
+                // Even for immutable statics it would be ok to have mutable allocations behind
+                // raw pointers, e.g. for `static FOO: *const AtomicUsize = &amp;AtomicUsize::new(42)`.
+                </span>InternKind::Static(<span class="kw">_</span>) =&gt; {}
+                <span class="comment">// Raw pointers in promoteds may only point to immutable things so we mark
+                // everything as immutable.
+                // It is UB to mutate through a raw pointer obtained via an immutable reference:
+                // Since all references and pointers inside a promoted must by their very definition
+                // be created from an immutable reference (and promotion also excludes interior
+                // mutability), mutating through them would be UB.
+                // There&#39;s no way we can check whether the user is using raw pointers correctly,
+                // so all we can do is mark this as immutable here.
+                </span>InternKind::Promoted =&gt; {
+                    <span class="comment">// See const_eval::machine::MemoryExtra::can_access_statics for why
+                    // immutability is so important.
+                    </span>alloc.mutability = Mutability::Not;
+                }
+                InternKind::Constant =&gt; {
+                    <span class="comment">// If it&#39;s a constant, we should not have any &quot;leftovers&quot; as everything
+                    // is tracked by const-checking.
+                    // FIXME: downgrade this to a warning? It rejects some legitimate consts,
+                    // such as `const CONST_RAW: *const Vec&lt;i32&gt; = &amp;Vec::new() as *const _;`.
+                    </span>ecx.tcx
+                        .sess
+                        .span_err(ecx.tcx.span, <span class="string">&quot;untyped pointers are not allowed in constant&quot;</span>);
+                    <span class="comment">// For better errors later, mark the allocation as immutable.
+                    </span>alloc.mutability = Mutability::Not;
+                }
+            }
+            <span class="kw">let </span>alloc = tcx.intern_const_alloc(alloc);
+            tcx.set_alloc_id_memory(alloc_id, alloc);
+            <span class="kw">for </span><span class="kw-2">&amp;</span>(<span class="kw">_</span>, alloc_id) <span class="kw">in </span>alloc.inner().provenance().iter() {
+                <span class="kw">if </span>leftover_allocations.insert(alloc_id) {
+                    todo.push(alloc_id);
+                }
+            }
+        } <span class="kw">else if </span>ecx.memory.dead_alloc_map.contains_key(<span class="kw-2">&amp;</span>alloc_id) {
+            <span class="comment">// Codegen does not like dangling pointers, and generally `tcx` assumes that
+            // all allocations referenced anywhere actually exist. So, make sure we error here.
+            </span><span class="kw">let </span>reported = ecx
+                .tcx
+                .sess
+                .span_err(ecx.tcx.span, <span class="string">&quot;encountered dangling pointer in final constant&quot;</span>);
+            <span class="kw">return </span><span class="prelude-val">Err</span>(reported);
+        } <span class="kw">else if </span>ecx.tcx.try_get_global_alloc(alloc_id).is_none() {
+            <span class="comment">// We have hit an `AllocId` that is neither in local or global memory and isn&#39;t
+            // marked as dangling by local memory.  That should be impossible.
+            </span><span class="macro">span_bug!</span>(ecx.tcx.span, <span class="string">&quot;encountered unknown alloc id {:?}&quot;</span>, alloc_id);
+        }
+    }
+    <span class="prelude-val">Ok</span>(())
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>: <span class="lifetime">&#39;mir</span>, M: <span class="kw">super</span>::intern::CompileTimeMachine&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, !&gt;&gt;
+    InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;
+{
+    <span class="doccomment">/// A helper function that allocates memory for the layout given and gives you access to mutate
+    /// it. Once your own mutation code is done, the backing `Allocation` is removed from the
+    /// current `Memory` and returned.
+    </span><span class="kw">pub fn </span>intern_with_temp_alloc(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        layout: TyAndLayout&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        f: <span class="kw">impl </span>FnOnce(
+            <span class="kw-2">&amp;mut </span>InterpCx&lt;<span class="lifetime">&#39;mir</span>, <span class="lifetime">&#39;tcx</span>, M&gt;,
+            <span class="kw-2">&amp;</span>PlaceTy&lt;<span class="lifetime">&#39;tcx</span>, M::Provenance&gt;,
+        ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ()&gt;,
+    ) -&gt; InterpResult&lt;<span class="lifetime">&#39;tcx</span>, ConstAllocation&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>dest = <span class="self">self</span>.allocate(layout, MemoryKind::Stack)<span class="question-mark">?</span>;
+        f(<span class="self">self</span>, <span class="kw-2">&amp;</span>dest.into())<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>alloc = <a class="self" href="#473">self</a>.memory.alloc_map.remove(<span class="kw-2">&amp;</span><a href="#480">dest</a>.ptr.provenance.unwrap()).unwrap().<span class="number">1</span>;
+        <a href="#482">alloc</a>.mutability = Mutability::Not;
+        <span class="prelude-val">Ok</span>(<a class="self" href="#473">self</a>.tcx.intern_const_alloc(<a href="#482">alloc</a>))
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_const_eval" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

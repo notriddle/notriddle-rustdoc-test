@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="A classic liveness analysis based on dataflow over the AST. Computes, for each local variable in a function, whether that variable is live at a given point. Program execution points are identified by their IDs."><meta name="keywords" content="rust, rustlang, rust-lang, liveness"><title>rustc_passes::liveness - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_passes/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_passes/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module liveness</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#constants">Constants</a></li><li><a href="#functions">Functions</a></li></ul></div></section></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_passes/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn"><span class="in-band">Module <a href="../index.html">rustc_passes</a>::<wbr><a class="mod" href="#">liveness</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../src/rustc_passes/liveness.rs.html#1-1769">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A classic liveness analysis based on dataflow over the AST. Computes,
+for each local variable in a function, whether that variable is live
+at a given point. Program execution points are identified by their
+IDs.</p>
+<h2 id="basic-idea"><a href="#basic-idea">Basic idea</a></h2>
+<p>The basic model is that each local variable is assigned an index. We
+represent sets of local variables using a vector indexed by this
+index. The value in the vector is either 0, indicating the variable
+is dead, or the ID of an expression that uses the variable.</p>
+<p>We conceptually walk over the AST in reverse execution order. If we
+find a use of a variable, we add it to the set of live variables. If
+we find an assignment to a variable, we remove it from the set of live
+variables. When we have to merge two flows, we take the union of
+those two flows – if the variable is live on both paths, we simply
+pick one ID. In the event of loops, we continue doing this until a
+fixed point is reached.</p>
+<h3 id="checking-initialization"><a href="#checking-initialization">Checking initialization</a></h3>
+<p>At the function entry point, all variables must be dead. If this is
+not the case, we can report an error using the ID found in the set of
+live variables, which identifies a use of the variable which is not
+dominated by an assignment.</p>
+<h3 id="checking-moves"><a href="#checking-moves">Checking moves</a></h3>
+<p>After each explicit move, the variable must be dead.</p>
+<h3 id="computing-last-uses"><a href="#computing-last-uses">Computing last uses</a></h3>
+<p>Any use of the variable where the variable is dead afterwards is a
+last use.</p>
+<h2 id="implementation-details"><a href="#implementation-details">Implementation details</a></h2>
+<p>The actual implementation contains two (nested) walks over the AST.
+The outer walk has the job of building up the ir_maps instance for the
+enclosing function. On the way down the tree, it identifies those AST
+nodes and variable IDs that will be needed for the liveness analysis
+and assigns them contiguous IDs. The liveness ID for an AST node is
+called a <code>live_node</code> (it’s a newtype’d <code>u32</code>) and the ID for a variable
+is called a <code>variable</code> (another newtype’d <code>u32</code>).</p>
+<p>On the way back up the tree, as we are about to exit from a function
+declaration we allocate a <code>liveness</code> instance. Now that we know
+precisely how many nodes and variables we need, we can allocate all
+the various arrays that we will need to precisely the right size. We then
+perform the actual propagation on the <code>liveness</code> instance.</p>
+<p>This propagation is encoded in the various <code>propagate_through_*()</code>
+methods. It effectively does a reverse walk of the AST; whenever we
+reach a loop node, we iterate until a fixed point is reached.</p>
+<h3 id="the-rwu-struct"><a href="#the-rwu-struct">The <code>RWU</code> struct</a></h3>
+<p>At each live node <code>N</code>, we track three pieces of information for each
+variable <code>V</code> (these are encapsulated in the <code>RWU</code> struct):</p>
+<ul>
+<li>
+<p><code>reader</code>: the <code>LiveNode</code> ID of some node which will read the value
+that <code>V</code> holds on entry to <code>N</code>. Formally: a node <code>M</code> such
+that there exists a path <code>P</code> from <code>N</code> to <code>M</code> where <code>P</code> does not
+write <code>V</code>. If the <code>reader</code> is <code>None</code>, then the current
+value will never be read (the variable is dead, essentially).</p>
+</li>
+<li>
+<p><code>writer</code>: the <code>LiveNode</code> ID of some node which will write the
+variable <code>V</code> and which is reachable from <code>N</code>. Formally: a node <code>M</code>
+such that there exists a path <code>P</code> from <code>N</code> to <code>M</code> and <code>M</code> writes
+<code>V</code>. If the <code>writer</code> is <code>None</code>, then there is no writer
+of <code>V</code> that follows <code>N</code>.</p>
+</li>
+<li>
+<p><code>used</code>: a boolean value indicating whether <code>V</code> is <em>used</em>. We
+distinguish a <em>read</em> from a <em>use</em> in that a <em>use</em> is some read that
+is not just used to generate a new value. For example, <code>x += 1</code> is
+a read but not a use. This is used to generate better warnings.</p>
+</li>
+</ul>
+<h3 id="special-nodes-and-variables"><a href="#special-nodes-and-variables">Special nodes and variables</a></h3>
+<p>We generate various special nodes for various, well, special purposes.
+These are described in the <code>Liveness</code> struct.</p>
+</div></details><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="mod" href="rwu_table/index.html" title="rustc_passes::liveness::rwu_table mod">rwu_table</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.CaptureInfo.html" title="rustc_passes::liveness::CaptureInfo struct">CaptureInfo</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.CollectLitsVisitor.html" title="rustc_passes::liveness::CollectLitsVisitor struct">CollectLitsVisitor</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.IrMaps.html" title="rustc_passes::liveness::IrMaps struct">IrMaps</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.LiveNode.html" title="rustc_passes::liveness::LiveNode struct">LiveNode</a></div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.Liveness.html" title="rustc_passes::liveness::Liveness struct">Liveness</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.LocalInfo.html" title="rustc_passes::liveness::LocalInfo struct">LocalInfo</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="struct" href="struct.Variable.html" title="rustc_passes::liveness::Variable struct">Variable</a></div></div></div><h2 id="enums" class="small-section-header"><a href="#enums">Enums</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="enum" href="enum.LiveNodeKind.html" title="rustc_passes::liveness::LiveNodeKind enum">LiveNodeKind</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="enum" href="enum.VarKind.html" title="rustc_passes::liveness::VarKind enum">VarKind</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="constants" class="small-section-header"><a href="#constants">Constants</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="constant" href="constant.ACC_READ.html" title="rustc_passes::liveness::ACC_READ constant">ACC_READ</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="constant" href="constant.ACC_USE.html" title="rustc_passes::liveness::ACC_USE constant">ACC_USE</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="constant" href="constant.ACC_WRITE.html" title="rustc_passes::liveness::ACC_WRITE constant">ACC_WRITE</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div></div><h2 id="functions" class="small-section-header"><a href="#functions">Functions</a></h2><div class="item-table"><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.check_expr.html" title="rustc_passes::liveness::check_expr fn">check_expr</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.check_liveness.html" title="rustc_passes::liveness::check_liveness fn">check_liveness</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.live_node_kind_to_string.html" title="rustc_passes::liveness::live_node_kind_to_string fn">live_node_kind_to_string</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></div><div class="item-row"><div class="item-left unstable module-item"><a class="fn" href="fn.provide.html" title="rustc_passes::liveness::provide fn">provide</a></div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_passes" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

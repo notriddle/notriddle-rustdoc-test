@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["ACCEPTED_FEATURES","Those language feature has since been Accepted (it was once Active)"]],"macro":[["declare_features",""]]};

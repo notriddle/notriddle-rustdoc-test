@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["LocalsStateAtExit",""],["TwoPhaseActivation","Location where a two-phase borrow is activated, if a borrow is in fact a two-phase borrow."]],"struct":[["BorrowData",""],["BorrowSet",""],["GatherBorrows",""]]};

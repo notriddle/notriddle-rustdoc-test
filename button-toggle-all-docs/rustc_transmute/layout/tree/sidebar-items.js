@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Err",""],["Tree","A tree-based representation of a type layout."]],"mod":[["rustc",""]]};

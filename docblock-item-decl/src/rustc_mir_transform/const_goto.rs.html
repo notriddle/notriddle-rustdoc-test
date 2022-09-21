@@ -1,0 +1,236 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_mir_transform/src/const_goto.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>const_goto.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_mir_transform/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_mir_transform/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+</pre><pre class="rust"><code><span class="doccomment">//! This pass optimizes the following sequence
+//! ```rust,ignore (example)
+//! bb2: {
+//!     _2 = const true;
+//!     goto -&gt; bb3;
+//! }
+//!
+//! bb3: {
+//!     switchInt(_2) -&gt; [false: bb4, otherwise: bb5];
+//! }
+//! ```
+//! into
+//! ```rust,ignore (example)
+//! bb2: {
+//!     _2 = const true;
+//!     goto -&gt; bb5;
+//! }
+//! ```
+
+</span><span class="kw">use </span><a href="../../rustc_middle/mir/trait.MirPass.html"><span class="kw">crate</span>::MirPass</a>;
+<span class="kw">use </span><a href="../../rustc_middle/mir/index.html">rustc_middle::mir</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="../../rustc_middle/ty/context/struct.TyCtxt.html">rustc_middle::ty::TyCtxt</a>;
+<span class="kw">use </span>rustc_middle::{<a href="../../rustc_middle/mir/visit/trait.Visitor.html">mir::visit::Visitor</a>, <a href="../../rustc_middle/ty/struct.ParamEnv.html">ty::ParamEnv</a>};
+
+<span class="kw">use </span><span class="kw">super</span>::simplify::{<a href="simplify.rs.html#51">simplify_cfg</a>, <a href="simplify.rs.html#397">simplify_locals</a>};
+
+<span class="kw">pub struct </span>ConstGoto;
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; MirPass&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span><a href="#27">ConstGoto</a> {
+    <span class="kw">fn </span>is_enabled(<span class="kw-2">&amp;</span><span class="self">self</span>, sess: <span class="kw-2">&amp;</span><a href="../../rustc_session/session/struct.Session.html">rustc_session::Session</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a href="#30">sess</a>.mir_opt_level() &gt;= <span class="number">4
+    </span>}
+
+    <span class="kw">fn </span>run_pass(<span class="kw-2">&amp;</span><span class="self">self</span>, tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;, body: <span class="kw-2">&amp;mut </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;) {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.trace.html">trace!</a>(<span class="string">&quot;Running ConstGoto on {:?}&quot;</span>, body.source);
+        <span class="kw">let </span>param_env = <a href="#34">tcx</a>.param_env_reveal_all_normalized(<a href="#34">body</a>.source.def_id());
+        <span class="kw">let </span><span class="kw-2">mut </span>opt_finder =
+            <a href="#112">ConstGotoOptimizationFinder</a> { <a href="#34">tcx</a>, <a href="#34">body</a>, optimizations: <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[], <a href="#36">param_env</a> };
+        <a href="#37">opt_finder</a>.<a href="../../rustc_middle/mir/visit/trait.Visitor.html">visit_body</a>(<a href="#34">body</a>);
+        <span class="kw">let </span>should_simplify = !<a href="#37">opt_finder</a>.optimizations.is_empty();
+        <span class="kw">for </span>opt <span class="kw">in </span>opt_finder.optimizations {
+            <span class="kw">let </span>block = <span class="kw-2">&amp;mut </span>body.basic_blocks_mut()[opt.bb_with_goto];
+            block.statements.extend(opt.stmts_move_up);
+            <span class="kw">let </span>terminator = block.terminator_mut();
+            <span class="kw">let </span>new_goto = TerminatorKind::Goto { target: opt.target_to_use_in_goto };
+            <span class="macro">debug!</span>(<span class="string">&quot;SUCCESS: replacing `{:?}` with `{:?}`&quot;</span>, terminator.kind, new_goto);
+            terminator.kind = new_goto;
+        }
+
+        <span class="comment">// if we applied optimizations, we potentially have some cfg to cleanup to
+        // make it easier for further passes
+        </span><span class="kw">if </span>should_simplify {
+            <a href="simplify.rs.html#51">simplify_cfg</a>(<a href="#34">tcx</a>, <a href="#34">body</a>);
+            <a href="simplify.rs.html#397">simplify_locals</a>(<a href="#34">body</a>, <a href="#34">tcx</a>);
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;tcx</span>&gt; Visitor&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>ConstGotoOptimizationFinder&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>visit_terminator(<span class="kw-2">&amp;mut </span><span class="self">self</span>, terminator: <span class="kw-2">&amp;</span>Terminator&lt;<span class="lifetime">&#39;tcx</span>&gt;, location: <a href="../../rustc_middle/mir/struct.Location.html">Location</a>) {
+        <span class="kw">let _</span>: <span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt; = <span class="kw">try </span>{
+            <span class="kw">let </span>target = terminator.kind.as_goto()<span class="question-mark">?</span>;
+            <span class="comment">// We only apply this optimization if the last statement is a const assignment
+            </span><span class="kw">let </span>last_statement = <span class="self">self</span>.body.basic_blocks[location.block].statements.last()<span class="question-mark">?</span>;
+
+            <span class="kw">if let </span>(place, Rvalue::Use(Operand::Constant(_const))) =
+                last_statement.kind.as_assign()<span class="question-mark">?
+            </span>{
+                <span class="comment">// We found a constant being assigned to `place`.
+                // Now check that the target of this Goto switches on this place.
+                </span><span class="kw">let </span>target_bb = <span class="kw-2">&amp;</span><a class="self" href="#60">self</a>.body.basic_blocks[<a href="#62">target</a>];
+
+                <span class="comment">// The `StorageDead(..)` statement does not affect the functionality of mir.
+                // We can move this part of the statement up to the predecessor.
+                </span><span class="kw">let </span><span class="kw-2">mut </span>stmts_move_up = Vec::new();
+                <span class="kw">for </span>stmt <span class="kw">in </span><span class="kw-2">&amp;</span>target_bb.statements {
+                    <span class="kw">if let </span>StatementKind::StorageDead(..) = stmt.kind {
+                        stmts_move_up.push(stmt.clone())
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">None</span><span class="question-mark">?</span>;
+                    }
+                }
+
+                <span class="kw">let </span>target_bb_terminator = <a href="#71">target_bb</a>.terminator();
+                <span class="kw">let </span>(discr, switch_ty, targets) = target_bb_terminator.kind.as_switch()<span class="question-mark">?</span>;
+                <span class="kw">if </span>discr.place() == <span class="prelude-val">Some</span>(<span class="kw-2">*</span>place) {
+                    <span class="comment">// We now know that the Switch matches on the const place, and it is statementless
+                    // Now find which value in the Switch matches the const value.
+                    </span><span class="kw">let </span>const_value =
+                        _const.literal.try_eval_bits(<span class="self">self</span>.tcx, <span class="self">self</span>.param_env, switch_ty)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>target_to_use_in_goto = <a href="#85">targets</a>.target_for_value(<a href="#89">const_value</a>);
+                    <a class="self" href="#60">self</a>.optimizations.push(<a href="#106">OptimizationToApply</a> {
+                        bb_with_goto: <a href="#60">location</a>.block,
+                        <a href="#91">target_to_use_in_goto</a>,
+                        <a href="#75">stmts_move_up</a>,
+                    });
+                }
+            }
+            <span class="prelude-val">Some</span>(())
+        };
+
+        <a class="self" href="#60">self</a>.<a href="../../rustc_middle/mir/visit/trait.Visitor.html">super_terminator</a>(<a href="#60">terminator</a>, <a href="#60">location</a>);
+    }
+}
+
+<span class="kw">struct </span>OptimizationToApply&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+    bb_with_goto: <a href="../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>,
+    target_to_use_in_goto: <a href="../../rustc_middle/mir/struct.BasicBlock.html">BasicBlock</a>,
+    stmts_move_up: Vec&lt;Statement&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+
+<span class="kw">pub struct </span>ConstGotoOptimizationFinder&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    tcx: TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Body&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    param_env: ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    optimizations: Vec&lt;OptimizationToApply&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_mir_transform" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

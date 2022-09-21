@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["MonotonicVec","A `MonotonicVec` is a `Vec` which can only be grown. Once inserted, an element can never be removed or swapped, guaranteeing that any indices into a `MonotonicVec` are stable"]]};

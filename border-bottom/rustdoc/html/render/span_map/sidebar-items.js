@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["LinkFromSrc","This enum allows us to store two different kinds of information:"]],"fn":[["collect_spans_and_sources","This function will do at most two things:"]],"struct":[["SpanMapVisitor",""]]};

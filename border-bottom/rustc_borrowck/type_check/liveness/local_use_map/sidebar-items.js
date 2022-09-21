@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Appearance",""],["AppearanceIndex",""],["LocalUseMap","A map that cross references each local with the locations where it is defined (assigned), used, or dropped. Used during liveness computation."],["LocalUseMapBuild",""]]};

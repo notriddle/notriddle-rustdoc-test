@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["NativeLibKind",""]],"struct":[["CanonicalizedPath","A path that has been canonicalized along with its original, non-canonicalized form"],["NativeLib",""]]};

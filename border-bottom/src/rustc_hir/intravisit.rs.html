@@ -1,0 +1,2386 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_hir/src/intravisit.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>intravisit.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../rustc_hir/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../rustc_hir/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../rustc_hir/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
+<span id="992">992</span>
+<span id="993">993</span>
+<span id="994">994</span>
+<span id="995">995</span>
+<span id="996">996</span>
+<span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
+<span id="1006">1006</span>
+<span id="1007">1007</span>
+<span id="1008">1008</span>
+<span id="1009">1009</span>
+<span id="1010">1010</span>
+<span id="1011">1011</span>
+<span id="1012">1012</span>
+<span id="1013">1013</span>
+<span id="1014">1014</span>
+<span id="1015">1015</span>
+<span id="1016">1016</span>
+<span id="1017">1017</span>
+<span id="1018">1018</span>
+<span id="1019">1019</span>
+<span id="1020">1020</span>
+<span id="1021">1021</span>
+<span id="1022">1022</span>
+<span id="1023">1023</span>
+<span id="1024">1024</span>
+<span id="1025">1025</span>
+<span id="1026">1026</span>
+<span id="1027">1027</span>
+<span id="1028">1028</span>
+<span id="1029">1029</span>
+<span id="1030">1030</span>
+<span id="1031">1031</span>
+<span id="1032">1032</span>
+<span id="1033">1033</span>
+<span id="1034">1034</span>
+<span id="1035">1035</span>
+<span id="1036">1036</span>
+<span id="1037">1037</span>
+<span id="1038">1038</span>
+<span id="1039">1039</span>
+<span id="1040">1040</span>
+<span id="1041">1041</span>
+<span id="1042">1042</span>
+<span id="1043">1043</span>
+<span id="1044">1044</span>
+<span id="1045">1045</span>
+<span id="1046">1046</span>
+<span id="1047">1047</span>
+<span id="1048">1048</span>
+<span id="1049">1049</span>
+<span id="1050">1050</span>
+<span id="1051">1051</span>
+<span id="1052">1052</span>
+<span id="1053">1053</span>
+<span id="1054">1054</span>
+<span id="1055">1055</span>
+<span id="1056">1056</span>
+<span id="1057">1057</span>
+<span id="1058">1058</span>
+<span id="1059">1059</span>
+<span id="1060">1060</span>
+<span id="1061">1061</span>
+<span id="1062">1062</span>
+<span id="1063">1063</span>
+<span id="1064">1064</span>
+<span id="1065">1065</span>
+<span id="1066">1066</span>
+<span id="1067">1067</span>
+<span id="1068">1068</span>
+<span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
+<span id="1086">1086</span>
+<span id="1087">1087</span>
+<span id="1088">1088</span>
+<span id="1089">1089</span>
+<span id="1090">1090</span>
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+</pre><pre class="rust"><code><span class="doccomment">//! HIR walker for walking the contents of nodes.
+//!
+//! Here are the three available patterns for the visitor strategy,
+//! in roughly the order of desirability:
+//!
+//! 1. **Shallow visit**: Get a simple callback for every item (or item-like thing) in the HIR.
+//!    - Example: find all items with a `#[foo]` attribute on them.
+//!    - How: Use the `hir_crate_items` or `hir_module_items` query to traverse over item-like ids
+//!       (ItemId, TraitItemId, etc.) and use tcx.def_kind and `tcx.hir().item*(id)` to filter and
+//!       access actual item-like thing, respectively.
+//!    - Pro: Efficient; just walks the lists of item ids and gives users control whether to access
+//!       the hir_owners themselves or not.
+//!    - Con: Don&#39;t get information about nesting
+//!    - Con: Don&#39;t have methods for specific bits of HIR, like &quot;on
+//!      every expr, do this&quot;.
+//! 2. **Deep visit**: Want to scan for specific kinds of HIR nodes within
+//!    an item, but don&#39;t care about how item-like things are nested
+//!    within one another.
+//!    - Example: Examine each expression to look for its type and do some check or other.
+//!    - How: Implement `intravisit::Visitor` and override the `NestedFilter` type to
+//!      `nested_filter::OnlyBodies` (and implement `nested_visit_map`), and use
+//!      `tcx.hir().visit_all_item_likes_in_crate(&amp;mut visitor)`. Within your
+//!      `intravisit::Visitor` impl, implement methods like `visit_expr()` (don&#39;t forget to invoke
+//!      `intravisit::walk_expr()` to keep walking the subparts).
+//!    - Pro: Visitor methods for any kind of HIR node, not just item-like things.
+//!    - Pro: Integrates well into dependency tracking.
+//!    - Con: Don&#39;t get information about nesting between items
+//! 3. **Nested visit**: Want to visit the whole HIR and you care about the nesting between
+//!    item-like things.
+//!    - Example: Lifetime resolution, which wants to bring lifetimes declared on the
+//!      impl into scope while visiting the impl-items, and then back out again.
+//!    - How: Implement `intravisit::Visitor` and override the `NestedFilter` type to
+//!      `nested_filter::All` (and implement `nested_visit_map`). Walk your crate with
+//!      `tcx.hir().walk_toplevel_module(visitor)` invoked on `tcx.hir().krate()`.
+//!    - Pro: Visitor methods for any kind of HIR node, not just item-like things.
+//!    - Pro: Preserves nesting information
+//!    - Con: Does not integrate well into dependency tracking.
+//!
+//! If you have decided to use this visitor, here are some general
+//! notes on how to do so:
+//!
+//! Each overridden visit method has full control over what
+//! happens with its node, it can do its own traversal of the node&#39;s children,
+//! call `intravisit::walk_*` to apply the default traversal algorithm, or prevent
+//! deeper traversal by doing nothing.
+//!
+//! When visiting the HIR, the contents of nested items are NOT visited
+//! by default. This is different from the AST visitor, which does a deep walk.
+//! Hence this module is called `intravisit`; see the method `visit_nested_item`
+//! for more details.
+//!
+//! Note: it is an important invariant that the default visitor walks
+//! the body of a function in &quot;execution order&quot; - more concretely, if
+//! we consider the reverse post-order (RPO) of the CFG implied by the HIR,
+//! then a pre-order traversal of the HIR is consistent with the CFG RPO
+//! on the *initial CFG point* of each HIR node, while a post-order traversal
+//! of the HIR is consistent with the CFG RPO on each *final CFG point* of
+//! each CFG node.
+//!
+//! One thing that follows is that if HIR node A always starts/ends executing
+//! before HIR node B, then A appears in traversal pre/postorder before B,
+//! respectively. (This follows from RPO respecting CFG domination).
+//!
+//! This order consistency is required in a few places in rustc, for
+//! example generator inference, and possibly also HIR borrowck.
+
+</span><span class="kw">use </span><a href="lib.rs.html#35"><span class="kw">crate</span>::hir</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">rustc_ast::walk_list</a>;
+<span class="kw">use </span>rustc_ast::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/struct.Attribute.html">Attribute</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/struct.Label.html">Label</a>};
+<span class="kw">use </span>rustc_span::symbol::{<a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>};
+<span class="kw">use </span><a href="../../rustc_span/span_encoding/struct.Span.html">rustc_span::Span</a>;
+
+<span class="kw">pub trait </span>IntoVisitor&lt;<span class="lifetime">&#39;hir</span>&gt; {
+    <span class="kw">type </span>Visitor: Visitor&lt;<span class="lifetime">&#39;hir</span>&gt;;
+    <span class="kw">fn </span>into_visitor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Visitor;
+}
+
+<span class="attribute">#[derive(Copy, Clone, Debug)]
+</span><span class="kw">pub enum </span>FnKind&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// `#[xxx] pub async/const/extern &quot;Abi&quot; fn foo()`
+    </span>ItemFn(<a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Generics&lt;<span class="lifetime">&#39;a</span>&gt;, <a href="hir.rs.html#2968">FnHeader</a>),
+
+    <span class="doccomment">/// `fn foo(&amp;self)`
+    </span>Method(<a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FnSig&lt;<span class="lifetime">&#39;a</span>&gt;),
+
+    <span class="doccomment">/// `|x, y| {}`
+    </span>Closure,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FnKind&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub fn </span>header(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="hir.rs.html#2968">FnHeader</a>&gt; {
+        <span class="kw">match </span><span class="kw-2">*</span><span class="self"><a href="#91">self</a> </span>{
+            <a href="#81">FnKind::ItemFn</a>(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw-2">ref </span>header) =&gt; <span class="prelude-val">Some</span>(<a href="#93">header</a>),
+            <a href="#84">FnKind::Method</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>sig) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="#94">sig</a>.header),
+            <a href="#87">FnKind::Closure</a> =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>constness(<span class="self">self</span>) -&gt; <a href="hir.rs.html#2953">Constness</a> {
+        <a class="self" href="#99">self</a>.<a href="#91">header</a>().map_or(<a href="hir.rs.html#2955">Constness::NotConst</a>, |header| <a href="#100">header</a>.constness)
+    }
+
+    <span class="kw">pub fn </span>asyncness(<span class="self">self</span>) -&gt; <a href="hir.rs.html#2687">IsAsync</a> {
+        <a class="self" href="#103">self</a>.<a href="#91">header</a>().map_or(<a href="hir.rs.html#2689">IsAsync::NotAsync</a>, |header| <a href="#104">header</a>.asyncness)
+    }
+}
+
+<span class="doccomment">/// An abstract representation of the HIR `rustc_middle::hir::map::Map`.
+</span><span class="kw">pub trait </span>Map&lt;<span class="lifetime">&#39;hir</span>&gt; {
+    <span class="doccomment">/// Retrieves the `Node` corresponding to `id`, returning `None` if cannot be found.
+    </span><span class="kw">fn </span>find(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_id: <a href="hir_id.rs.html#17">HirId</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Node&lt;<span class="lifetime">&#39;hir</span>&gt;&gt;;
+    <span class="kw">fn </span>body(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="hir.rs.html#1420">BodyId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>Body&lt;<span class="lifetime">&#39;hir</span>&gt;;
+    <span class="kw">fn </span>item(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="hir.rs.html#2890">ItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>Item&lt;<span class="lifetime">&#39;hir</span>&gt;;
+    <span class="kw">fn </span>trait_item(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="hir.rs.html#2208">TraitItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>TraitItem&lt;<span class="lifetime">&#39;hir</span>&gt;;
+    <span class="kw">fn </span>impl_item(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="hir.rs.html#2272">ImplItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ImplItem&lt;<span class="lifetime">&#39;hir</span>&gt;;
+    <span class="kw">fn </span>foreign_item(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <a href="hir.rs.html#3134">ForeignItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ForeignItem&lt;<span class="lifetime">&#39;hir</span>&gt;;
+}
+
+<span class="comment">// Used when no map is actually available, forcing manual implementation of nested visitors.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;hir</span>&gt; Map&lt;<span class="lifetime">&#39;hir</span>&gt; <span class="kw">for </span>! {
+    <span class="kw">fn </span>find(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir_id.rs.html#17">HirId</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Node&lt;<span class="lifetime">&#39;hir</span>&gt;&gt; {
+        <span class="kw-2">*</span><a class="self" href="#121">self</a>;
+    }
+    <span class="kw">fn </span>body(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir.rs.html#1420">BodyId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>Body&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw-2">*</span><a class="self" href="#124">self</a>;
+    }
+    <span class="kw">fn </span>item(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir.rs.html#2890">ItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>Item&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw-2">*</span><a class="self" href="#127">self</a>;
+    }
+    <span class="kw">fn </span>trait_item(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir.rs.html#2208">TraitItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>TraitItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw-2">*</span><a class="self" href="#130">self</a>;
+    }
+    <span class="kw">fn </span>impl_item(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir.rs.html#2272">ImplItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ImplItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw-2">*</span><a class="self" href="#133">self</a>;
+    }
+    <span class="kw">fn </span>foreign_item(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <a href="hir.rs.html#3134">ForeignItemId</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;hir </span>ForeignItem&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw-2">*</span><a class="self" href="#136">self</a>;
+    }
+}
+
+<span class="kw">pub mod </span>nested_filter {
+    <span class="kw">use </span><a href="#109"><span class="kw">super</span>::Map</a>;
+
+    <span class="doccomment">/// Specifies what nested things a visitor wants to visit. By &quot;nested
+    /// things&quot;, we are referring to bits of HIR that are not directly embedded
+    /// within one another but rather indirectly, through a table in the crate.
+    /// This is done to control dependencies during incremental compilation: the
+    /// non-inline bits of HIR can be tracked and hashed separately.
+    ///
+    /// The most common choice is `OnlyBodies`, which will cause the visitor to
+    /// visit fn bodies for fns that it encounters, and closure bodies, but
+    /// skip over nested item-like things.
+    ///
+    /// See the comments on `ItemLikeVisitor` for more details on the overall
+    /// visit strategy.
+    </span><span class="kw">pub trait </span>NestedFilter&lt;<span class="lifetime">&#39;hir</span>&gt; {
+        <span class="kw">type </span>Map: Map&lt;<span class="lifetime">&#39;hir</span>&gt;;
+
+        <span class="doccomment">/// Whether the visitor visits nested &quot;item-like&quot; things.
+        /// E.g., item, impl-item.
+        </span><span class="kw">const </span>INTER: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+        <span class="doccomment">/// Whether the visitor visits &quot;intra item-like&quot; things.
+        /// E.g., function body, closure, `AnonConst`
+        </span><span class="kw">const </span>INTRA: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>;
+    }
+
+    <span class="doccomment">/// Do not visit any nested things. When you add a new
+    /// &quot;non-nested&quot; thing, you will want to audit such uses to see if
+    /// they remain valid.
+    ///
+    /// Use this if you are only walking some particular kind of tree
+    /// (i.e., a type, or fn signature) and you don&#39;t want to thread a
+    /// HIR map around.
+    </span><span class="kw">pub struct </span><span class="prelude-val">None</span>(());
+    <span class="kw">impl </span>NestedFilter&lt;<span class="lifetime">&#39;_</span>&gt; <span class="kw">for </span><span class="prelude-val">None </span>{
+        <span class="kw">type </span>Map = !;
+        <span class="kw">const </span>INTER: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> = <span class="bool-val">false</span>;
+        <span class="kw">const </span>INTRA: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> = <span class="bool-val">false</span>;
+    }
+}
+
+<span class="kw">use </span><a href="#156">nested_filter::NestedFilter</a>;
+
+<span class="doccomment">/// Each method of the Visitor trait is a hook to be potentially
+/// overridden. Each method&#39;s default implementation recursively visits
+/// the substructure of the input via the corresponding `walk` method;
+/// e.g., the `visit_mod` method by default calls `intravisit::walk_mod`.
+///
+/// Note that this visitor does NOT visit nested items by default
+/// (this is why the module is called `intravisit`, to distinguish it
+/// from the AST&#39;s `visit` module, which acts differently). If you
+/// simply want to visit all items in the crate in some order, you
+/// should call `tcx.hir().visit_all_item_likes_in_crate`. Otherwise, see the comment
+/// on `visit_nested_item` for details on how to visit nested items.
+///
+/// If you want to ensure that your code handles every variant
+/// explicitly, you need to override each method. (And you also need
+/// to monitor future changes to `Visitor` in case a new method with a
+/// new default implementation gets introduced.)
+</span><span class="kw">pub trait </span>Visitor&lt;<span class="lifetime">&#39;v</span>&gt;: <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html">Sized</a> {
+    <span class="comment">// this type should not be overridden, it exists for convenient usage as `Self::Map`
+    </span><span class="kw">type </span>Map: Map&lt;<span class="lifetime">&#39;v</span>&gt; = &lt;<span class="self">Self</span>::NestedFilter <span class="kw">as </span>NestedFilter&lt;<span class="lifetime">&#39;v</span>&gt;&gt;::Map;
+
+    <span class="comment">///////////////////////////////////////////////////////////////////////////
+    // Nested items.
+
+    </span><span class="doccomment">/// Override this type to control which nested HIR are visited; see
+    /// [`NestedFilter`] for details. If you override this type, you
+    /// must also override [`nested_visit_map`](Self::nested_visit_map).
+    ///
+    /// **If for some reason you want the nested behavior, but don&#39;t
+    /// have a `Map` at your disposal:** then override the
+    /// `visit_nested_XXX` methods. If a new `visit_nested_XXX` variant is
+    /// added in the future, it will cause a panic which can be detected
+    /// and fixed appropriately.
+    </span><span class="kw">type </span>NestedFilter: NestedFilter&lt;<span class="lifetime">&#39;v</span>&gt; = <a href="#174">nested_filter::None</a>;
+
+    <span class="doccomment">/// If `type NestedFilter` is set to visit nested items, this method
+    /// must also be overridden to provide a map to retrieve nested items.
+    </span><span class="kw">fn </span>nested_visit_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Map {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(
+            <span class="string">&quot;nested_visit_map must be implemented or consider using \
+            `type NestedFilter = nested_filter::None` (the default)&quot;
+        </span>);
+    }
+
+    <span class="doccomment">/// Invoked when a nested item is encountered. By default, when
+    /// `Self::NestedFilter` is `nested_filter::None`, this method does
+    /// nothing. **You probably don&#39;t want to override this method** --
+    /// instead, override [`Self::NestedFilter`] or use the &quot;shallow&quot; or
+    /// &quot;deep&quot; visit patterns described on
+    /// `itemlikevisit::ItemLikeVisitor`. The only reason to override
+    /// this method is if you want a nested pattern but cannot supply a
+    /// [`Map`]; see `nested_visit_map` for advice.
+    </span><span class="kw">fn </span>visit_nested_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="hir.rs.html#2890">ItemId</a>) {
+        <span class="kw">if </span><span class="self">Self</span>::NestedFilter::INTER {
+            <span class="kw">let </span>item = <a class="self" href="#235">self</a>.<a href="#220">nested_visit_map</a>().<a href="#113">item</a>(<a href="#235">id</a>);
+            <a class="self" href="#235">self</a>.<a href="#288">visit_item</a>(<a href="#237">item</a>);
+        }
+    }
+
+    <span class="doccomment">/// Like `visit_nested_item()`, but for trait items. See
+    /// `visit_nested_item()` for advice on when to override this
+    /// method.
+    </span><span class="kw">fn </span>visit_nested_trait_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="hir.rs.html#2208">TraitItemId</a>) {
+        <span class="kw">if </span><span class="self">Self</span>::NestedFilter::INTER {
+            <span class="kw">let </span>item = <a class="self" href="#245">self</a>.<a href="#220">nested_visit_map</a>().<a href="#114">trait_item</a>(<a href="#245">id</a>);
+            <a class="self" href="#245">self</a>.<a href="#370">visit_trait_item</a>(<a href="#247">item</a>);
+        }
+    }
+
+    <span class="doccomment">/// Like `visit_nested_item()`, but for impl items. See
+    /// `visit_nested_item()` for advice on when to override this
+    /// method.
+    </span><span class="kw">fn </span>visit_nested_impl_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="hir.rs.html#2272">ImplItemId</a>) {
+        <span class="kw">if </span><span class="self">Self</span>::NestedFilter::INTER {
+            <span class="kw">let </span>item = <a class="self" href="#255">self</a>.<a href="#220">nested_visit_map</a>().<a href="#115">impl_item</a>(<a href="#255">id</a>);
+            <a class="self" href="#255">self</a>.<a href="#376">visit_impl_item</a>(<a href="#257">item</a>);
+        }
+    }
+
+    <span class="doccomment">/// Like `visit_nested_item()`, but for foreign items. See
+    /// `visit_nested_item()` for advice on when to override this
+    /// method.
+    </span><span class="kw">fn </span>visit_nested_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="hir.rs.html#3134">ForeignItemId</a>) {
+        <span class="kw">if </span><span class="self">Self</span>::NestedFilter::INTER {
+            <span class="kw">let </span>item = <a class="self" href="#265">self</a>.<a href="#220">nested_visit_map</a>().<a href="#116">foreign_item</a>(<a href="#265">id</a>);
+            <a class="self" href="#265">self</a>.<a href="#310">visit_foreign_item</a>(<a href="#267">item</a>);
+        }
+    }
+
+    <span class="doccomment">/// Invoked to visit the body of a function, method or closure. Like
+    /// `visit_nested_item`, does nothing by default unless you override
+    /// `Self::NestedFilter`.
+    </span><span class="kw">fn </span>visit_nested_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: <a href="hir.rs.html#1420">BodyId</a>) {
+        <span class="kw">if </span><span class="self">Self</span>::NestedFilter::INTRA {
+            <span class="kw">let </span>body = <a class="self" href="#275">self</a>.<a href="#220">nested_visit_map</a>().<a href="#112">body</a>(<a href="#275">id</a>);
+            <a class="self" href="#275">self</a>.<a href="#292">visit_body</a>(<a href="#277">body</a>);
+        }
+    }
+
+    <span class="kw">fn </span>visit_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, param: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Param&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#508">walk_param</a>(<a class="self" href="#282">self</a>, <a href="#282">param</a>)
+    }
+
+    <span class="doccomment">/// Visits the top-level item and (optionally) nested items / impl items. See
+    /// `visit_nested_item` for details.
+    </span><span class="kw">fn </span>visit_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Item&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#513">walk_item</a>(<a class="self" href="#288">self</a>, <a href="#288">i</a>)
+    }
+
+    <span class="kw">fn </span>visit_body(<span class="kw-2">&amp;mut </span><span class="self">self</span>, b: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Body&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#458">walk_body</a>(<a class="self" href="#292">self</a>, <a href="#292">b</a>);
+    }
+
+    <span class="comment">///////////////////////////////////////////////////////////////////////////
+
+    </span><span class="kw">fn </span>visit_id(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _hir_id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <span class="comment">// Nothing to do.
+    </span>}
+    <span class="kw">fn </span>visit_name(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _name: <a href="../../rustc_span/symbol/struct.Symbol.html">Symbol</a>) {
+        <span class="comment">// Nothing to do.
+    </span>}
+    <span class="kw">fn </span>visit_ident(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ident: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>) {
+        <a href="#475">walk_ident</a>(<a class="self" href="#304">self</a>, <a href="#304">ident</a>)
+    }
+    <span class="kw">fn </span>visit_mod(<span class="kw-2">&amp;mut </span><span class="self">self</span>, m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Mod&lt;<span class="lifetime">&#39;v</span>&gt;, _s: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, n: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#451">walk_mod</a>(<a class="self" href="#307">self</a>, <a href="#307">m</a>, <a href="#307">n</a>)
+    }
+    <span class="kw">fn </span>visit_foreign_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ForeignItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#787">walk_foreign_item</a>(<a class="self" href="#310">self</a>, <a href="#310">i</a>)
+    }
+    <span class="kw">fn </span>visit_local(<span class="kw-2">&amp;mut </span><span class="self">self</span>, l: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Local&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#463">walk_local</a>(<a class="self" href="#313">self</a>, <a href="#313">l</a>)
+    }
+    <span class="kw">fn </span>visit_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, b: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Block&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1013">walk_block</a>(<a class="self" href="#316">self</a>, <a href="#316">b</a>)
+    }
+    <span class="kw">fn </span>visit_stmt(<span class="kw-2">&amp;mut </span><span class="self">self</span>, s: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Stmt&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1019">walk_stmt</a>(<a class="self" href="#319">self</a>, <a href="#319">s</a>)
+    }
+    <span class="kw">fn </span>visit_arm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, a: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Arm&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1168">walk_arm</a>(<a class="self" href="#322">self</a>, <a href="#322">a</a>)
+    }
+    <span class="kw">fn </span>visit_pat(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Pat&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#742">walk_pat</a>(<a class="self" href="#325">self</a>, <a href="#325">p</a>)
+    }
+    <span class="kw">fn </span>visit_pat_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PatField&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#781">walk_pat_field</a>(<a class="self" href="#328">self</a>, <a href="#328">f</a>)
+    }
+    <span class="kw">fn </span>visit_array_length(<span class="kw-2">&amp;mut </span><span class="self">self</span>, len: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1607">ArrayLen</a>) {
+        <a href="#1030">walk_array_len</a>(<a class="self" href="#331">self</a>, <a href="#331">len</a>)
+    }
+    <span class="kw">fn </span>visit_anon_const(<span class="kw-2">&amp;mut </span><span class="self">self</span>, c: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1629">AnonConst</a>) {
+        <a href="#1037">walk_anon_const</a>(<a class="self" href="#334">self</a>, <a href="#334">c</a>)
+    }
+    <span class="kw">fn </span>visit_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ex: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Expr&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1056">walk_expr</a>(<a class="self" href="#337">self</a>, <a href="#337">ex</a>)
+    }
+    <span class="kw">fn </span>visit_let_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lex: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Let&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1042">walk_let_expr</a>(<a class="self" href="#340">self</a>, <a href="#340">lex</a>)
+    }
+    <span class="kw">fn </span>visit_expr_field(<span class="kw-2">&amp;mut </span><span class="self">self</span>, field: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ExprField&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1050">walk_expr_field</a>(<a class="self" href="#343">self</a>, <a href="#343">field</a>)
+    }
+    <span class="kw">fn </span>visit_ty(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Ty&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#649">walk_ty</a>(<a class="self" href="#346">self</a>, <a href="#346">t</a>)
+    }
+    <span class="kw">fn </span>visit_generic_param(<span class="kw-2">&amp;mut </span><span class="self">self</span>, p: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericParam&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#817">walk_generic_param</a>(<a class="self" href="#349">self</a>, <a href="#349">p</a>)
+    }
+    <span class="kw">fn </span>visit_const_param_default(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _param: <a href="hir_id.rs.html#17">HirId</a>, ct: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1629">AnonConst</a>) {
+        <a href="#835">walk_const_param_default</a>(<a class="self" href="#352">self</a>, <a href="#352">ct</a>)
+    }
+    <span class="kw">fn </span>visit_generics(<span class="kw-2">&amp;mut </span><span class="self">self</span>, g: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Generics&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#839">walk_generics</a>(<a class="self" href="#355">self</a>, <a href="#355">g</a>)
+    }
+    <span class="kw">fn </span>visit_where_predicate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, predicate: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>WherePredicate&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#844-847">walk_where_predicate</a>(<a class="self" href="#358">self</a>, <a href="#358">predicate</a>)
+    }
+    <span class="kw">fn </span>visit_fn_decl(<span class="kw-2">&amp;mut </span><span class="self">self</span>, fd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FnDecl&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#876">walk_fn_decl</a>(<a class="self" href="#361">self</a>, <a href="#361">fd</a>)
+    }
+    <span class="kw">fn </span>visit_fn(<span class="kw-2">&amp;mut </span><span class="self">self</span>, fk: FnKind&lt;<span class="lifetime">&#39;v</span>&gt;, fd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FnDecl&lt;<span class="lifetime">&#39;v</span>&gt;, b: <a href="hir.rs.html#1420">BodyId</a>, <span class="kw">_</span>: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>, id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#892-898">walk_fn</a>(<a class="self" href="#364">self</a>, <a href="#364">fk</a>, <a href="#364">fd</a>, <a href="#364">b</a>, <a href="#364">id</a>)
+    }
+    <span class="kw">fn </span>visit_use(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Path&lt;<span class="lifetime">&#39;v</span>&gt;, hir_id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#628">walk_use</a>(<a class="self" href="#367">self</a>, <a href="#367">path</a>, <a href="#367">hir_id</a>)
+    }
+    <span class="kw">fn </span>visit_trait_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ti: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TraitItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#905">walk_trait_item</a>(<a class="self" href="#370">self</a>, <a href="#370">ti</a>)
+    }
+    <span class="kw">fn </span>visit_trait_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ii: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3100">TraitItemRef</a>) {
+        <a href="#936">walk_trait_item_ref</a>(<a class="self" href="#373">self</a>, <a href="#373">ii</a>)
+    }
+    <span class="kw">fn </span>visit_impl_item(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ii: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ImplItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#944">walk_impl_item</a>(<a class="self" href="#376">self</a>, <a href="#376">ii</a>)
+    }
+    <span class="kw">fn </span>visit_foreign_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ii: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3153">ForeignItemRef</a>) {
+        <a href="#981-984">walk_foreign_item_ref</a>(<a class="self" href="#379">self</a>, <a href="#379">ii</a>)
+    }
+    <span class="kw">fn </span>visit_impl_item_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ii: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3114">ImplItemRef</a>) {
+        <a href="#991">walk_impl_item_ref</a>(<a class="self" href="#382">self</a>, <a href="#382">ii</a>)
+    }
+    <span class="kw">fn </span>visit_trait_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TraitRef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#503">walk_trait_ref</a>(<a class="self" href="#385">self</a>, <a href="#385">t</a>)
+    }
+    <span class="kw">fn </span>visit_param_bound(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bounds: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericBound&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#804">walk_param_bound</a>(<a class="self" href="#388">self</a>, <a href="#388">bounds</a>)
+    }
+    <span class="kw">fn </span>visit_poly_trait_ref(<span class="kw-2">&amp;mut </span><span class="self">self</span>, t: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PolyTraitRef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#498">walk_poly_trait_ref</a>(<a class="self" href="#391">self</a>, <a href="#391">t</a>)
+    }
+    <span class="kw">fn </span>visit_variant_data(<span class="kw-2">&amp;mut </span><span class="self">self</span>, s: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>VariantData&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#999-1002">walk_struct_def</a>(<a class="self" href="#394">self</a>, <a href="#394">s</a>)
+    }
+    <span class="kw">fn </span>visit_field_def(<span class="kw-2">&amp;mut </span><span class="self">self</span>, s: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FieldDef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#1007">walk_field_def</a>(<a class="self" href="#397">self</a>, <a href="#397">s</a>)
+    }
+    <span class="kw">fn </span>visit_enum_def(<span class="kw-2">&amp;mut </span><span class="self">self</span>, enum_definition: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>EnumDef&lt;<span class="lifetime">&#39;v</span>&gt;, item_id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#633-637">walk_enum_def</a>(<a class="self" href="#400">self</a>, <a href="#400">enum_definition</a>, <a href="#400">item_id</a>)
+    }
+    <span class="kw">fn </span>visit_variant(<span class="kw-2">&amp;mut </span><span class="self">self</span>, v: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Variant&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#642">walk_variant</a>(<a class="self" href="#403">self</a>, <a href="#403">v</a>)
+    }
+    <span class="kw">fn </span>visit_label(<span class="kw-2">&amp;mut </span><span class="self">self</span>, label: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/struct.Label.html">Label</a>) {
+        <a href="#479">walk_label</a>(<a class="self" href="#406">self</a>, <a href="#406">label</a>)
+    }
+    <span class="kw">fn </span>visit_infer(<span class="kw-2">&amp;mut </span><span class="self">self</span>, inf: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#248">InferArg</a>) {
+        <a href="#689">walk_inf</a>(<a class="self" href="#409">self</a>, <a href="#409">inf</a>);
+    }
+    <span class="kw">fn </span>visit_generic_arg(<span class="kw-2">&amp;mut </span><span class="self">self</span>, generic_arg: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericArg&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <span class="kw">match </span><a href="#412">generic_arg</a> {
+            <a href="hir.rs.html#261">GenericArg::Lifetime</a>(lt) =&gt; <a class="self" href="#412">self</a>.<a href="#420">visit_lifetime</a>(<a href="#414">lt</a>),
+            <a href="hir.rs.html#262">GenericArg::Type</a>(ty) =&gt; <a class="self" href="#412">self</a>.<a href="#346">visit_ty</a>(<a href="#415">ty</a>),
+            <a href="hir.rs.html#263">GenericArg::Const</a>(ct) =&gt; <a class="self" href="#412">self</a>.<a href="#334">visit_anon_const</a>(<span class="kw-2">&amp;</span><a href="#416">ct</a>.value),
+            <a href="hir.rs.html#264">GenericArg::Infer</a>(inf) =&gt; <a class="self" href="#412">self</a>.<a href="#409">visit_infer</a>(<a href="#417">inf</a>),
+        }
+    }
+    <span class="kw">fn </span>visit_lifetime(<span class="kw-2">&amp;mut </span><span class="self">self</span>, lifetime: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#30">Lifetime</a>) {
+        <a href="#483">walk_lifetime</a>(<a class="self" href="#420">self</a>, <a href="#420">lifetime</a>)
+    }
+    <span class="comment">// The span is that of the surrounding type/pattern/expr/whatever.
+    </span><span class="kw">fn </span>visit_qpath(<span class="kw-2">&amp;mut </span><span class="self">self</span>, qpath: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>QPath&lt;<span class="lifetime">&#39;v</span>&gt;, id: <a href="hir_id.rs.html#17">HirId</a>, _span: <a href="../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <a href="#693">walk_qpath</a>(<a class="self" href="#424">self</a>, <a href="#424">qpath</a>, <a href="#424">id</a>)
+    }
+    <span class="kw">fn </span>visit_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Path&lt;<span class="lifetime">&#39;v</span>&gt;, _id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#707">walk_path</a>(<a class="self" href="#427">self</a>, <a href="#427">path</a>)
+    }
+    <span class="kw">fn </span>visit_path_segment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path_segment: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PathSegment&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#713">walk_path_segment</a>(<a class="self" href="#430">self</a>, <a href="#430">path_segment</a>)
+    }
+    <span class="kw">fn </span>visit_generic_args(<span class="kw-2">&amp;mut </span><span class="self">self</span>, generic_args: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericArgs&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#721">walk_generic_args</a>(<a class="self" href="#433">self</a>, <a href="#433">generic_args</a>)
+    }
+    <span class="kw">fn </span>visit_assoc_type_binding(<span class="kw-2">&amp;mut </span><span class="self">self</span>, type_binding: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TypeBinding&lt;<span class="lifetime">&#39;v</span>&gt;) {
+        <a href="#726-729">walk_assoc_type_binding</a>(<a class="self" href="#436">self</a>, <a href="#436">type_binding</a>)
+    }
+    <span class="kw">fn </span>visit_attribute(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _attr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/struct.Attribute.html">Attribute</a>) {}
+    <span class="kw">fn </span>visit_associated_item_kind(<span class="kw-2">&amp;mut </span><span class="self">self</span>, kind: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3124">AssocItemKind</a>) {
+        <a href="#1182">walk_associated_item_kind</a>(<a class="self" href="#440">self</a>, <a href="#440">kind</a>);
+    }
+    <span class="kw">fn </span>visit_defaultness(<span class="kw-2">&amp;mut </span><span class="self">self</span>, defaultness: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#2693">Defaultness</a>) {
+        <a href="#1188">walk_defaultness</a>(<a class="self" href="#443">self</a>, <a href="#443">defaultness</a>);
+    }
+    <span class="kw">fn </span>visit_inline_asm(<span class="kw-2">&amp;mut </span><span class="self">self</span>, asm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>InlineAsm&lt;<span class="lifetime">&#39;v</span>&gt;, id: <a href="hir_id.rs.html#17">HirId</a>) {
+        <a href="#604">walk_inline_asm</a>(<a class="self" href="#446">self</a>, <a href="#446">asm</a>, <a href="#446">id</a>);
+    }
+}
+
+<span class="kw">pub fn </span>walk_mod&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, module: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Mod&lt;<span class="lifetime">&#39;v</span>&gt;, mod_hir_id: <a href="hir_id.rs.html#17">HirId</a>) {
+    <a href="#451">visitor</a>.<a href="#298">visit_id</a>(<a href="#451">mod_hir_id</a>);
+    <span class="kw">for </span><span class="kw-2">&amp;</span>item_id <span class="kw">in </span>module.item_ids {
+        visitor.visit_nested_item(item_id);
+    }
+}
+
+<span class="kw">pub fn </span>walk_body&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, body: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Body&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param, body.params);
+    <a href="#458">visitor</a>.<a href="#337">visit_expr</a>(<span class="kw-2">&amp;</span><a href="#458">body</a>.value);
+}
+
+<span class="kw">pub fn </span>walk_local&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, local: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Local&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="comment">// Intentionally visiting the expr first - the initialization expr
+    // dominates the local&#39;s definition.
+    </span><a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, <span class="kw-2">&amp;</span>local.init);
+    <a href="#463">visitor</a>.<a href="#298">visit_id</a>(<a href="#463">local</a>.hir_id);
+    <a href="#463">visitor</a>.<a href="#325">visit_pat</a>(<span class="kw-2">&amp;</span><a href="#463">local</a>.pat);
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(els) = <a href="#463">local</a>.els {
+        <a href="#463">visitor</a>.<a href="#316">visit_block</a>(<a href="#469">els</a>);
+    }
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, <span class="kw-2">&amp;</span>local.ty);
+}
+
+<span class="kw">pub fn </span>walk_ident&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, ident: <a href="../../rustc_span/symbol/struct.Ident.html">Ident</a>) {
+    <a href="#475">visitor</a>.<a href="#301">visit_name</a>(<a href="#475">ident</a>.name);
+}
+
+<span class="kw">pub fn </span>walk_label&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, label: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/struct.Label.html">Label</a>) {
+    <a href="#479">visitor</a>.<a href="#304">visit_ident</a>(<a href="#479">label</a>.ident);
+}
+
+<span class="kw">pub fn </span>walk_lifetime&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, lifetime: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#30">Lifetime</a>) {
+    <a href="#483">visitor</a>.<a href="#298">visit_id</a>(<a href="#483">lifetime</a>.hir_id);
+    <span class="kw">match </span><a href="#483">lifetime</a>.name {
+        <a href="hir.rs.html#91">LifetimeName::Param</a>(<span class="kw">_</span>, <a href="hir.rs.html#47">ParamName::Plain</a>(ident)) =&gt; {
+            <a href="#483">visitor</a>.<a href="#304">visit_ident</a>(<a href="#486">ident</a>);
+        }
+        <a href="hir.rs.html#91">LifetimeName::Param</a>(<span class="kw">_</span>, <a href="hir.rs.html#63">ParamName::Fresh</a>)
+        | <a href="hir.rs.html#91">LifetimeName::Param</a>(<span class="kw">_</span>, <a href="hir.rs.html#68">ParamName::Error</a>)
+        | <a href="hir.rs.html#115">LifetimeName::Static</a>
+        | <a href="hir.rs.html#108">LifetimeName::Error</a>
+        | <a href="hir.rs.html#104">LifetimeName::ImplicitObjectLifetimeDefault</a>
+        | <a href="hir.rs.html#112">LifetimeName::Infer</a> =&gt; {}
+    }
+}
+
+<span class="kw">pub fn </span>walk_poly_trait_ref&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, trait_ref: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PolyTraitRef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_param, trait_ref.bound_generic_params);
+    <a href="#498">visitor</a>.<a href="#385">visit_trait_ref</a>(<span class="kw-2">&amp;</span><a href="#498">trait_ref</a>.trait_ref);
+}
+
+<span class="kw">pub fn </span>walk_trait_ref&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, trait_ref: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TraitRef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#503">visitor</a>.<a href="#298">visit_id</a>(<a href="#503">trait_ref</a>.hir_ref_id);
+    <a href="#503">visitor</a>.<a href="#427">visit_path</a>(<span class="kw-2">&amp;</span><a href="#503">trait_ref</a>.path, <a href="#503">trait_ref</a>.hir_ref_id)
+}
+
+<span class="kw">pub fn </span>walk_param&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, param: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Param&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#508">visitor</a>.<a href="#298">visit_id</a>(<a href="#508">param</a>.hir_id);
+    <a href="#508">visitor</a>.<a href="#325">visit_pat</a>(<span class="kw-2">&amp;</span><a href="#508">param</a>.pat);
+}
+
+<span class="kw">pub fn </span>walk_item&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Item&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#513">visitor</a>.<a href="#304">visit_ident</a>(<a href="#513">item</a>.ident);
+    <span class="kw">match </span><a href="#513">item</a>.kind {
+        <a href="hir.rs.html#2994">ItemKind::ExternCrate</a>(orig_name) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(orig_name) = <a href="#516">orig_name</a> {
+                <a href="#513">visitor</a>.<a href="#301">visit_name</a>(<a href="#518">orig_name</a>);
+            }
+        }
+        <a href="hir.rs.html#3001">ItemKind::Use</a>(<span class="kw-2">ref </span>path, <span class="kw">_</span>) =&gt; {
+            <a href="#513">visitor</a>.<a href="#367">visit_use</a>(<a href="#522">path</a>, <a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+        }
+        <a href="hir.rs.html#3004">ItemKind::Static</a>(<span class="kw-2">ref </span>typ, <span class="kw">_</span>, body) | <a href="hir.rs.html#3006">ItemKind::Const</a>(<span class="kw-2">ref </span>typ, body) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#346">visit_ty</a>(<a href="#525">typ</a>);
+            <a href="#513">visitor</a>.<a href="#275">visit_nested_body</a>(<a href="#525">body</a>);
+        }
+        <a href="hir.rs.html#3008">ItemKind::Fn</a>(<span class="kw-2">ref </span>sig, <span class="kw-2">ref </span>generics, body_id) =&gt; <a href="#513">visitor</a>.<a href="#364">visit_fn</a>(
+            <a href="#81">FnKind::ItemFn</a>(<a href="#513">item</a>.ident, <a href="#530">generics</a>, <a href="#530">sig</a>.header),
+            <span class="kw-2">&amp;</span><a href="#530">sig</a>.decl,
+            <a href="#530">body_id</a>,
+            <a href="#513">item</a>.span,
+            <a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>(),
+        ),
+        <a href="hir.rs.html#3010">ItemKind::Macro</a>(..) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+        }
+        <a href="hir.rs.html#3012">ItemKind::Mod</a>(<span class="kw-2">ref </span>module) =&gt; {
+            <span class="comment">// `visit_mod()` takes care of visiting the `Item`&#39;s `HirId`.
+            </span><a href="#513">visitor</a>.<a href="#307">visit_mod</a>(<a href="#540">module</a>, <a href="#513">item</a>.span, <a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>())
+        }
+        <a href="hir.rs.html#3014">ItemKind::ForeignMod</a> { abi: <span class="kw">_</span>, items } =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_foreign_item_ref, items);
+        }
+        <a href="hir.rs.html#3016">ItemKind::GlobalAsm</a>(asm) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#446">visit_inline_asm</a>(<a href="#548">asm</a>, <a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+        }
+        <a href="hir.rs.html#3018">ItemKind::TyAlias</a>(<span class="kw-2">ref </span>ty, <span class="kw-2">ref </span>generics) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#346">visit_ty</a>(<a href="#552">ty</a>);
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#552">generics</a>)
+        }
+        <a href="hir.rs.html#3020">ItemKind::OpaqueTy</a>(<a href="hir.rs.html#2519">OpaqueTy</a> { <span class="kw-2">ref </span>generics, bounds, .. }) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#839">walk_generics</a>(<a href="#513">visitor</a>, <a href="#557">generics</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+        }
+        <a href="hir.rs.html#3022">ItemKind::Enum</a>(<span class="kw-2">ref </span>enum_definition, <span class="kw-2">ref </span>generics) =&gt; {
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#562">generics</a>);
+            <span class="comment">// `visit_enum_def()` takes care of visiting the `Item`&#39;s `HirId`.
+            </span><a href="#513">visitor</a>.<a href="#400">visit_enum_def</a>(<a href="#562">enum_definition</a>, <a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>())
+        }
+        <a href="hir.rs.html#3033">ItemKind::Impl</a>(<a href="hir.rs.html#3037">Impl</a> {
+            unsafety: <span class="kw">_</span>,
+            defaultness: <span class="kw">_</span>,
+            polarity: <span class="kw">_</span>,
+            constness: <span class="kw">_</span>,
+            defaultness_span: <span class="kw">_</span>,
+            <span class="kw-2">ref </span>generics,
+            <span class="kw-2">ref </span>of_trait,
+            <span class="kw-2">ref </span>self_ty,
+            items,
+        }) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#573">generics</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_trait_ref, of_trait);
+            <a href="#513">visitor</a>.<a href="#346">visit_ty</a>(<a href="#575">self_ty</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_impl_item_ref, <span class="kw-2">*</span>items);
+        }
+        <a href="hir.rs.html#3024">ItemKind::Struct</a>(<span class="kw-2">ref </span>struct_definition, <span class="kw-2">ref </span>generics)
+        | <a href="hir.rs.html#3026">ItemKind::Union</a>(<span class="kw-2">ref </span>struct_definition, <span class="kw-2">ref </span>generics) =&gt; {
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#584">generics</a>);
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#394">visit_variant_data</a>(<a href="#584">struct_definition</a>);
+        }
+        <a href="hir.rs.html#3028">ItemKind::Trait</a>(.., <span class="kw-2">ref </span>generics, bounds, trait_item_refs) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#590">generics</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_trait_item_ref, trait_item_refs);
+        }
+        <a href="hir.rs.html#3030">ItemKind::TraitAlias</a>(<span class="kw-2">ref </span>generics, bounds) =&gt; {
+            <a href="#513">visitor</a>.<a href="#298">visit_id</a>(<a href="#513">item</a>.<a href="hir.rs.html#2916">hir_id</a>());
+            <a href="#513">visitor</a>.<a href="#355">visit_generics</a>(<a href="#596">generics</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_inline_asm&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, asm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>InlineAsm&lt;<span class="lifetime">&#39;v</span>&gt;, id: <a href="hir_id.rs.html#17">HirId</a>) {
+    <span class="kw">for </span>(op, op_sp) <span class="kw">in </span>asm.operands {
+        <span class="kw">match </span>op {
+            InlineAsmOperand::In { expr, .. } | InlineAsmOperand::InOut { expr, .. } =&gt; {
+                visitor.visit_expr(expr)
+            }
+            InlineAsmOperand::Out { expr, .. } =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(expr) = expr {
+                    visitor.visit_expr(expr);
+                }
+            }
+            InlineAsmOperand::SplitInOut { in_expr, out_expr, .. } =&gt; {
+                visitor.visit_expr(in_expr);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(out_expr) = out_expr {
+                    visitor.visit_expr(out_expr);
+                }
+            }
+            InlineAsmOperand::Const { anon_const, .. }
+            | InlineAsmOperand::SymFn { anon_const, .. } =&gt; visitor.visit_anon_const(anon_const),
+            InlineAsmOperand::SymStatic { path, .. } =&gt; visitor.visit_qpath(path, id, <span class="kw-2">*</span>op_sp),
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_use&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, path: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Path&lt;<span class="lifetime">&#39;v</span>&gt;, hir_id: <a href="hir_id.rs.html#17">HirId</a>) {
+    <a href="#628">visitor</a>.<a href="#298">visit_id</a>(<a href="#628">hir_id</a>);
+    <a href="#628">visitor</a>.<a href="#427">visit_path</a>(<a href="#628">path</a>, <a href="#628">hir_id</a>);
+}
+
+<span class="kw">pub fn </span>walk_enum_def&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    enum_definition: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>EnumDef&lt;<span class="lifetime">&#39;v</span>&gt;,
+    item_id: <a href="hir_id.rs.html#17">HirId</a>,
+) {
+    <a href="#634">visitor</a>.<a href="#298">visit_id</a>(<a href="#636">item_id</a>);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_variant, enum_definition.variants);
+}
+
+<span class="kw">pub fn </span>walk_variant&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, variant: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Variant&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#642">visitor</a>.<a href="#304">visit_ident</a>(<a href="#642">variant</a>.ident);
+    <a href="#642">visitor</a>.<a href="#298">visit_id</a>(<a href="#642">variant</a>.id);
+    <a href="#642">visitor</a>.<a href="#394">visit_variant_data</a>(<span class="kw-2">&amp;</span><a href="#642">variant</a>.data);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_anon_const, <span class="kw-2">&amp;</span>variant.disr_expr);
+}
+
+<span class="kw">pub fn </span>walk_ty&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, typ: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Ty&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#649">visitor</a>.<a href="#298">visit_id</a>(<a href="#649">typ</a>.hir_id);
+
+    <span class="kw">match </span><a href="#649">typ</a>.kind {
+        <a href="hir.rs.html#2541">TyKind::Slice</a>(<span class="kw-2">ref </span>ty) =&gt; <a href="#649">visitor</a>.<a href="#346">visit_ty</a>(<a href="#653">ty</a>),
+        <a href="hir.rs.html#2545">TyKind::Ptr</a>(<span class="kw-2">ref </span>mutable_type) =&gt; <a href="#649">visitor</a>.<a href="#346">visit_ty</a>(<span class="kw-2">&amp;</span><a href="#654">mutable_type</a>.ty),
+        <a href="hir.rs.html#2547">TyKind::Rptr</a>(<span class="kw-2">ref </span>lifetime, <span class="kw-2">ref </span>mutable_type) =&gt; {
+            <a href="#649">visitor</a>.<a href="#420">visit_lifetime</a>(<a href="#655">lifetime</a>);
+            <a href="#649">visitor</a>.<a href="#346">visit_ty</a>(<span class="kw-2">&amp;</span><a href="#655">mutable_type</a>.ty)
+        }
+        <a href="hir.rs.html#2551">TyKind::Never</a> =&gt; {}
+        <a href="hir.rs.html#2553">TyKind::Tup</a>(tuple_element_types) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, tuple_element_types);
+        }
+        <a href="hir.rs.html#2549">TyKind::BareFn</a>(<span class="kw-2">ref </span>function_declaration) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_param, function_declaration.generic_params);
+            <a href="#649">visitor</a>.<a href="#361">visit_fn_decl</a>(<span class="kw-2">&amp;</span><a href="#663">function_declaration</a>.decl);
+        }
+        <a href="hir.rs.html#2558">TyKind::Path</a>(<span class="kw-2">ref </span>qpath) =&gt; {
+            <a href="#649">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#667">qpath</a>, <a href="#649">typ</a>.hir_id, <a href="#649">typ</a>.span);
+        }
+        <a href="hir.rs.html#2565">TyKind::OpaqueDef</a>(item_id, lifetimes, _in_trait) =&gt; {
+            <a href="#649">visitor</a>.<a href="#235">visit_nested_item</a>(<a href="#670">item_id</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_arg, lifetimes);
+        }
+        <a href="hir.rs.html#2543">TyKind::Array</a>(<span class="kw-2">ref </span>ty, <span class="kw-2">ref </span>length) =&gt; {
+            <a href="#649">visitor</a>.<a href="#346">visit_ty</a>(<a href="#674">ty</a>);
+            <a href="#649">visitor</a>.<a href="#331">visit_array_length</a>(<a href="#674">length</a>)
+        }
+        <a href="hir.rs.html#2568">TyKind::TraitObject</a>(bounds, <span class="kw-2">ref </span>lifetime, _syntax) =&gt; {
+            <span class="kw">for </span>bound <span class="kw">in </span>bounds {
+                visitor.visit_poly_trait_ref(bound);
+            }
+            <a href="#649">visitor</a>.<a href="#420">visit_lifetime</a>(<a href="#678">lifetime</a>);
+        }
+        <a href="hir.rs.html#2570">TyKind::Typeof</a>(<span class="kw-2">ref </span>expression) =&gt; <a href="#649">visitor</a>.<a href="#334">visit_anon_const</a>(<a href="#684">expression</a>),
+        <a href="hir.rs.html#2573">TyKind::Infer</a> | <a href="hir.rs.html#2575">TyKind::Err</a> =&gt; {}
+    }
+}
+
+<span class="kw">pub fn </span>walk_inf&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, inf: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#248">InferArg</a>) {
+    <a href="#689">visitor</a>.<a href="#298">visit_id</a>(<a href="#689">inf</a>.hir_id);
+}
+
+<span class="kw">pub fn </span>walk_qpath&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, qpath: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>QPath&lt;<span class="lifetime">&#39;v</span>&gt;, id: <a href="hir_id.rs.html#17">HirId</a>) {
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#693">qpath</a> {
+        <a href="hir.rs.html#2008">QPath::Resolved</a>(<span class="kw-2">ref </span>maybe_qself, <span class="kw-2">ref </span>path) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, maybe_qself);
+            <a href="#693">visitor</a>.<a href="#427">visit_path</a>(<a href="#695">path</a>, <a href="#693">id</a>)
+        }
+        <a href="hir.rs.html#2016">QPath::TypeRelative</a>(<span class="kw-2">ref </span>qself, <span class="kw-2">ref </span>segment) =&gt; {
+            <a href="#693">visitor</a>.<a href="#346">visit_ty</a>(<a href="#699">qself</a>);
+            <a href="#693">visitor</a>.<a href="#430">visit_path_segment</a>(<a href="#699">segment</a>);
+        }
+        <a href="hir.rs.html#2019">QPath::LangItem</a>(..) =&gt; {}
+    }
+}
+
+<span class="kw">pub fn </span>walk_path&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, path: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Path&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="kw">for </span>segment <span class="kw">in </span>path.segments {
+        visitor.visit_path_segment(segment);
+    }
+}
+
+<span class="kw">pub fn </span>walk_path_segment&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, segment: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PathSegment&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#713">visitor</a>.<a href="#304">visit_ident</a>(<a href="#713">segment</a>.ident);
+    <a href="#713">visitor</a>.<a href="#298">visit_id</a>(<a href="#713">segment</a>.hir_id);
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>args) = <a href="#713">segment</a>.args {
+        <a href="#713">visitor</a>.<a href="#433">visit_generic_args</a>(<a href="#716">args</a>);
+    }
+}
+
+<span class="kw">pub fn </span>walk_generic_args&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, generic_args: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericArgs&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_arg, generic_args.args);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_assoc_type_binding, generic_args.bindings);
+}
+
+<span class="kw">pub fn </span>walk_assoc_type_binding&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    type_binding: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TypeBinding&lt;<span class="lifetime">&#39;v</span>&gt;,
+) {
+    <a href="#727">visitor</a>.<a href="#298">visit_id</a>(<a href="#728">type_binding</a>.hir_id);
+    <a href="#727">visitor</a>.<a href="#304">visit_ident</a>(<a href="#728">type_binding</a>.ident);
+    <a href="#727">visitor</a>.<a href="#433">visit_generic_args</a>(<a href="#728">type_binding</a>.gen_args);
+    <span class="kw">match </span><a href="#728">type_binding</a>.kind {
+        <a href="hir.rs.html#2371">TypeBindingKind::Equality</a> { <span class="kw-2">ref </span>term } =&gt; <span class="kw">match </span><a href="#734">term</a> {
+            <a href="hir.rs.html#2349">Term::Ty</a>(<span class="kw-2">ref </span>ty) =&gt; <a href="#727">visitor</a>.<a href="#346">visit_ty</a>(<a href="#735">ty</a>),
+            <a href="hir.rs.html#2350">Term::Const</a>(<span class="kw-2">ref </span>c) =&gt; <a href="#727">visitor</a>.<a href="#334">visit_anon_const</a>(<a href="#736">c</a>),
+        },
+        <a href="hir.rs.html#2369">TypeBindingKind::Constraint</a> { bounds } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds),
+    }
+}
+
+<span class="kw">pub fn </span>walk_pat&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, pattern: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Pat&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#742">visitor</a>.<a href="#298">visit_id</a>(<a href="#742">pattern</a>.hir_id);
+    <span class="kw">match </span><a href="#742">pattern</a>.kind {
+        <a href="hir.rs.html#1116">PatKind::TupleStruct</a>(<span class="kw-2">ref </span>qpath, children, <span class="kw">_</span>) =&gt; {
+            <a href="#742">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#745">qpath</a>, <a href="#742">pattern</a>.hir_id, <a href="#742">pattern</a>.span);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, children);
+        }
+        <a href="hir.rs.html#1123">PatKind::Path</a>(<span class="kw-2">ref </span>qpath) =&gt; {
+            <a href="#742">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#749">qpath</a>, <a href="#742">pattern</a>.hir_id, <a href="#742">pattern</a>.span);
+        }
+        <a href="hir.rs.html#1111">PatKind::Struct</a>(<span class="kw-2">ref </span>qpath, fields, <span class="kw">_</span>) =&gt; {
+            <a href="#742">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#752">qpath</a>, <a href="#742">pattern</a>.hir_id, <a href="#742">pattern</a>.span);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat_field, fields);
+        }
+        <a href="hir.rs.html#1120">PatKind::Or</a>(pats) =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, pats),
+        <a href="hir.rs.html#1128">PatKind::Tuple</a>(tuple_elements, <span class="kw">_</span>) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, tuple_elements);
+        }
+        <a href="hir.rs.html#1131">PatKind::Box</a>(<span class="kw-2">ref </span>subpattern) | <a href="hir.rs.html#1134">PatKind::Ref</a>(<span class="kw-2">ref </span>subpattern, <span class="kw">_</span>) =&gt; {
+            <a href="#742">visitor</a>.<a href="#325">visit_pat</a>(<a href="#760">subpattern</a>)
+        }
+        <a href="hir.rs.html#1107">PatKind::Binding</a>(<span class="kw">_</span>, _hir_id, ident, <span class="kw-2">ref </span>optional_subpattern) =&gt; {
+            <a href="#742">visitor</a>.<a href="#304">visit_ident</a>(<a href="#763">ident</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, optional_subpattern);
+        }
+        <a href="hir.rs.html#1137">PatKind::Lit</a>(<span class="kw-2">ref </span>expression) =&gt; <a href="#742">visitor</a>.<a href="#337">visit_expr</a>(<a href="#767">expression</a>),
+        <a href="hir.rs.html#1140">PatKind::Range</a>(<span class="kw-2">ref </span>lower_bound, <span class="kw-2">ref </span>upper_bound, <span class="kw">_</span>) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, lower_bound);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, upper_bound);
+        }
+        <a href="hir.rs.html#1101">PatKind::Wild</a> =&gt; (),
+        <a href="hir.rs.html#1151">PatKind::Slice</a>(prepatterns, <span class="kw-2">ref </span>slice_pattern, postpatterns) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, prepatterns);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, slice_pattern);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_pat, postpatterns);
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_pat_field&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, field: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>PatField&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#781">visitor</a>.<a href="#298">visit_id</a>(<a href="#781">field</a>.hir_id);
+    <a href="#781">visitor</a>.<a href="#304">visit_ident</a>(<a href="#781">field</a>.ident);
+    <a href="#781">visitor</a>.<a href="#325">visit_pat</a>(<span class="kw-2">&amp;</span><a href="#781">field</a>.pat)
+}
+
+<span class="kw">pub fn </span>walk_foreign_item&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, foreign_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ForeignItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#787">visitor</a>.<a href="#298">visit_id</a>(<a href="#787">foreign_item</a>.<a href="hir.rs.html#3170">hir_id</a>());
+    <a href="#787">visitor</a>.<a href="#304">visit_ident</a>(<a href="#787">foreign_item</a>.ident);
+
+    <span class="kw">match </span><a href="#787">foreign_item</a>.kind {
+        <a href="hir.rs.html#3184">ForeignItemKind::Fn</a>(<span class="kw-2">ref </span>function_declaration, param_names, <span class="kw-2">ref </span>generics) =&gt; {
+            <a href="#787">visitor</a>.<a href="#355">visit_generics</a>(<a href="#792">generics</a>);
+            <a href="#787">visitor</a>.<a href="#361">visit_fn_decl</a>(<a href="#792">function_declaration</a>);
+            <span class="kw">for </span><span class="kw-2">&amp;</span>param_name <span class="kw">in </span>param_names {
+                visitor.visit_ident(param_name);
+            }
+        }
+        <a href="hir.rs.html#3186">ForeignItemKind::Static</a>(<span class="kw-2">ref </span>typ, <span class="kw">_</span>) =&gt; <a href="#787">visitor</a>.<a href="#346">visit_ty</a>(<a href="#799">typ</a>),
+        <a href="hir.rs.html#3188">ForeignItemKind::Type</a> =&gt; (),
+    }
+}
+
+<span class="kw">pub fn </span>walk_param_bound&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, bound: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericBound&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#804">bound</a> {
+        <a href="hir.rs.html#429">GenericBound::Trait</a>(<span class="kw-2">ref </span>typ, _modifier) =&gt; {
+            <a href="#804">visitor</a>.<a href="#391">visit_poly_trait_ref</a>(<a href="#806">typ</a>);
+        }
+        <a href="hir.rs.html#431">GenericBound::LangItemTrait</a>(<span class="kw">_</span>, _span, hir_id, args) =&gt; {
+            <a href="#804">visitor</a>.<a href="#298">visit_id</a>(<a href="#809">hir_id</a>);
+            <a href="#804">visitor</a>.<a href="#433">visit_generic_args</a>(<a href="#809">args</a>);
+        }
+        <a href="hir.rs.html#432">GenericBound::Outlives</a>(<span class="kw-2">ref </span>lifetime) =&gt; <a href="#804">visitor</a>.<a href="#420">visit_lifetime</a>(<a href="#813">lifetime</a>),
+    }
+}
+
+<span class="kw">pub fn </span>walk_generic_param&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, param: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>GenericParam&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#817">visitor</a>.<a href="#298">visit_id</a>(<a href="#817">param</a>.hir_id);
+    <span class="kw">match </span><a href="#817">param</a>.name {
+        <a href="hir.rs.html#47">ParamName::Plain</a>(ident) =&gt; <a href="#817">visitor</a>.<a href="#304">visit_ident</a>(<a href="#820">ident</a>),
+        <a href="hir.rs.html#68">ParamName::Error</a> | <a href="hir.rs.html#63">ParamName::Fresh</a> =&gt; {}
+    }
+    <span class="kw">match </span><a href="#817">param</a>.kind {
+        <a href="hir.rs.html#471">GenericParamKind::Lifetime</a> { .. } =&gt; {}
+        <a href="hir.rs.html#474">GenericParamKind::Type</a> { <span class="kw-2">ref </span>default, .. } =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, default),
+        <a href="hir.rs.html#478">GenericParamKind::Const</a> { <span class="kw-2">ref </span>ty, <span class="kw-2">ref </span>default } =&gt; {
+            <a href="#817">visitor</a>.<a href="#346">visit_ty</a>(<a href="#826">ty</a>);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>default) = <a href="#826">default</a> {
+                <a href="#817">visitor</a>.<a href="#352">visit_const_param_default</a>(<a href="#817">param</a>.hir_id, <a href="#828">default</a>);
+            }
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_const_param_default&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, ct: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1629">AnonConst</a>) {
+    <a href="#835">visitor</a>.<a href="#334">visit_anon_const</a>(<a href="#835">ct</a>)
+}
+
+<span class="kw">pub fn </span>walk_generics&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, generics: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Generics&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_param, generics.params);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_where_predicate, generics.predicates);
+}
+
+<span class="kw">pub fn </span>walk_where_predicate&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    predicate: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>WherePredicate&lt;<span class="lifetime">&#39;v</span>&gt;,
+) {
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#846">predicate</a> {
+        <a href="hir.rs.html#691">WherePredicate::BoundPredicate</a>(<a href="hir.rs.html#733">WhereBoundPredicate</a> {
+            <span class="kw-2">ref </span>bounded_ty,
+            bounds,
+            bound_generic_params,
+            ..
+        }) =&gt; {
+            <a href="#845">visitor</a>.<a href="#346">visit_ty</a>(<a href="#850">bounded_ty</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_param, bound_generic_params);
+        }
+        <a href="hir.rs.html#693">WherePredicate::RegionPredicate</a>(<a href="hir.rs.html#754">WhereRegionPredicate</a> { <span class="kw-2">ref </span>lifetime, bounds, .. }) =&gt; {
+            <a href="#845">visitor</a>.<a href="#420">visit_lifetime</a>(<a href="#859">lifetime</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+        }
+        <a href="hir.rs.html#695">WherePredicate::EqPredicate</a>(<a href="hir.rs.html#773">WhereEqPredicate</a> { <span class="kw-2">ref </span>lhs_ty, <span class="kw-2">ref </span>rhs_ty, .. }) =&gt; {
+            <a href="#845">visitor</a>.<a href="#346">visit_ty</a>(<a href="#863">lhs_ty</a>);
+            <a href="#845">visitor</a>.<a href="#346">visit_ty</a>(<a href="#863">rhs_ty</a>);
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_fn_ret_ty&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, ret_ty: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FnRetTy&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="kw">if let </span><a href="hir.rs.html#2724">FnRetTy::Return</a>(<span class="kw-2">ref </span>output_ty) = <span class="kw-2">*</span><a href="#870">ret_ty</a> {
+        <a href="#870">visitor</a>.<a href="#346">visit_ty</a>(<a href="#871">output_ty</a>)
+    }
+}
+
+<span class="kw">pub fn </span>walk_fn_decl&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, function_declaration: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FnDecl&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="kw">for </span>ty <span class="kw">in </span>function_declaration.inputs {
+        visitor.visit_ty(ty)
+    }
+    <a href="#870">walk_fn_ret_ty</a>(<a href="#876">visitor</a>, <span class="kw-2">&amp;</span><a href="#876">function_declaration</a>.output)
+}
+
+<span class="kw">pub fn </span>walk_fn_kind&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, function_kind: FnKind&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="kw">match </span><a href="#883">function_kind</a> {
+        <a href="#81">FnKind::ItemFn</a>(<span class="kw">_</span>, generics, ..) =&gt; {
+            <a href="#883">visitor</a>.<a href="#355">visit_generics</a>(<a href="#885">generics</a>);
+        }
+        <a href="#87">FnKind::Closure</a> | <a href="#84">FnKind::Method</a>(..) =&gt; {}
+    }
+}
+
+<span class="kw">pub fn </span>walk_fn&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    function_kind: FnKind&lt;<span class="lifetime">&#39;v</span>&gt;,
+    function_declaration: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FnDecl&lt;<span class="lifetime">&#39;v</span>&gt;,
+    body_id: <a href="hir.rs.html#1420">BodyId</a>,
+    id: <a href="hir_id.rs.html#17">HirId</a>,
+) {
+    <a href="#893">visitor</a>.<a href="#298">visit_id</a>(<a href="#897">id</a>);
+    <a href="#893">visitor</a>.<a href="#361">visit_fn_decl</a>(<a href="#895">function_declaration</a>);
+    <a href="#883">walk_fn_kind</a>(<a href="#893">visitor</a>, <a href="#894">function_kind</a>);
+    <a href="#893">visitor</a>.<a href="#275">visit_nested_body</a>(<a href="#896">body_id</a>)
+}
+
+<span class="kw">pub fn </span>walk_trait_item&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, trait_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>TraitItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="comment">// N.B., deliberately force a compilation error if/when new fields are added.
+    </span><span class="kw">let </span><a href="hir.rs.html#2225">TraitItem</a> { ident, generics, <span class="kw-2">ref </span>defaultness, <span class="kw-2">ref </span>kind, span, def_id: <span class="kw">_ </span>} = <span class="kw-2">*</span><a href="#905">trait_item</a>;
+    <span class="kw">let </span>hir_id = <a href="#905">trait_item</a>.<a href="hir.rs.html#2236">hir_id</a>();
+    <a href="#905">visitor</a>.<a href="#304">visit_ident</a>(<a href="#907">ident</a>);
+    <a href="#905">visitor</a>.<a href="#355">visit_generics</a>(<span class="kw-2">&amp;</span><a href="#907">generics</a>);
+    <a href="#905">visitor</a>.<a href="#443">visit_defaultness</a>(<span class="kw-2">&amp;</span><a href="#907">defaultness</a>);
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#907">kind</a> {
+        <a href="hir.rs.html#2260">TraitItemKind::Const</a>(<span class="kw-2">ref </span>ty, default) =&gt; {
+            <a href="#905">visitor</a>.<a href="#298">visit_id</a>(<a href="#908">hir_id</a>);
+            <a href="#905">visitor</a>.<a href="#346">visit_ty</a>(<a href="#913">ty</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_nested_body, default);
+        }
+        <a href="hir.rs.html#2262">TraitItemKind::Fn</a>(<span class="kw-2">ref </span>sig, <a href="hir.rs.html#2250">TraitFn::Required</a>(param_names)) =&gt; {
+            <a href="#905">visitor</a>.<a href="#298">visit_id</a>(<a href="#908">hir_id</a>);
+            <a href="#905">visitor</a>.<a href="#361">visit_fn_decl</a>(<span class="kw-2">&amp;</span><a href="#918">sig</a>.decl);
+            <span class="kw">for </span><span class="kw-2">&amp;</span>param_name <span class="kw">in </span>param_names {
+                visitor.visit_ident(param_name);
+            }
+        }
+        <a href="hir.rs.html#2262">TraitItemKind::Fn</a>(<span class="kw-2">ref </span>sig, <a href="hir.rs.html#2253">TraitFn::Provided</a>(body_id)) =&gt; {
+            <a href="#905">visitor</a>.<a href="#364">visit_fn</a>(<a href="#84">FnKind::Method</a>(<a href="#907">ident</a>, <a href="#925">sig</a>), <span class="kw-2">&amp;</span><a href="#925">sig</a>.decl, <a href="#925">body_id</a>, <a href="#907">span</a>, <a href="#908">hir_id</a>);
+        }
+        <a href="hir.rs.html#2265">TraitItemKind::Type</a>(bounds, <span class="kw-2">ref </span>default) =&gt; {
+            <a href="#905">visitor</a>.<a href="#298">visit_id</a>(<a href="#908">hir_id</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_param_bound, bounds);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, default);
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_trait_item_ref&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, trait_item_ref: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3100">TraitItemRef</a>) {
+    <span class="comment">// N.B., deliberately force a compilation error if/when new fields are added.
+    </span><span class="kw">let </span><a href="hir.rs.html#3100">TraitItemRef</a> { id, ident, <span class="kw-2">ref </span>kind, span: <span class="kw">_ </span>} = <span class="kw-2">*</span><a href="#936">trait_item_ref</a>;
+    <a href="#936">visitor</a>.<a href="#245">visit_nested_trait_item</a>(<a href="#938">id</a>);
+    <a href="#936">visitor</a>.<a href="#304">visit_ident</a>(<a href="#938">ident</a>);
+    <a href="#936">visitor</a>.<a href="#440">visit_associated_item_kind</a>(<a href="#938">kind</a>);
+}
+
+<span class="kw">pub fn </span>walk_impl_item&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, impl_item: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ImplItem&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="comment">// N.B., deliberately force a compilation error if/when new fields are added.
+    </span><span class="kw">let </span><a href="hir.rs.html#2286">ImplItem</a> {
+        def_id: <span class="kw">_</span>,
+        ident,
+        <span class="kw-2">ref </span>generics,
+        <span class="kw-2">ref </span>kind,
+        <span class="kw-2">ref </span>defaultness,
+        span: <span class="kw">_</span>,
+        vis_span: <span class="kw">_</span>,
+    } = <span class="kw-2">*</span><a href="#944">impl_item</a>;
+
+    <a href="#944">visitor</a>.<a href="#304">visit_ident</a>(<a href="#948">ident</a>);
+    <a href="#944">visitor</a>.<a href="#355">visit_generics</a>(<a href="#949">generics</a>);
+    <a href="#944">visitor</a>.<a href="#443">visit_defaultness</a>(<a href="#951">defaultness</a>);
+    <span class="kw">match </span><span class="kw-2">*</span><a href="#950">kind</a> {
+        <a href="hir.rs.html#2313">ImplItemKind::Const</a>(<span class="kw-2">ref </span>ty, body) =&gt; {
+            <a href="#944">visitor</a>.<a href="#298">visit_id</a>(<a href="#944">impl_item</a>.<a href="hir.rs.html#2298">hir_id</a>());
+            <a href="#944">visitor</a>.<a href="#346">visit_ty</a>(<a href="#960">ty</a>);
+            <a href="#944">visitor</a>.<a href="#275">visit_nested_body</a>(<a href="#960">body</a>);
+        }
+        <a href="hir.rs.html#2315">ImplItemKind::Fn</a>(<span class="kw-2">ref </span>sig, body_id) =&gt; {
+            <a href="#944">visitor</a>.<a href="#364">visit_fn</a>(
+                <a href="#84">FnKind::Method</a>(<a href="#944">impl_item</a>.ident, <a href="#965">sig</a>),
+                <span class="kw-2">&amp;</span><a href="#965">sig</a>.decl,
+                <a href="#965">body_id</a>,
+                <a href="#944">impl_item</a>.span,
+                <a href="#944">impl_item</a>.<a href="hir.rs.html#2298">hir_id</a>(),
+            );
+        }
+        <a href="hir.rs.html#2317">ImplItemKind::TyAlias</a>(<span class="kw-2">ref </span>ty) =&gt; {
+            <a href="#944">visitor</a>.<a href="#298">visit_id</a>(<a href="#944">impl_item</a>.<a href="hir.rs.html#2298">hir_id</a>());
+            <a href="#944">visitor</a>.<a href="#346">visit_ty</a>(<a href="#974">ty</a>);
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_foreign_item_ref&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    foreign_item_ref: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3153">ForeignItemRef</a>,
+) {
+    <span class="comment">// N.B., deliberately force a compilation error if/when new fields are added.
+    </span><span class="kw">let </span><a href="hir.rs.html#3153">ForeignItemRef</a> { id, ident, span: <span class="kw">_ </span>} = <span class="kw-2">*</span><a href="#983">foreign_item_ref</a>;
+    <a href="#982">visitor</a>.<a href="#265">visit_nested_foreign_item</a>(<a href="#986">id</a>);
+    <a href="#982">visitor</a>.<a href="#304">visit_ident</a>(<a href="#986">ident</a>);
+}
+
+<span class="kw">pub fn </span>walk_impl_item_ref&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, impl_item_ref: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3114">ImplItemRef</a>) {
+    <span class="comment">// N.B., deliberately force a compilation error if/when new fields are added.
+    </span><span class="kw">let </span><a href="hir.rs.html#3114">ImplItemRef</a> { id, ident, <span class="kw-2">ref </span>kind, span: <span class="kw">_</span>, trait_item_def_id: <span class="kw">_ </span>} = <span class="kw-2">*</span><a href="#991">impl_item_ref</a>;
+    <a href="#991">visitor</a>.<a href="#255">visit_nested_impl_item</a>(<a href="#993">id</a>);
+    <a href="#991">visitor</a>.<a href="#304">visit_ident</a>(<a href="#993">ident</a>);
+    <a href="#991">visitor</a>.<a href="#440">visit_associated_item_kind</a>(<a href="#993">kind</a>);
+}
+
+<span class="kw">pub fn </span>walk_struct_def&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(
+    visitor: <span class="kw-2">&amp;mut </span>V,
+    struct_definition: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>VariantData&lt;<span class="lifetime">&#39;v</span>&gt;,
+) {
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_id, struct_definition.ctor_hir_id());
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_field_def, struct_definition.fields());
+}
+
+<span class="kw">pub fn </span>walk_field_def&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, field: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>FieldDef&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1007">visitor</a>.<a href="#298">visit_id</a>(<a href="#1007">field</a>.hir_id);
+    <a href="#1007">visitor</a>.<a href="#304">visit_ident</a>(<a href="#1007">field</a>.ident);
+    <a href="#1007">visitor</a>.<a href="#346">visit_ty</a>(<span class="kw-2">&amp;</span><a href="#1007">field</a>.ty);
+}
+
+<span class="kw">pub fn </span>walk_block&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, block: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Block&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1013">visitor</a>.<a href="#298">visit_id</a>(<a href="#1013">block</a>.hir_id);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_stmt, block.stmts);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, <span class="kw-2">&amp;</span>block.expr);
+}
+
+<span class="kw">pub fn </span>walk_stmt&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, statement: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Stmt&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1019">visitor</a>.<a href="#298">visit_id</a>(<a href="#1019">statement</a>.hir_id);
+    <span class="kw">match </span><a href="#1019">statement</a>.kind {
+        <a href="hir.rs.html#1319">StmtKind::Local</a>(<span class="kw-2">ref </span>local) =&gt; <a href="#1019">visitor</a>.<a href="#313">visit_local</a>(<a href="#1022">local</a>),
+        <a href="hir.rs.html#1322">StmtKind::Item</a>(item) =&gt; <a href="#1019">visitor</a>.<a href="#235">visit_nested_item</a>(<a href="#1023">item</a>),
+        <a href="hir.rs.html#1325">StmtKind::Expr</a>(<span class="kw-2">ref </span>expression) | <a href="hir.rs.html#1328">StmtKind::Semi</a>(<span class="kw-2">ref </span>expression) =&gt; {
+            <a href="#1019">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1024">expression</a>)
+        }
+    }
+}
+
+<span class="kw">pub fn </span>walk_array_len&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, len: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1607">ArrayLen</a>) {
+    <span class="kw">match </span><a href="#1030">len</a> {
+        <span class="kw-2">&amp;</span><a href="hir.rs.html#1608">ArrayLen::Infer</a>(hir_id, _span) =&gt; <a href="#1030">visitor</a>.<a href="#298">visit_id</a>(<a href="#1032">hir_id</a>),
+        <a href="hir.rs.html#1609">ArrayLen::Body</a>(c) =&gt; <a href="#1030">visitor</a>.<a href="#334">visit_anon_const</a>(<a href="#1033">c</a>),
+    }
+}
+
+<span class="kw">pub fn </span>walk_anon_const&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, constant: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#1629">AnonConst</a>) {
+    <a href="#1037">visitor</a>.<a href="#298">visit_id</a>(<a href="#1037">constant</a>.hir_id);
+    <a href="#1037">visitor</a>.<a href="#275">visit_nested_body</a>(<a href="#1037">constant</a>.body);
+}
+
+<span class="kw">pub fn </span>walk_let_expr&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, let_expr: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Let&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <span class="comment">// match the visit order in walk_local
+    </span><a href="#1042">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1042">let_expr</a>.init);
+    <a href="#1042">visitor</a>.<a href="#298">visit_id</a>(<a href="#1042">let_expr</a>.hir_id);
+    <a href="#1042">visitor</a>.<a href="#325">visit_pat</a>(<a href="#1042">let_expr</a>.pat);
+    <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_ty, let_expr.ty);
+}
+
+<span class="kw">pub fn </span>walk_expr_field&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, field: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>ExprField&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1050">visitor</a>.<a href="#298">visit_id</a>(<a href="#1050">field</a>.hir_id);
+    <a href="#1050">visitor</a>.<a href="#304">visit_ident</a>(<a href="#1050">field</a>.ident);
+    <a href="#1050">visitor</a>.<a href="#337">visit_expr</a>(<span class="kw-2">&amp;</span><a href="#1050">field</a>.expr)
+}
+
+<span class="kw">pub fn </span>walk_expr&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, expression: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Expr&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1056">visitor</a>.<a href="#298">visit_id</a>(<a href="#1056">expression</a>.hir_id);
+    <span class="kw">match </span><a href="#1056">expression</a>.kind {
+        <a href="hir.rs.html#1875">ExprKind::Box</a>(<span class="kw-2">ref </span>subexpression) =&gt; <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1059">subexpression</a>),
+        <a href="hir.rs.html#1879">ExprKind::Array</a>(subexpressions) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, subexpressions);
+        }
+        <a href="hir.rs.html#1877">ExprKind::ConstBlock</a>(<span class="kw-2">ref </span>anon_const) =&gt; <a href="#1056">visitor</a>.<a href="#334">visit_anon_const</a>(<a href="#1063">anon_const</a>),
+        <a href="hir.rs.html#1986">ExprKind::Repeat</a>(<span class="kw-2">ref </span>element, <span class="kw-2">ref </span>count) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1064">element</a>);
+            <a href="#1056">visitor</a>.<a href="#331">visit_array_length</a>(<a href="#1064">count</a>)
+        }
+        <a href="hir.rs.html#1980">ExprKind::Struct</a>(<span class="kw-2">ref </span>qpath, fields, <span class="kw-2">ref </span>optional_base) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#1068">qpath</a>, <a href="#1056">expression</a>.hir_id, <a href="#1056">expression</a>.span);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr_field, fields);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, optional_base);
+        }
+        <a href="hir.rs.html#1905">ExprKind::Tup</a>(subexpressions) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, subexpressions);
+        }
+        <a href="hir.rs.html#1886">ExprKind::Call</a>(<span class="kw-2">ref </span>callee_expression, arguments) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1076">callee_expression</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, arguments);
+        }
+        <a href="hir.rs.html#1903">ExprKind::MethodCall</a>(<span class="kw-2">ref </span>segment, receiver, arguments, <span class="kw">_</span>) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#430">visit_path_segment</a>(<a href="#1080">segment</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1080">receiver</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, arguments);
+        }
+        <a href="hir.rs.html#1907">ExprKind::Binary</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>left_expression, <span class="kw-2">ref </span>right_expression) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1085">left_expression</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1085">right_expression</a>)
+        }
+        <a href="hir.rs.html#1965">ExprKind::AddrOf</a>(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw-2">ref </span>subexpression) | <a href="hir.rs.html#1909">ExprKind::Unary</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>subexpression) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1089">subexpression</a>)
+        }
+        <a href="hir.rs.html#1913">ExprKind::Cast</a>(<span class="kw-2">ref </span>subexpression, <span class="kw-2">ref </span>typ) | <a href="hir.rs.html#1915">ExprKind::Type</a>(<span class="kw-2">ref </span>subexpression, <span class="kw-2">ref </span>typ) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1092">subexpression</a>);
+            <a href="#1056">visitor</a>.<a href="#346">visit_ty</a>(<a href="#1092">typ</a>)
+        }
+        <a href="hir.rs.html#1921">ExprKind::DropTemps</a>(<span class="kw-2">ref </span>subexpression) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1096">subexpression</a>);
+        }
+        <a href="hir.rs.html#1926">ExprKind::Let</a>(<span class="kw-2">ref </span>let_expr) =&gt; <a href="#1056">visitor</a>.<a href="#340">visit_let_expr</a>(<a href="#1099">let_expr</a>),
+        <a href="hir.rs.html#1930">ExprKind::If</a>(<span class="kw-2">ref </span>cond, <span class="kw-2">ref </span>then, <span class="kw-2">ref </span>else_opt) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1100">cond</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1100">then</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, else_opt);
+        }
+        <a href="hir.rs.html#1936">ExprKind::Loop</a>(<span class="kw-2">ref </span>block, <span class="kw-2">ref </span>opt_label, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_label, opt_label);
+            <a href="#1056">visitor</a>.<a href="#316">visit_block</a>(<a href="#1105">block</a>);
+        }
+        <a href="hir.rs.html#1939">ExprKind::Match</a>(<span class="kw-2">ref </span>subexpression, arms, <span class="kw">_</span>) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1109">subexpression</a>);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_arm, arms);
+        }
+        <a href="hir.rs.html#1946">ExprKind::Closure</a>(<span class="kw-2">&amp;</span><a href="hir.rs.html#920">Closure</a> {
+            binder: <span class="kw">_</span>,
+            bound_generic_params,
+            fn_decl,
+            body,
+            capture_clause: <span class="kw">_</span>,
+            fn_decl_span: <span class="kw">_</span>,
+            movability: <span class="kw">_</span>,
+        }) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_generic_param, bound_generic_params);
+            <a href="#1056">visitor</a>.<a href="#364">visit_fn</a>(<a href="#87">FnKind::Closure</a>, <a href="#1116">fn_decl</a>, <a href="#1117">body</a>, <a href="#1056">expression</a>.span, <a href="#1056">expression</a>.hir_id)
+        }
+        <a href="hir.rs.html#1948">ExprKind::Block</a>(<span class="kw-2">ref </span>block, <span class="kw-2">ref </span>opt_label) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_label, opt_label);
+            <a href="#1056">visitor</a>.<a href="#316">visit_block</a>(<a href="#1125">block</a>);
+        }
+        <a href="hir.rs.html#1951">ExprKind::Assign</a>(<span class="kw-2">ref </span>lhs, <span class="kw-2">ref </span>rhs, <span class="kw">_</span>) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1129">rhs</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1129">lhs</a>)
+        }
+        <a href="hir.rs.html#1955">ExprKind::AssignOp</a>(<span class="kw">_</span>, <span class="kw-2">ref </span>left_expression, <span class="kw-2">ref </span>right_expression) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1133">right_expression</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1133">left_expression</a>);
+        }
+        <a href="hir.rs.html#1957">ExprKind::Field</a>(<span class="kw-2">ref </span>subexpression, ident) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1137">subexpression</a>);
+            <a href="#1056">visitor</a>.<a href="#304">visit_ident</a>(<a href="#1137">ident</a>);
+        }
+        <a href="hir.rs.html#1959">ExprKind::Index</a>(<span class="kw-2">ref </span>main_expression, <span class="kw-2">ref </span>index_expression) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1141">main_expression</a>);
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1141">index_expression</a>)
+        }
+        <a href="hir.rs.html#1962">ExprKind::Path</a>(<span class="kw-2">ref </span>qpath) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#424">visit_qpath</a>(<a href="#1145">qpath</a>, <a href="#1056">expression</a>.hir_id, <a href="#1056">expression</a>.span);
+        }
+        <a href="hir.rs.html#1967">ExprKind::Break</a>(<span class="kw-2">ref </span>destination, <span class="kw-2">ref </span>opt_expr) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_label, <span class="kw-2">&amp;</span>destination.label);
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, opt_expr);
+        }
+        <a href="hir.rs.html#1969">ExprKind::Continue</a>(<span class="kw-2">ref </span>destination) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_label, <span class="kw-2">&amp;</span>destination.label);
+        }
+        <a href="hir.rs.html#1971">ExprKind::Ret</a>(<span class="kw-2">ref </span>optional_expression) =&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/macro.walk_list.html">walk_list!</a>(visitor, visit_expr, optional_expression);
+        }
+        <a href="hir.rs.html#1974">ExprKind::InlineAsm</a>(<span class="kw-2">ref </span>asm) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#446">visit_inline_asm</a>(<a href="#1158">asm</a>, <a href="#1056">expression</a>.hir_id);
+        }
+        <a href="hir.rs.html#1989">ExprKind::Yield</a>(<span class="kw-2">ref </span>subexpression, <span class="kw">_</span>) =&gt; {
+            <a href="#1056">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1161">subexpression</a>);
+        }
+        <a href="hir.rs.html#1911">ExprKind::Lit</a>(<span class="kw">_</span>) | <a href="hir.rs.html#1992">ExprKind::Err</a> =&gt; {}
+    }
+}
+
+<span class="kw">pub fn </span>walk_arm&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(visitor: <span class="kw-2">&amp;mut </span>V, arm: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span>Arm&lt;<span class="lifetime">&#39;v</span>&gt;) {
+    <a href="#1168">visitor</a>.<a href="#298">visit_id</a>(<a href="#1168">arm</a>.hir_id);
+    <a href="#1168">visitor</a>.<a href="#325">visit_pat</a>(<span class="kw-2">&amp;</span><a href="#1168">arm</a>.pat);
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>g) = <a href="#1168">arm</a>.guard {
+        <span class="kw">match </span><a href="#1171">g</a> {
+            <a href="hir.rs.html#1379">Guard::If</a>(<span class="kw-2">ref </span>e) =&gt; <a href="#1168">visitor</a>.<a href="#337">visit_expr</a>(<a href="#1173">e</a>),
+            <a href="hir.rs.html#1380">Guard::IfLet</a>(<span class="kw-2">ref </span>l) =&gt; {
+                <a href="#1168">visitor</a>.<a href="#340">visit_let_expr</a>(<a href="#1174">l</a>);
+            }
+        }
+    }
+    <a href="#1168">visitor</a>.<a href="#337">visit_expr</a>(<span class="kw-2">&amp;</span><a href="#1168">arm</a>.body);
+}
+
+<span class="kw">pub fn </span>walk_associated_item_kind&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(<span class="kw">_</span>: <span class="kw-2">&amp;mut </span>V, <span class="kw">_</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#3124">AssocItemKind</a>) {
+    <span class="comment">// No visitable content here: this fn exists so you can call it if
+    // the right thing to do, should content be added in the future,
+    // would be to walk it.
+</span>}
+
+<span class="kw">pub fn </span>walk_defaultness&lt;<span class="lifetime">&#39;v</span>, V: Visitor&lt;<span class="lifetime">&#39;v</span>&gt;&gt;(<span class="kw">_</span>: <span class="kw-2">&amp;mut </span>V, <span class="kw">_</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;v </span><a href="hir.rs.html#2693">Defaultness</a>) {
+    <span class="comment">// No visitable content here: this fn exists so you can call it if
+    // the right thing to do, should content be added in the future,
+    // would be to walk it.
+</span>}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="rustc_hir" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0-dev" ></div></body></html>

@@ -1,0 +1,1894 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_codegen_llvm/src/back/lto.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lto.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../rustc_codegen_llvm/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../rustc_codegen_llvm/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
+<span id="673">673</span>
+<span id="674">674</span>
+<span id="675">675</span>
+<span id="676">676</span>
+<span id="677">677</span>
+<span id="678">678</span>
+<span id="679">679</span>
+<span id="680">680</span>
+<span id="681">681</span>
+<span id="682">682</span>
+<span id="683">683</span>
+<span id="684">684</span>
+<span id="685">685</span>
+<span id="686">686</span>
+<span id="687">687</span>
+<span id="688">688</span>
+<span id="689">689</span>
+<span id="690">690</span>
+<span id="691">691</span>
+<span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::back::write::{
+    <a class="self" href="../lib.rs.html#50">self</a>, <a href="write.rs.html#250-254">save_temp_bitcode</a>, <a href="write.rs.html#124-126">to_llvm_opt_settings</a>, <a href="write.rs.html#1075-1081">with_llvm_pmb</a>, <a href="write.rs.html#268">DiagnosticHandlers</a>,
+};
+<span class="kw">use </span><span class="kw">crate</span>::llvm::{<a class="self" href="../lib.rs.html#71">self</a>, <a href="../llvm/mod.rs.html#266">build_string</a>, <a href="../llvm/ffi.rs.html#23">False</a>, <a href="../llvm/ffi.rs.html#22">True</a>};
+<span class="kw">use crate</span>::{<a href="../lib.rs.html#75">llvm_util</a>, <a href="../lib.rs.html#83">LlvmCodegenBackend</a>, <a href="../lib.rs.html#384">ModuleLlvm</a>};
+<span class="kw">use </span><a href="https://docs.rs/object/0.29.0/object/read/archive/struct.ArchiveFile.html">object::read::archive::ArchiveFile</a>;
+<span class="kw">use </span>rustc_codegen_ssa::back::lto::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/enum.LtoModuleCodegen.html">LtoModuleCodegen</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/enum.SerializedModule.html">SerializedModule</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/struct.ThinModule.html">ThinModule</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/struct.ThinShared.html">ThinShared</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/symbol_export/index.html">rustc_codegen_ssa::back::symbol_export</a>;
+<span class="kw">use </span>rustc_codegen_ssa::back::write::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/write/struct.CodegenContext.html">CodegenContext</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/write/enum.FatLTOInput.html">FatLTOInput</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/write/struct.TargetMachineFactoryConfig.html">TargetMachineFactoryConfig</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/index.html">rustc_codegen_ssa::traits</a>::<span class="kw-2">*</span>;
+<span class="kw">use </span>rustc_codegen_ssa::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/fn.looks_like_rust_object_file.html">looks_like_rust_object_file</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/struct.ModuleCodegen.html">ModuleCodegen</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/enum.ModuleKind.html">ModuleKind</a>};
+<span class="kw">use </span>rustc_data_structures::fx::FxHashMap;
+<span class="kw">use </span><a href="../../../rustc_data_structures/memmap/struct.Mmap.html">rustc_data_structures::memmap::Mmap</a>;
+<span class="kw">use </span>rustc_errors::{FatalError, <a href="../../../rustc_errors/struct.Handler.html">Handler</a>};
+<span class="kw">use </span><a href="../../../rustc_span/def_id/constant.LOCAL_CRATE.html">rustc_hir::def_id::LOCAL_CRATE</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">rustc_middle::bug</a>;
+<span class="kw">use </span><a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">rustc_middle::dep_graph::WorkProduct</a>;
+<span class="kw">use </span>rustc_middle::middle::exported_symbols::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/exported_symbols/struct.SymbolExportInfo.html">SymbolExportInfo</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/exported_symbols/enum.SymbolExportLevel.html">SymbolExportLevel</a>};
+<span class="kw">use </span><a href="../../../rustc_session/cgu_reuse_tracker/enum.CguReuse.html">rustc_session::cgu_reuse_tracker::CguReuse</a>;
+<span class="kw">use </span>rustc_session::config::{<a class="self" href="../../../rustc_session/config/index.html">self</a>, <a href="../../../rustc_session/config/enum.CrateType.html">CrateType</a>, <a href="../../../rustc_session/config/enum.Lto.html">Lto</a>};
+
+<span class="kw">use </span>std::ffi::{<a href="https://doc.rust-lang.org/nightly/core/ffi/c_str/struct.CStr.html">CStr</a>, <a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/fs/struct.File.html">std::fs::File</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/index.html">std::io</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/iter/index.html">std::iter</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/path/struct.Path.html">std::path::Path</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ptr/index.html">std::ptr</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/slice/index.html">std::slice</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">std::sync::Arc</a>;
+
+<span class="doccomment">/// We keep track of the computed LTO cache keys from the previous
+/// session to determine which CGUs we can reuse.
+</span><span class="kw">pub const </span>THIN_LTO_KEYS_INCR_COMP_FILE_NAME: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> = <span class="string">&quot;thin-lto-past-keys.bin&quot;</span>;
+
+<span class="kw">pub fn </span>crate_type_allows_lto(crate_type: <a href="../../../rustc_session/config/enum.CrateType.html">CrateType</a>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+    <span class="kw">match </span><a href="#35">crate_type</a> {
+        CrateType::Executable | CrateType::Staticlib | CrateType::Cdylib =&gt; <span class="bool-val">true</span>,
+        CrateType::Dylib | CrateType::Rlib | CrateType::ProcMacro =&gt; <span class="bool-val">false</span>,
+    }
+}
+
+<span class="kw">fn </span>prepare_lto(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    diag_handler: <span class="kw-2">&amp;</span><a href="../../../rustc_errors/struct.Handler.html">Handler</a>,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(Vec&lt;<a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>&gt;, Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>)&gt;), <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>export_threshold = <span class="kw">match </span><a href="#43">cgcx</a>.lto {
+        <span class="comment">// We&#39;re just doing LTO for our one crate
+        </span>Lto::ThinLocal =&gt; SymbolExportLevel::Rust,
+
+        <span class="comment">// We&#39;re doing LTO for the entire crate graph
+        </span>Lto::Fat | Lto::Thin =&gt; symbol_export::crates_export_threshold(<span class="kw-2">&amp;</span><a href="#43">cgcx</a>.crate_types),
+
+        Lto::No =&gt; <a class="macro" href="https://doc.rust-lang.org/nightly/std/macro.panic.html">panic!</a>(<span class="string">&quot;didn&#39;t request LTO but we&#39;re doing LTO&quot;</span>),
+    };
+
+    <span class="kw">let </span>symbol_filter = <span class="kw-2">&amp;</span>|<span class="kw-2">&amp;</span>(<span class="kw-2">ref </span>name, info): <span class="kw-2">&amp;</span>(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/middle/exported_symbols/struct.SymbolExportInfo.html">SymbolExportInfo</a>)| {
+        <span class="kw">if </span>info.level.is_below_threshold(export_threshold) || info.used {
+            <span class="prelude-val">Some</span>(CString::new(<a href="#56">name</a>.as_str()).unwrap())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    };
+    <span class="kw">let </span>exported_symbols = <a href="#43">cgcx</a>.exported_symbols.as_ref().expect(<span class="string">&quot;needs exported symbols for LTO&quot;</span>);
+    <span class="kw">let </span><span class="kw-2">mut </span>symbols_below_threshold = {
+        <span class="kw">let </span>_timer = <a href="#43">cgcx</a>.prof.generic_activity(<span class="string">&quot;LLVM_lto_generate_symbols_below_threshold&quot;</span>);
+        <a href="#63">exported_symbols</a>[<span class="kw-2">&amp;</span><a href="../../../rustc_span/def_id/constant.LOCAL_CRATE.html">LOCAL_CRATE</a>].iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(<a href="#56">symbol_filter</a>).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>&gt;&gt;()
+    };
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;{} symbols to preserve in this crate&quot;</span>, symbols_below_threshold.len());
+
+    <span class="comment">// If we&#39;re performing LTO for the entire crate graph, then for each of our
+    // upstream dependencies, find the corresponding rlib and load the bitcode
+    // from the archive.
+    //
+    // We save off all the bytecode and LLVM module ids for later processing
+    // with either fat or thin LTO
+    </span><span class="kw">let </span><span class="kw-2">mut </span>upstream_modules = Vec::new();
+    <span class="kw">if </span>cgcx.lto != Lto::ThinLocal {
+        <span class="kw">if </span>cgcx.opts.cg.prefer_dynamic {
+            <a href="#44">diag_handler</a>
+                .struct_err(<span class="string">&quot;cannot prefer dynamic linking when performing LTO&quot;</span>)
+                .note(
+                    <span class="string">&quot;only &#39;staticlib&#39;, &#39;bin&#39;, and &#39;cdylib&#39; outputs are \
+                               supported with LTO&quot;</span>,
+                )
+                .emit();
+            <span class="kw">return </span><span class="prelude-val">Err</span>(FatalError);
+        }
+
+        <span class="comment">// Make sure we actually can run LTO
+        </span><span class="kw">for </span>crate_type <span class="kw">in </span>cgcx.crate_types.iter() {
+            <span class="kw">if </span>!crate_type_allows_lto(<span class="kw-2">*</span>crate_type) {
+                <span class="kw">let </span>e = diag_handler.fatal(
+                    <span class="string">&quot;lto can only be run for executables, cdylibs and \
+                                            static library outputs&quot;</span>,
+                );
+                <span class="kw">return </span><span class="prelude-val">Err</span>(e);
+            }
+        }
+
+        <span class="kw">for </span><span class="kw-2">&amp;</span>(cnum, <span class="kw-2">ref </span>path) <span class="kw">in </span>cgcx.each_linked_rlib_for_lto.iter() {
+            <span class="kw">let </span>exported_symbols =
+                cgcx.exported_symbols.as_ref().expect(<span class="string">&quot;needs exported symbols for LTO&quot;</span>);
+            {
+                <span class="kw">let </span>_timer =
+                    cgcx.prof.generic_activity(<span class="string">&quot;LLVM_lto_generate_symbols_below_threshold&quot;</span>);
+                symbols_below_threshold
+                    .extend(exported_symbols[<span class="kw-2">&amp;</span>cnum].iter().filter_map(symbol_filter));
+            }
+
+            <span class="kw">let </span>archive_data = <span class="kw">unsafe </span>{
+                Mmap::map(std::fs::File::open(<span class="kw-2">&amp;</span>path).expect(<span class="string">&quot;couldn&#39;t open rlib&quot;</span>))
+                    .expect(<span class="string">&quot;couldn&#39;t map rlib&quot;</span>)
+            };
+            <span class="kw">let </span>archive = ArchiveFile::parse(<span class="kw-2">&amp;*</span>archive_data).expect(<span class="string">&quot;wanted an rlib&quot;</span>);
+            <span class="kw">let </span>obj_files = archive
+                .members()
+                .filter_map(|child| {
+                    child.ok().and_then(|c| {
+                        std::str::from_utf8(c.name()).ok().map(|name| (name.trim(), c))
+                    })
+                })
+                .filter(|<span class="kw-2">&amp;</span>(name, <span class="kw">_</span>)| looks_like_rust_object_file(name));
+            <span class="kw">for </span>(name, child) <span class="kw">in </span>obj_files {
+                <span class="macro">info!</span>(<span class="string">&quot;adding bitcode from {}&quot;</span>, name);
+                <span class="kw">match </span>get_bitcode_slice_from_object_data(
+                    child.data(<span class="kw-2">&amp;*</span>archive_data).expect(<span class="string">&quot;corrupt rlib&quot;</span>),
+                ) {
+                    <span class="prelude-val">Ok</span>(data) =&gt; {
+                        <span class="kw">let </span>module = SerializedModule::FromRlib(data.to_vec());
+                        upstream_modules.push((module, CString::new(name).unwrap()));
+                    }
+                    <span class="prelude-val">Err</span>(msg) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(diag_handler.fatal(<span class="kw-2">&amp;</span>msg)),
+                }
+            }
+        }
+    }
+
+    <span class="prelude-val">Ok</span>((<a href="#64">symbols_below_threshold</a>, <a href="#76">upstream_modules</a>))
+}
+
+<span class="kw">fn </span>get_bitcode_slice_from_object_data(obj: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>], <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>len = <span class="number">0</span>;
+    <span class="kw">let </span>data =
+        <span class="kw">unsafe </span>{ <a href="../llvm/ffi.rs.html#2510-2514">llvm::LLVMRustGetBitcodeSliceFromObjectData</a>(<a href="#141">obj</a>.as_ptr(), <a href="#141">obj</a>.len(), <span class="kw-2">&amp;mut </span><a href="#142">len</a>) };
+    <span class="kw">if </span>!data.is_null() {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(len != <span class="number">0</span>);
+        <span class="kw">let </span>bc = <span class="kw">unsafe </span>{ slice::from_raw_parts(<a href="#143">data</a>, <a href="#142">len</a>) };
+
+        <span class="comment">// `bc` must be a sub-slice of `obj`.
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(obj.as_ptr() &lt;= bc.as_ptr());
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(bc[bc.len()..bc.len()].as_ptr() &lt;= obj[obj.len()..obj.len()].as_ptr());
+
+        <span class="prelude-val">Ok</span>(<a href="#147">bc</a>)
+    } <span class="kw">else </span>{
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(len == <span class="number">0</span>);
+        <span class="kw">let </span>msg = <a href="../llvm/mod.rs.html#284">llvm::last_error</a>().unwrap_or_else(|| <span class="string">&quot;unknown LLVM error&quot;</span>.<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>());
+        <span class="prelude-val">Err</span>(<a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;failed to get bitcode from object file for LTO ({})&quot;</span>, msg))
+    }
+}
+
+<span class="doccomment">/// Performs fat LTO by merging all modules into a single one and returning it
+/// for further optimization.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>run_fat(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    modules: Vec&lt;FatLTOInput&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;&gt;,
+    cached_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>)&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;LtoModuleCodegen&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;, <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>diag_handler = <a href="#164">cgcx</a>.create_diag_handler();
+    <span class="kw">let </span>(symbols_below_threshold, upstream_modules) = prepare_lto(cgcx, <span class="kw-2">&amp;</span>diag_handler)<span class="question-mark">?</span>;
+    <span class="kw">let </span>symbols_below_threshold =
+        <a href="#169">symbols_below_threshold</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|c| <a href="#171">c</a>.as_ptr()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+    <a href="#216-223">fat_lto</a>(
+        <a href="#164">cgcx</a>,
+        <span class="kw-2">&amp;</span><a href="#168">diag_handler</a>,
+        <a href="#165">modules</a>,
+        <a href="#166">cached_modules</a>,
+        <a href="#169">upstream_modules</a>,
+        <span class="kw-2">&amp;</span><a href="#170">symbols_below_threshold</a>,
+    )
+}
+
+<span class="doccomment">/// Performs thin LTO by performing necessary global analysis and returning two
+/// lists, one of the modules that need optimization and another for modules that
+/// can simply be copied over from the incr. comp. cache.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>run_thin(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    modules: Vec&lt;(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="#702">ThinBuffer</a>)&gt;,
+    cached_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>)&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(Vec&lt;LtoModuleCodegen&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;&gt;, Vec&lt;<a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>&gt;), <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>diag_handler = <a href="#186">cgcx</a>.create_diag_handler();
+    <span class="kw">let </span>(symbols_below_threshold, upstream_modules) = prepare_lto(cgcx, <span class="kw-2">&amp;</span>diag_handler)<span class="question-mark">?</span>;
+    <span class="kw">let </span>symbols_below_threshold =
+        <a href="#191">symbols_below_threshold</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|c| <a href="#193">c</a>.as_ptr()).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+    <span class="kw">if </span>cgcx.opts.cg.linker_plugin_lto.enabled() {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>(
+            <span class="string">&quot;We should never reach this case if the LTO step \
+                      is deferred to the linker&quot;
+        </span>);
+    }
+    <a href="#413-420">thin_lto</a>(
+        <a href="#186">cgcx</a>,
+        <span class="kw-2">&amp;</span><a href="#190">diag_handler</a>,
+        <a href="#187">modules</a>,
+        <a href="#191">upstream_modules</a>,
+        <a href="#188">cached_modules</a>,
+        <span class="kw-2">&amp;</span><a href="#192">symbols_below_threshold</a>,
+    )
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>prepare_thin(module: ModuleCodegen&lt;<a href="../lib.rs.html#384">ModuleLlvm</a>&gt;) -&gt; (<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="#702">ThinBuffer</a>) {
+    <span class="kw">let </span>name = <a href="#210">module</a>.name.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>();
+    <span class="kw">let </span>buffer = ThinBuffer::new(<a href="#210">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>(), <span class="bool-val">true</span>);
+    (<a href="#211">name</a>, <a href="#212">buffer</a>)
+}
+
+<span class="kw">fn </span>fat_lto(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    diag_handler: <span class="kw-2">&amp;</span><a href="../../../rustc_errors/struct.Handler.html">Handler</a>,
+    modules: Vec&lt;FatLTOInput&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;&gt;,
+    cached_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>)&gt;,
+    <span class="kw-2">mut </span>serialized_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>)&gt;,
+    symbols_below_threshold: <span class="kw-2">&amp;</span>[<span class="kw-2">*const </span><a href="https://docs.rs/libc/0.2.131/libc/unix/linux_like/linux/gnu/b64/x86_64/type.c_char.html">libc::c_char</a>],
+) -&gt; <span class="prelude-ty">Result</span>&lt;LtoModuleCodegen&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;, <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>_timer = <a href="#217">cgcx</a>.prof.generic_activity(<span class="string">&quot;LLVM_fat_lto_build_monolithic_module&quot;</span>);
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;going for a fat lto&quot;</span>);
+
+    <span class="comment">// Sort out all our lists of incoming modules into two lists.
+    //
+    // * `serialized_modules` (also and argument to this function) contains all
+    //   modules that are serialized in-memory.
+    // * `in_memory` contains modules which are already parsed and in-memory,
+    //   such as from multi-CGU builds.
+    //
+    // All of `cached_modules` (cached from previous incremental builds) can
+    // immediately go onto the `serialized_modules` modules list and then we can
+    // split the `modules` array into these two lists.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>in_memory = Vec::new();
+    <a href="#221">serialized_modules</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html">extend</a>(<a href="#220">cached_modules</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(buffer, wp)| {
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;pushing cached module {:?}&quot;</span>, wp.cgu_name);
+        (<a href="#238">buffer</a>, CString::new(<a href="#238">wp</a>.cgu_name).unwrap())
+    }));
+    <span class="kw">for </span>module <span class="kw">in </span>modules {
+        <span class="kw">match </span>module {
+            FatLTOInput::InMemory(m) =&gt; in_memory.push(m),
+            FatLTOInput::Serialized { name, buffer } =&gt; {
+                <span class="macro">info!</span>(<span class="string">&quot;pushing serialized module {:?}&quot;</span>, name);
+                <span class="kw">let </span>buffer = SerializedModule::Local(buffer);
+                serialized_modules.push((buffer, CString::new(name).unwrap()));
+            }
+        }
+    }
+
+    <span class="comment">// Find the &quot;costliest&quot; module and merge everything into that codegen unit.
+    // All the other modules will be serialized and reparsed into the new
+    // context, so this hopefully avoids serializing and parsing the largest
+    // codegen unit.
+    //
+    // Additionally use a regular module as the base here to ensure that various
+    // file copy operations in the backend work correctly. The only other kind
+    // of module here should be an allocator one, and if your crate is smaller
+    // than the allocator module then the size doesn&#39;t really matter anyway.
+    </span><span class="kw">let </span>costliest_module = <a href="#237">in_memory</a>
+        .iter()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">enumerate</a>()
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter</a>(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, module)| <a href="#265">module</a>.kind == ModuleKind::Regular)
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(i, module)| {
+            <span class="kw">let </span>cost = <span class="kw">unsafe </span>{ <a href="../llvm/ffi.rs.html#2479">llvm::LLVMRustModuleCost</a>(<a href="#266">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>()) };
+            (<a href="#267">cost</a>, <a href="#266">i</a>)
+        })
+        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">max</a>();
+
+    <span class="comment">// If we found a costliest module, we&#39;re good to go. Otherwise all our
+    // inputs were serialized which could happen in the case, for example, that
+    // all our inputs were incrementally reread from the cache and we&#39;re just
+    // re-executing the LTO passes. If that&#39;s the case deserialize the first
+    // module and create a linker with it.
+    </span><span class="kw">let </span>module: ModuleCodegen&lt;<a href="../lib.rs.html#384">ModuleLlvm</a>&gt; = <span class="kw">match </span><a href="#262">costliest_module</a> {
+        <span class="prelude-val">Some</span>((_cost, i)) =&gt; <a href="#237">in_memory</a>.remove(<a href="#278">i</a>),
+        <span class="prelude-val">None </span>=&gt; {
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(!serialized_modules.is_empty(), <span class="string">&quot;must have at least one serialized module&quot;</span>);
+            <span class="kw">let </span>(buffer, name) = <a href="#221">serialized_modules</a>.remove(<span class="number">0</span>);
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;no in-memory regular modules to choose from, parsing {:?}&quot;</span>, name);
+            <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/struct.ModuleCodegen.html">ModuleCodegen</a> {
+                module_llvm: ModuleLlvm::parse(cgcx, <span class="kw-2">&amp;</span>name, buffer.data(), diag_handler)<span class="question-mark">?</span>,
+                name: <a href="#281">name</a>.into_string().unwrap(),
+                kind: ModuleKind::Regular,
+            }
+        }
+    };
+    <span class="kw">let </span><span class="kw-2">mut </span>serialized_bitcode = Vec::new();
+    {
+        <span class="kw">let </span>(llcx, llmod) = {
+            <span class="kw">let </span>llvm = <span class="kw-2">&amp;</span><a href="#277">module</a>.module_llvm;
+            (<span class="kw-2">&amp;</span><a href="#293">llvm</a>.llcx, <a href="#293">llvm</a>.<a href="../lib.rs.html#432">llmod</a>())
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;using {:?} as a base module&quot;</span>, module.name);
+
+        <span class="comment">// The linking steps below may produce errors and diagnostics within LLVM
+        // which we&#39;d like to handle and print, so set up our diagnostic handlers
+        // (which get unregistered when they go out of scope below).
+        </span><span class="kw">let </span>_handler = DiagnosticHandlers::new(<a href="#217">cgcx</a>, <a href="#218">diag_handler</a>, <a href="#292">llcx</a>);
+
+        <span class="comment">// For all other modules we codegened we&#39;ll need to link them into our own
+        // bitcode. All modules were codegened in their own LLVM context, however,
+        // and we want to move everything to the same LLVM context. Currently the
+        // way we know of to do that is to serialize them to a string and them parse
+        // them later. Not great but hey, that&#39;s why it&#39;s &quot;fat&quot; LTO, right?
+        </span><span class="kw">for </span>module <span class="kw">in </span>in_memory {
+            <span class="kw">let </span>buffer = ModuleBuffer::new(module.module_llvm.llmod());
+            <span class="kw">let </span>llmod_id = CString::new(<span class="kw-2">&amp;</span>module.name[..]).unwrap();
+            serialized_modules.push((SerializedModule::Local(buffer), llmod_id));
+        }
+        <span class="comment">// Sort the modules to ensure we produce deterministic results.
+        </span><a href="#221">serialized_modules</a>.sort_by(|module1, module2| <a href="#314">module1</a>.<span class="number">1</span>.<a href="https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html">cmp</a>(<span class="kw-2">&amp;</span><a href="#314">module2</a>.<span class="number">1</span>));
+
+        <span class="comment">// For all serialized bitcode files we parse them and link them in as we did
+        // above, this is all mostly handled in C++. Like above, though, we don&#39;t
+        // know much about the memory management here so we err on the side of being
+        // save and persist everything with the original module.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>linker = Linker::new(<a href="#292">llmod</a>);
+        <span class="kw">for </span>(bc_decoded, name) <span class="kw">in </span>serialized_modules {
+            <span class="kw">let </span>_timer = cgcx
+                .prof
+                .generic_activity_with_arg_recorder(<span class="string">&quot;LLVM_fat_lto_link_module&quot;</span>, |recorder| {
+                    recorder.record_arg(<span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, name))
+                });
+            <span class="macro">info!</span>(<span class="string">&quot;linking {:?}&quot;</span>, name);
+            <span class="kw">let </span>data = bc_decoded.data();
+            linker.add(data).map_err(|()| {
+                <span class="kw">let </span>msg = <span class="macro">format!</span>(<span class="string">&quot;failed to load bitcode of module {:?}&quot;</span>, name);
+                write::llvm_err(diag_handler, <span class="kw-2">&amp;</span>msg)
+            })<span class="question-mark">?</span>;
+            serialized_bitcode.push(bc_decoded);
+        }
+        <a href="https://doc.rust-lang.org/nightly/core/mem/fn.drop.html">drop</a>(<a href="#320">linker</a>);
+        <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#217">cgcx</a>, <span class="kw-2">&amp;</span><a href="#277">module</a>, <span class="string">&quot;lto.input&quot;</span>);
+
+        <span class="comment">// Internalize everything below threshold to help strip out more modules and such.
+        </span><span class="kw">unsafe </span>{
+            <span class="kw">let </span>ptr = <a href="#222">symbols_below_threshold</a>.as_ptr();
+            <a href="../llvm/ffi.rs.html#2384">llvm::LLVMRustRunRestrictionPass</a>(
+                <a href="#292">llmod</a>,
+                <a href="#340">ptr</a> <span class="kw">as </span><span class="kw-2">*const *const </span><a href="https://docs.rs/libc/0.2.131/libc/unix/linux_like/linux/gnu/b64/x86_64/type.c_char.html">libc::c_char</a>,
+                <a href="#222">symbols_below_threshold</a>.len() <span class="kw">as </span><a href="https://docs.rs/libc/0.2.131/libc/unix/type.size_t.html">libc::size_t</a>,
+            );
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#217">cgcx</a>, <span class="kw-2">&amp;</span><a href="#277">module</a>, <span class="string">&quot;lto.after-restriction&quot;</span>);
+        }
+    }
+
+    <span class="prelude-val">Ok</span>(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/enum.LtoModuleCodegen.html">LtoModuleCodegen::Fat</a> { <a href="#277">module</a>, _serialized_bitcode: <a href="#290">serialized_bitcode</a> })
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Linker&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>llvm::Linker&lt;<span class="lifetime">&#39;a</span>&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Linker&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(llmod: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../llvm/ffi.rs.html#625">llvm::Module</a>) -&gt; <span class="self">Self </span>{
+        <span class="kw">unsafe </span>{ <a href="#353">Linker</a>(<a href="../llvm/ffi.rs.html#2522">llvm::LLVMRustLinkerNew</a>(<a href="#356">llmod</a>)) }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bytecode: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>]) -&gt; <span class="prelude-ty">Result</span>&lt;(), ()&gt; {
+        <span class="kw">unsafe </span>{
+            <span class="kw">if </span>llvm::LLVMRustLinkerAdd(
+                <span class="self">self</span>.<span class="number">0</span>,
+                bytecode.as_ptr() <span class="kw">as </span><span class="kw-2">*const </span>libc::c_char,
+                bytecode.len(),
+            ) {
+                <span class="prelude-val">Ok</span>(())
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Err</span>(())
+            }
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html">Drop</a> <span class="kw">for </span>Linker&lt;<span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">unsafe </span>{
+            <a href="../llvm/ffi.rs.html#2528">llvm::LLVMRustLinkerFree</a>(<span class="kw-2">&amp;mut *</span>(<a class="self" href="#376">self</a>.<span class="number">0 </span><span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>));
+        }
+    }
+}
+
+<span class="doccomment">/// Prepare &quot;thin&quot; LTO to get run on these modules.
+///
+/// The general structure of ThinLTO is quite different from the structure of
+/// &quot;fat&quot; LTO above. With &quot;fat&quot; LTO all LLVM modules in question are merged into
+/// one giant LLVM module, and then we run more optimization passes over this
+/// big module after internalizing most symbols. Thin LTO, on the other hand,
+/// avoid this large bottleneck through more targeted optimization.
+///
+/// At a high level Thin LTO looks like:
+///
+///    1. Prepare a &quot;summary&quot; of each LLVM module in question which describes
+///       the values inside, cost of the values, etc.
+///    2. Merge the summaries of all modules in question into one &quot;index&quot;
+///    3. Perform some global analysis on this index
+///    4. For each module, use the index and analysis calculated previously to
+///       perform local transformations on the module, for example inlining
+///       small functions from other modules.
+///    5. Run thin-specific optimization passes over each module, and then code
+///       generate everything at the end.
+///
+/// The summary for each module is intended to be quite cheap, and the global
+/// index is relatively quite cheap to create as well. As a result, the goal of
+/// ThinLTO is to reduce the bottleneck on LTO and enable LTO to be used in more
+/// situations. For example one cheap optimization is that we can parallelize
+/// all codegen modules, easily making use of all the cores on a machine.
+///
+/// With all that in mind, the function here is designed at specifically just
+/// calculating the *index* for ThinLTO. This index will then be shared amongst
+/// all of the `LtoModuleCodegen` units returned below and destroyed once
+/// they all go out of scope.
+</span><span class="kw">fn </span>thin_lto(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    diag_handler: <span class="kw-2">&amp;</span><a href="../../../rustc_errors/struct.Handler.html">Handler</a>,
+    modules: Vec&lt;(<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="#702">ThinBuffer</a>)&gt;,
+    serialized_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>)&gt;,
+    cached_modules: Vec&lt;(SerializedModule&lt;<a href="#660">ModuleBuffer</a>&gt;, <a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>)&gt;,
+    symbols_below_threshold: <span class="kw-2">&amp;</span>[<span class="kw-2">*const </span><a href="https://docs.rs/libc/0.2.131/libc/unix/linux_like/linux/gnu/b64/x86_64/type.c_char.html">libc::c_char</a>],
+) -&gt; <span class="prelude-ty">Result</span>&lt;(Vec&lt;LtoModuleCodegen&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;&gt;, Vec&lt;<a href="../../../rustc_query_system/dep_graph/graph/struct.WorkProduct.html">WorkProduct</a>&gt;), <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>_timer = <a href="#414">cgcx</a>.prof.generic_activity(<span class="string">&quot;LLVM_thin_lto_global_analysis&quot;</span>);
+    <span class="kw">unsafe </span>{
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;going for that thin, thin LTO&quot;</span>);
+
+        <span class="kw">let </span>green_modules: FxHashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; =
+            <a href="#418">cached_modules</a>.iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, <span class="kw-2">ref </span>wp)| (<a href="#426">wp</a>.cgu_name.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>(), <a href="#426">wp</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>())).<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+
+        <span class="kw">let </span>full_scope_len = <a href="#416">modules</a>.len() + <a href="#417">serialized_modules</a>.len() + <a href="#418">cached_modules</a>.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>thin_buffers = Vec::with_capacity(<a href="#416">modules</a>.len());
+        <span class="kw">let </span><span class="kw-2">mut </span>module_names = Vec::with_capacity(<a href="#428">full_scope_len</a>);
+        <span class="kw">let </span><span class="kw-2">mut </span>thin_modules = Vec::with_capacity(<a href="#428">full_scope_len</a>);
+
+        <span class="kw">for </span>(i, (name, buffer)) <span class="kw">in </span>modules.into_iter().enumerate() {
+            <span class="macro">info!</span>(<span class="string">&quot;local module: {} - {}&quot;</span>, i, name);
+            <span class="kw">let </span>cname = CString::new(name.clone()).unwrap();
+            thin_modules.push(llvm::ThinLTOModule {
+                identifier: cname.as_ptr(),
+                data: buffer.data().as_ptr(),
+                len: buffer.data().len(),
+            });
+            thin_buffers.push(buffer);
+            module_names.push(cname);
+        }
+
+        <span class="comment">// FIXME: All upstream crates are deserialized internally in the
+        //        function below to extract their summary and modules. Note that
+        //        unlike the loop above we *must* decode and/or read something
+        //        here as these are all just serialized files on disk. An
+        //        improvement, however, to make here would be to store the
+        //        module summary separately from the actual module itself. Right
+        //        now this is store in one large bitcode file, and the entire
+        //        file is deflate-compressed. We could try to bypass some of the
+        //        decompression by storing the index uncompressed and only
+        //        lazily decompressing the bytecode if necessary.
+        //
+        //        Note that truly taking advantage of this optimization will
+        //        likely be further down the road. We&#39;d have to implement
+        //        incremental ThinLTO first where we could actually avoid
+        //        looking at upstream modules entirely sometimes (the contents,
+        //        we must always unconditionally look at the index).
+        </span><span class="kw">let </span><span class="kw-2">mut </span>serialized = Vec::with_capacity(<a href="#417">serialized_modules</a>.len() + <a href="#418">cached_modules</a>.len());
+
+        <span class="kw">let </span>cached_modules =
+            <a href="#418">cached_modules</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html">into_iter</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(sm, wp)| (<a href="#464">sm</a>, CString::new(<a href="#464">wp</a>.cgu_name).unwrap()));
+
+        <span class="kw">for </span>(module, name) <span class="kw">in </span>serialized_modules.into_iter().chain(cached_modules) {
+            <span class="macro">info!</span>(<span class="string">&quot;upstream or cached module {:?}&quot;</span>, name);
+            thin_modules.push(llvm::ThinLTOModule {
+                identifier: name.as_ptr(),
+                data: module.data().as_ptr(),
+                len: module.data().len(),
+            });
+            serialized.push(module);
+            module_names.push(name);
+        }
+
+        <span class="comment">// Sanity check
+        </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert_eq.html">assert_eq!</a>(thin_modules.len(), module_names.len());
+
+        <span class="comment">// Delegate to the C++ bindings to create some data here. Once this is a
+        // tried-and-true interface we may wish to try to upstream some of this
+        // to LLVM itself, right now we reimplement a lot of what they do
+        // upstream...
+        </span><span class="kw">let </span>data = llvm::LLVMRustCreateThinLTOData(
+            thin_modules.as_ptr(),
+            thin_modules.len() <span class="kw">as </span>u32,
+            symbols_below_threshold.as_ptr(),
+            symbols_below_threshold.len() <span class="kw">as </span>u32,
+        )
+        .ok_or_else(|| write::llvm_err(diag_handler, <span class="string">&quot;failed to prepare thin LTO context&quot;</span>))<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>data = <a href="#689">ThinData</a>(<a href="#484">data</a>);
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;thin LTO data created&quot;</span>);
+
+        <span class="kw">let </span>(key_map_path, prev_key_map, curr_key_map) = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>incr_comp_session_dir) =
+            <a href="#414">cgcx</a>.incr_comp_session_dir
+        {
+            <span class="kw">let </span>path = <a href="#496">incr_comp_session_dir</a>.join(<a href="#33">THIN_LTO_KEYS_INCR_COMP_FILE_NAME</a>);
+            <span class="comment">// If the previous file was deleted, or we get an IO error
+            // reading the file, then we&#39;ll just use `None` as the
+            // prev_key_map, which will force the code to be recompiled.
+            </span><span class="kw">let </span>prev =
+                <span class="kw">if </span>path.exists() { ThinLTOKeysMap::load_from_file(<span class="kw-2">&amp;</span><a href="#499">path</a>).ok() } <span class="kw">else </span>{ <span class="prelude-val">None </span>};
+            <span class="kw">let </span>curr = ThinLTOKeysMap::from_thin_lto_modules(<span class="kw-2">&amp;</span><a href="#492">data</a>, <span class="kw-2">&amp;</span><a href="#431">thin_modules</a>, <span class="kw-2">&amp;</span><a href="#430">module_names</a>);
+            (<span class="prelude-val">Some</span>(<a href="#499">path</a>), <a href="#503">prev</a>, <a href="#505">curr</a>)
+        } <span class="kw">else </span>{
+            <span class="comment">// If we don&#39;t compile incrementally, we don&#39;t need to load the
+            // import data from LLVM.
+            </span><a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.assert.html">assert!</a>(green_modules.is_empty());
+            <span class="kw">let </span>curr = ThinLTOKeysMap::default();
+            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <a href="#511">curr</a>)
+        };
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;thin LTO cache key map loaded&quot;</span>);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;prev_key_map: {:#?}&quot;</span>, prev_key_map);
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;curr_key_map: {:#?}&quot;</span>, curr_key_map);
+
+        <span class="comment">// Throw our data in an `Arc` as we&#39;ll be sharing it across threads. We
+        // also put all memory referenced by the C++ data (buffers, ids, etc)
+        // into the arc as well. After this we&#39;ll create a thin module
+        // codegen per module in this data.
+        </span><span class="kw">let </span>shared = Arc::new(<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/back/lto/struct.ThinShared.html">ThinShared</a> {
+            <a href="#492">data</a>,
+            <a href="#429">thin_buffers</a>,
+            serialized_modules: <a href="#461">serialized</a>,
+            <a href="#430">module_names</a>,
+        });
+
+        <span class="kw">let </span><span class="kw-2">mut </span>copy_jobs = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+        <span class="kw">let </span><span class="kw-2">mut </span>opt_jobs = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.vec.html">vec!</a>[];
+
+        <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;checking which modules can be-reused and which have to be re-optimized.&quot;</span>);
+        <span class="kw">for </span>(module_index, module_name) <span class="kw">in </span>shared.module_names.iter().enumerate() {
+            <span class="kw">let </span>module_name = module_name_to_str(module_name);
+            <span class="kw">if let </span>(<span class="prelude-val">Some</span>(prev_key_map), <span class="bool-val">true</span>) =
+                (prev_key_map.as_ref(), green_modules.contains_key(module_name))
+            {
+                <span class="macro">assert!</span>(cgcx.incr_comp_session_dir.is_some());
+
+                <span class="comment">// If a module exists in both the current and the previous session,
+                // and has the same LTO cache key in both sessions, then we can re-use it
+                </span><span class="kw">if </span>prev_key_map.keys.get(module_name) == curr_key_map.keys.get(module_name) {
+                    <span class="kw">let </span>work_product = green_modules[module_name].clone();
+                    copy_jobs.push(work_product);
+                    <span class="macro">info!</span>(<span class="string">&quot; - {}: re-used&quot;</span>, module_name);
+                    <span class="macro">assert!</span>(cgcx.incr_comp_session_dir.is_some());
+                    cgcx.cgu_reuse_tracker.set_actual_reuse(module_name, CguReuse::PostLto);
+                    <span class="kw">continue</span>;
+                }
+            }
+
+            <span class="macro">info!</span>(<span class="string">&quot; - {}: re-compiled&quot;</span>, module_name);
+            opt_jobs.push(LtoModuleCodegen::Thin(ThinModule {
+                shared: shared.clone(),
+                idx: module_index,
+            }));
+        }
+
+        <span class="comment">// Save the current ThinLTO import information for the next compilation
+        // session, overwriting the previous serialized data (if any).
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(path) = <a href="#496">key_map_path</a> {
+            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = <a href="#496">curr_key_map</a>.<a href="#883">save_to_file</a>(<span class="kw-2">&amp;</span><a href="#561">path</a>) {
+                <span class="kw">let </span>msg = <a class="macro" href="https://doc.rust-lang.org/nightly/alloc/macro.format.html">format!</a>(<span class="string">&quot;Error while writing ThinLTO key data: {}&quot;</span>, err);
+                <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<a href="#415">diag_handler</a>, <span class="kw-2">&amp;</span><a href="#563">msg</a>));
+            }
+        }
+
+        <span class="prelude-val">Ok</span>((<a href="#530">opt_jobs</a>, <a href="#529">copy_jobs</a>))
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>run_pass_manager(
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    diag_handler: <span class="kw-2">&amp;</span><a href="../../../rustc_errors/struct.Handler.html">Handler</a>,
+    module: <span class="kw-2">&amp;mut </span>ModuleCodegen&lt;<a href="../lib.rs.html#384">ModuleLlvm</a>&gt;,
+    thin: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>_timer = <a href="#573">cgcx</a>.prof.extra_verbose_generic_activity(<span class="string">&quot;LLVM_lto_optimize&quot;</span>, <span class="kw-2">&amp;*</span><a href="#575">module</a>.name);
+    <span class="kw">let </span>config = <a href="#573">cgcx</a>.config(<a href="#575">module</a>.kind);
+
+    <span class="comment">// Now we have one massive module inside of llmod. Time to run the
+    // LTO-specific optimization passes that LLVM provides.
+    //
+    // This code is based off the code found in llvm&#39;s LTO code generator:
+    //      llvm/lib/LTO/LTOCodeGenerator.cpp
+    </span><a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;running the pass manager&quot;</span>);
+    <span class="kw">unsafe </span>{
+        <span class="kw">if </span>!llvm::LLVMRustHasModuleFlag(
+            module.module_llvm.llmod(),
+            <span class="string">&quot;LTOPostLink&quot;</span>.as_ptr().cast(),
+            <span class="number">11</span>,
+        ) {
+            <a href="../llvm/ffi.rs.html#1941-1946">llvm::LLVMRustAddModuleFlag</a>(
+                <a href="#575">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>(),
+                <a href="../llvm/ffi.rs.html#75">llvm::LLVMModFlagBehavior::Error</a>,
+                <span class="string">&quot;LTOPostLink\0&quot;</span>.as_ptr().cast(),
+                <span class="number">1</span>,
+            );
+        }
+        <span class="kw">if </span>llvm_util::should_use_new_llvm_pass_manager(
+            <span class="kw-2">&amp;</span>config.new_llvm_pass_manager,
+            <span class="kw-2">&amp;</span>cgcx.target_arch,
+        ) {
+            <span class="kw">let </span>opt_stage = <span class="kw">if </span>thin { <a href="../llvm/ffi.rs.html#490">llvm::OptStage::ThinLTO</a> } <span class="kw">else </span>{ <a href="../llvm/ffi.rs.html#491">llvm::OptStage::FatLTO</a> };
+            <span class="kw">let </span>opt_level = <a href="#579">config</a>.opt_level.unwrap_or(config::OptLevel::No);
+            write::optimize_with_new_llvm_pass_manager(
+                cgcx,
+                diag_handler,
+                module,
+                config,
+                opt_level,
+                opt_stage,
+            )<span class="question-mark">?</span>;
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;lto done&quot;</span>);
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="kw">let </span>pm = <a href="../llvm/ffi.rs.html#1814">llvm::LLVMCreatePassManager</a>();
+        <a href="../llvm/ffi.rs.html#1833">llvm::LLVMAddAnalysisPasses</a>(<a href="#575">module</a>.module_llvm.tm, <a href="#618">pm</a>);
+
+        <span class="kw">if </span>config.verify_llvm_ir {
+            <span class="kw">let </span>pass = <a href="../llvm/ffi.rs.html#2265">llvm::LLVMRustFindAndCreatePass</a>(<span class="string">&quot;verify\0&quot;</span>.as_ptr().cast());
+            <a href="../llvm/ffi.rs.html#2274">llvm::LLVMRustAddPass</a>(<a href="#618">pm</a>, <a href="#622">pass</a>.unwrap());
+        }
+
+        <span class="kw">let </span>opt_level = <a href="#579">config</a>
+            .opt_level
+            .map(|x| <a href="write.rs.html#124-126">to_llvm_opt_settings</a>(<a href="#628">x</a>).<span class="number">0</span>)
+            .unwrap_or(<a href="../llvm/ffi.rs.html#466">llvm::CodeGenOptLevel::None</a>);
+        <a href="write.rs.html#1075-1081">with_llvm_pmb</a>(<a href="#575">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>(), <a href="#579">config</a>, <a href="#626">opt_level</a>, <span class="bool-val">false</span>, <span class="kw-2">&amp;mut </span>|b| {
+            <span class="kw">if </span>thin {
+                <a href="../llvm/ffi.rs.html#1856-1859">llvm::LLVMRustPassManagerBuilderPopulateThinLTOPassManager</a>(<a href="#630">b</a>, <a href="#618">pm</a>);
+            } <span class="kw">else </span>{
+                <a href="../llvm/ffi.rs.html#1850-1855">llvm::LLVMRustPassManagerBuilderPopulateLTOPassManager</a>(
+                    <a href="#630">b</a>, <a href="#618">pm</a>, <span class="comment">/* Internalize = */ </span><a href="../llvm/ffi.rs.html#23">False</a>, <span class="comment">/* RunInliner = */ </span><a href="../llvm/ffi.rs.html#22">True</a>,
+                );
+            }
+        });
+
+        <span class="comment">// We always generate bitcode through ThinLTOBuffers,
+        // which do not support anonymous globals
+        </span><span class="kw">if </span>config.bitcode_needed() {
+            <span class="kw">let </span>pass = <a href="../llvm/ffi.rs.html#2265">llvm::LLVMRustFindAndCreatePass</a>(<span class="string">&quot;name-anon-globals\0&quot;</span>.as_ptr().cast());
+            <a href="../llvm/ffi.rs.html#2274">llvm::LLVMRustAddPass</a>(<a href="#618">pm</a>, <a href="#643">pass</a>.unwrap());
+        }
+
+        <span class="kw">if </span>config.verify_llvm_ir {
+            <span class="kw">let </span>pass = <a href="../llvm/ffi.rs.html#2265">llvm::LLVMRustFindAndCreatePass</a>(<span class="string">&quot;verify\0&quot;</span>.as_ptr().cast());
+            <a href="../llvm/ffi.rs.html#2274">llvm::LLVMRustAddPass</a>(<a href="#618">pm</a>, <a href="#648">pass</a>.unwrap());
+        }
+
+        <a href="../llvm/ffi.rs.html#1823">llvm::LLVMRunPassManager</a>(<a href="#618">pm</a>, <a href="#575">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>());
+
+        <a href="../llvm/ffi.rs.html#1820">llvm::LLVMDisposePassManager</a>(<a href="#618">pm</a>);
+    }
+    <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.debug.html">debug!</a>(<span class="string">&quot;lto done&quot;</span>);
+    <span class="prelude-val">Ok</span>(())
+}
+
+<span class="kw">pub struct </span>ModuleBuffer(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><span class="kw-2">mut </span><a href="../llvm/ffi.rs.html#992">llvm::ModuleBuffer</a>);
+
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html">Send</a> <span class="kw">for </span><a href="#660">ModuleBuffer</a> {}
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html">Sync</a> <span class="kw">for </span><a href="#660">ModuleBuffer</a> {}
+
+<span class="kw">impl </span><a href="#660">ModuleBuffer</a> {
+    <span class="kw">pub fn </span>new(m: <span class="kw-2">&amp;</span><a href="../llvm/ffi.rs.html#625">llvm::Module</a>) -&gt; <a href="#660">ModuleBuffer</a> {
+        <a href="#660">ModuleBuffer</a>(<span class="kw">unsafe </span>{ <a href="../llvm/ffi.rs.html#2475">llvm::LLVMRustModuleBufferCreate</a>(<a href="#666">m</a>) })
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/write/trait.ModuleBufferMethods.html">ModuleBufferMethods</a> <span class="kw">for </span><a href="#660">ModuleBuffer</a> {
+    <span class="kw">fn </span>data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>] {
+        <span class="kw">unsafe </span>{
+            <span class="kw">let </span>ptr = <a href="../llvm/ffi.rs.html#2476">llvm::LLVMRustModuleBufferPtr</a>(<a class="self" href="#672">self</a>.<span class="number">0</span>);
+            <span class="kw">let </span>len = <a href="../llvm/ffi.rs.html#2477">llvm::LLVMRustModuleBufferLen</a>(<a class="self" href="#672">self</a>.<span class="number">0</span>);
+            slice::from_raw_parts(<a href="#674">ptr</a>, <a href="#675">len</a>)
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html">Drop</a> <span class="kw">for </span><a href="#660">ModuleBuffer</a> {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">unsafe </span>{
+            <a href="../llvm/ffi.rs.html#2478">llvm::LLVMRustModuleBufferFree</a>(<span class="kw-2">&amp;mut *</span>(<a class="self" href="#682">self</a>.<span class="number">0 </span><span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>));
+        }
+    }
+}
+
+<span class="kw">pub struct </span>ThinData(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><span class="kw-2">mut </span><a href="../llvm/ffi.rs.html#577">llvm::ThinLTOData</a>);
+
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html">Send</a> <span class="kw">for </span><a href="#689">ThinData</a> {}
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html">Sync</a> <span class="kw">for </span><a href="#689">ThinData</a> {}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html">Drop</a> <span class="kw">for </span><a href="#689">ThinData</a> {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">unsafe </span>{
+            <a href="../llvm/ffi.rs.html#2503">llvm::LLVMRustFreeThinLTOData</a>(<span class="kw-2">&amp;mut *</span>(<a class="self" href="#695">self</a>.<span class="number">0 </span><span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>));
+        }
+    }
+}
+
+<span class="kw">pub struct </span>ThinBuffer(<span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span><span class="kw-2">mut </span><a href="../llvm/ffi.rs.html#582">llvm::ThinLTOBuffer</a>);
+
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html">Send</a> <span class="kw">for </span><a href="#702">ThinBuffer</a> {}
+<span class="kw">unsafe impl </span><a href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html">Sync</a> <span class="kw">for </span><a href="#702">ThinBuffer</a> {}
+
+<span class="kw">impl </span><a href="#702">ThinBuffer</a> {
+    <span class="kw">pub fn </span>new(m: <span class="kw-2">&amp;</span><a href="../llvm/ffi.rs.html#625">llvm::Module</a>, is_thin: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>) -&gt; <a href="#702">ThinBuffer</a> {
+        <span class="kw">unsafe </span>{
+            <span class="kw">let </span>buffer = <a href="../llvm/ffi.rs.html#2481">llvm::LLVMRustThinLTOBufferCreate</a>(<a href="#708">m</a>, <a href="#708">is_thin</a>);
+            <a href="#702">ThinBuffer</a>(<a href="#710">buffer</a>)
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/traits/write/trait.ThinBufferMethods.html">ThinBufferMethods</a> <span class="kw">for </span><a href="#702">ThinBuffer</a> {
+    <span class="kw">fn </span>data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>] {
+        <span class="kw">unsafe </span>{
+            <span class="kw">let </span>ptr = <a href="../llvm/ffi.rs.html#2483">llvm::LLVMRustThinLTOBufferPtr</a>(<a class="self" href="#717">self</a>.<span class="number">0</span>) <span class="kw">as </span><span class="kw-2">*const </span><span class="kw">_</span>;
+            <span class="kw">let </span>len = <a href="../llvm/ffi.rs.html#2484">llvm::LLVMRustThinLTOBufferLen</a>(<a class="self" href="#717">self</a>.<span class="number">0</span>);
+            slice::from_raw_parts(<a href="#719">ptr</a>, <a href="#720">len</a>)
+        }
+    }
+}
+
+<span class="kw">impl </span><a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html">Drop</a> <span class="kw">for </span><a href="#702">ThinBuffer</a> {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">unsafe </span>{
+            <a href="../llvm/ffi.rs.html#2482">llvm::LLVMRustThinLTOBufferFree</a>(<span class="kw-2">&amp;mut *</span>(<a class="self" href="#727">self</a>.<span class="number">0 </span><span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>));
+        }
+    }
+}
+
+<span class="kw">pub unsafe fn </span>optimize_thin_module(
+    thin_module: ThinModule&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+    cgcx: <span class="kw-2">&amp;</span>CodegenContext&lt;<a href="../lib.rs.html#83">LlvmCodegenBackend</a>&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;ModuleCodegen&lt;<a href="../lib.rs.html#384">ModuleLlvm</a>&gt;, <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">let </span>diag_handler = <a href="#736">cgcx</a>.create_diag_handler();
+
+    <span class="kw">let </span>module_name = <span class="kw-2">&amp;</span><a href="#735">thin_module</a>.shared.module_names[<a href="#735">thin_module</a>.idx];
+    <span class="kw">let </span>tm_factory_config = TargetMachineFactoryConfig::new(<a href="#736">cgcx</a>, <a href="#740">module_name</a>.to_str().unwrap());
+    <span class="kw">let </span>tm =
+        (cgcx.tm_factory)(tm_factory_config).map_err(|e| write::llvm_err(<span class="kw-2">&amp;</span>diag_handler, <span class="kw-2">&amp;</span>e))<span class="question-mark">?</span>;
+
+    <span class="comment">// Right now the implementation we&#39;ve got only works over serialized
+    // modules, so we create a fresh new LLVM context and parse the module
+    // into that context. One day, however, we may do this for upstream
+    // crates but for locally codegened modules we may be able to reuse
+    // that LLVM Context and Module.
+    </span><span class="kw">let </span>llcx = <a href="../llvm/ffi.rs.html#1004">llvm::LLVMRustContextCreate</a>(<a href="#736">cgcx</a>.fewer_names);
+    <span class="kw">let </span>llmod_raw = parse_module(llcx, module_name, thin_module.data(), <span class="kw-2">&amp;</span>diag_handler)<span class="question-mark">? </span><span class="kw">as </span><span class="kw-2">*const </span><span class="kw">_</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>module = <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_codegen_ssa/struct.ModuleCodegen.html">ModuleCodegen</a> {
+        module_llvm: <a href="../lib.rs.html#384">ModuleLlvm</a> { <a href="#751">llmod_raw</a>, <a href="#750">llcx</a>, <a href="#742">tm</a> },
+        name: <a href="#735">thin_module</a>.name().<a href="https://doc.rust-lang.org/nightly/alloc/string/trait.ToString.html">to_string</a>(),
+        kind: ModuleKind::Regular,
+    };
+    {
+        <span class="kw">let </span>target = <span class="kw-2">&amp;*</span><a href="#752">module</a>.module_llvm.tm;
+        <span class="kw">let </span>llmod = <a href="#752">module</a>.module_llvm.<a href="../lib.rs.html#432">llmod</a>();
+        <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-input&quot;</span>);
+
+        <span class="comment">// Before we do much else find the &quot;main&quot; `DICompileUnit` that we&#39;ll be
+        // using below. If we find more than one though then rustc has changed
+        // in a way we&#39;re not ready for, so generate an ICE by returning
+        // an error.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>cu1 = ptr::null_mut();
+        <span class="kw">let </span><span class="kw-2">mut </span>cu2 = ptr::null_mut();
+        <a href="../llvm/ffi.rs.html#2515-2519">llvm::LLVMRustThinLTOGetDICompileUnit</a>(<a href="#759">llmod</a>, <span class="kw-2">&amp;mut </span><a href="#766">cu1</a>, <span class="kw-2">&amp;mut </span><a href="#767">cu2</a>);
+        <span class="kw">if </span>!cu2.is_null() {
+            <span class="kw">let </span>msg = <span class="string">&quot;multiple source DICompileUnits found&quot;</span>;
+            <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<span class="kw-2">&amp;</span><a href="#738">diag_handler</a>, <a href="#770">msg</a>));
+        }
+
+        <span class="comment">// Up next comes the per-module local analyses that we do for Thin LTO.
+        // Each of these functions is basically copied from the LLVM
+        // implementation and then tailored to suit this implementation. Ideally
+        // each of these would be supported by upstream LLVM but that&#39;s perhaps
+        // a patch for another day!
+        //
+        // You can find some more comments about these functions in the LLVM
+        // bindings we&#39;ve got (currently `PassWrapper.cpp`)
+        </span>{
+            <span class="kw">let </span>_timer =
+                <a href="#736">cgcx</a>.prof.generic_activity_with_arg(<span class="string">&quot;LLVM_thin_lto_rename&quot;</span>, <a href="#735">thin_module</a>.name());
+            <span class="kw">if </span>!llvm::LLVMRustPrepareThinLTORename(thin_module.shared.data.<span class="number">0</span>, llmod, target) {
+                <span class="kw">let </span>msg = <span class="string">&quot;failed to prepare thin LTO module&quot;</span>;
+                <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<span class="kw-2">&amp;</span><a href="#738">diag_handler</a>, <a href="#786">msg</a>));
+            }
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-rename&quot;</span>);
+        }
+
+        {
+            <span class="kw">let </span>_timer = <a href="#736">cgcx</a>
+                .prof
+                .generic_activity_with_arg(<span class="string">&quot;LLVM_thin_lto_resolve_weak&quot;</span>, <a href="#735">thin_module</a>.name());
+            <span class="kw">if </span>!llvm::LLVMRustPrepareThinLTOResolveWeak(thin_module.shared.data.<span class="number">0</span>, llmod) {
+                <span class="kw">let </span>msg = <span class="string">&quot;failed to prepare thin LTO module&quot;</span>;
+                <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<span class="kw-2">&amp;</span><a href="#738">diag_handler</a>, <a href="#797">msg</a>));
+            }
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-resolve&quot;</span>);
+        }
+
+        {
+            <span class="kw">let </span>_timer = <a href="#736">cgcx</a>
+                .prof
+                .generic_activity_with_arg(<span class="string">&quot;LLVM_thin_lto_internalize&quot;</span>, <a href="#735">thin_module</a>.name());
+            <span class="kw">if </span>!llvm::LLVMRustPrepareThinLTOInternalize(thin_module.shared.data.<span class="number">0</span>, llmod) {
+                <span class="kw">let </span>msg = <span class="string">&quot;failed to prepare thin LTO module&quot;</span>;
+                <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<span class="kw-2">&amp;</span><a href="#738">diag_handler</a>, <a href="#808">msg</a>));
+            }
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-internalize&quot;</span>);
+        }
+
+        {
+            <span class="kw">let </span>_timer =
+                <a href="#736">cgcx</a>.prof.generic_activity_with_arg(<span class="string">&quot;LLVM_thin_lto_import&quot;</span>, <a href="#735">thin_module</a>.name());
+            <span class="kw">if </span>!llvm::LLVMRustPrepareThinLTOImport(thin_module.shared.data.<span class="number">0</span>, llmod, target) {
+                <span class="kw">let </span>msg = <span class="string">&quot;failed to prepare thin LTO module&quot;</span>;
+                <span class="kw">return </span><span class="prelude-val">Err</span>(<a href="write.rs.html#41">write::llvm_err</a>(<span class="kw-2">&amp;</span><a href="#738">diag_handler</a>, <a href="#818">msg</a>));
+            }
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-import&quot;</span>);
+        }
+
+        <span class="comment">// Ok now this is a bit unfortunate. This is also something you won&#39;t
+        // find upstream in LLVM&#39;s ThinLTO passes! This is a hack for now to
+        // work around bugs in LLVM.
+        //
+        // First discovered in #45511 it was found that as part of ThinLTO
+        // importing passes LLVM will import `DICompileUnit` metadata
+        // information across modules. This means that we&#39;ll be working with one
+        // LLVM module that has multiple `DICompileUnit` instances in it (a
+        // bunch of `llvm.dbg.cu` members). Unfortunately there&#39;s a number of
+        // bugs in LLVM&#39;s backend which generates invalid DWARF in a situation
+        // like this:
+        //
+        //  https://bugs.llvm.org/show_bug.cgi?id=35212
+        //  https://bugs.llvm.org/show_bug.cgi?id=35562
+        //
+        // While the first bug there is fixed the second ended up causing #46346
+        // which was basically a resurgence of #45511 after LLVM&#39;s bug 35212 was
+        // fixed.
+        //
+        // This function below is a huge hack around this problem. The function
+        // below is defined in `PassWrapper.cpp` and will basically &quot;merge&quot;
+        // all `DICompileUnit` instances in a module. Basically it&#39;ll take all
+        // the objects, rewrite all pointers of `DISubprogram` to point to the
+        // first `DICompileUnit`, and then delete all the other units.
+        //
+        // This is probably mangling to the debug info slightly (but hopefully
+        // not too much) but for now at least gets LLVM to emit valid DWARF (or
+        // so it appears). Hopefully we can remove this once upstream bugs are
+        // fixed in LLVM.
+        </span>{
+            <span class="kw">let </span>_timer = <a href="#736">cgcx</a>
+                .prof
+                .generic_activity_with_arg(<span class="string">&quot;LLVM_thin_lto_patch_debuginfo&quot;</span>, <a href="#735">thin_module</a>.name());
+            <a href="../llvm/ffi.rs.html#2520">llvm::LLVMRustThinLTOPatchDICompileUnit</a>(<a href="#759">llmod</a>, <a href="#766">cu1</a>);
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-patch&quot;</span>);
+        }
+
+        <span class="comment">// Alright now that we&#39;ve done everything related to the ThinLTO
+        // analysis it&#39;s time to run some optimizations! Here we use the same
+        // `run_pass_manager` as the &quot;fat&quot; LTO above except that we tell it to
+        // populate a thin-specific pass manager, which presumably LLVM treats a
+        // little differently.
+        </span>{
+            <a class="macro" href="https://docs.rs/tracing/0.1.35/tracing/macro.info.html">info!</a>(<span class="string">&quot;running thin lto passes over {}&quot;</span>, module.name);
+            run_pass_manager(cgcx, <span class="kw-2">&amp;</span>diag_handler, <span class="kw-2">&amp;mut </span>module, <span class="bool-val">true</span>)<span class="question-mark">?</span>;
+            <a href="write.rs.html#250-254">save_temp_bitcode</a>(<a href="#736">cgcx</a>, <span class="kw-2">&amp;</span><a href="#752">module</a>, <span class="string">&quot;thin-lto-after-pm&quot;</span>);
+        }
+    }
+    <span class="prelude-val">Ok</span>(<a href="#752">module</a>)
+}
+
+<span class="doccomment">/// Maps LLVM module identifiers to their corresponding LLVM LTO cache keys
+</span><span class="attribute">#[derive(Debug, Default)]
+</span><span class="kw">pub struct </span>ThinLTOKeysMap {
+    <span class="comment">// key = llvm name of importing module, value = LLVM cache key
+    </span>keys: FxHashMap&lt;<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>, <a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>&gt;,
+}
+
+<span class="kw">impl </span><a href="#877">ThinLTOKeysMap</a> {
+    <span class="kw">fn </span>save_to_file(<span class="kw-2">&amp;</span><span class="self">self</span>, path: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/path/struct.Path.html">Path</a>) -&gt; io::Result&lt;()&gt; {
+        <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html">std::io::Write</a>;
+        <span class="kw">let </span>file = File::create(path)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>writer = io::BufWriter::new(<a href="#885">file</a>);
+        <span class="kw">for </span>(module, key) <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.keys {
+            <span class="macro">writeln!</span>(writer, <span class="string">&quot;{} {}&quot;</span>, module, key)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>load_from_file(path: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/path/struct.Path.html">Path</a>) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/std/io/trait.BufRead.html">std::io::BufRead</a>;
+        <span class="kw">let </span><span class="kw-2">mut </span>keys = FxHashMap::default();
+        <span class="kw">let </span>file = File::open(path)<span class="question-mark">?</span>;
+        <span class="kw">for </span>line <span class="kw">in </span>io::BufReader::new(file).lines() {
+            <span class="kw">let </span>line = line<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>split = line.split(<span class="string">&#39; &#39;</span>);
+            <span class="kw">let </span>module = split.next().unwrap();
+            <span class="kw">let </span>key = split.next().unwrap();
+            <span class="macro">assert_eq!</span>(split.next(), <span class="prelude-val">None</span>, <span class="string">&quot;Expected two space-separated values, found {:?}&quot;</span>, line);
+            keys.insert(module.to_string(), key.to_string());
+        }
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ <a href="#895">keys</a> })
+    }
+
+    <span class="kw">fn </span>from_thin_lto_modules(
+        data: <span class="kw-2">&amp;</span><a href="#689">ThinData</a>,
+        modules: <span class="kw-2">&amp;</span>[<a href="../llvm/ffi.rs.html#587">llvm::ThinLTOModule</a>],
+        names: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/alloc/ffi/c_str/struct.CString.html">CString</a>],
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>keys = <a href="https://doc.rust-lang.org/nightly/core/iter/adapters/zip/fn.zip.html">iter::zip</a>(<a href="#910">modules</a>, <a href="#911">names</a>)
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">map</a>(|(module, name)| {
+                <span class="kw">let </span>key = <a href="../llvm/mod.rs.html#266">build_string</a>(|rust_str| <span class="kw">unsafe </span>{
+                    <a href="../llvm/ffi.rs.html#2530-2534">llvm::LLVMRustComputeLTOCacheKey</a>(<a href="#915">rust_str</a>, <a href="#914">module</a>.identifier, <a href="#909">data</a>.<span class="number">0</span>);
+                })
+                .expect(<span class="string">&quot;Invalid ThinLTO module key&quot;</span>);
+                (<a href="#914">name</a>.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">clone</a>().into_string().unwrap(), <a href="#915">key</a>)
+            })
+            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">collect</a>();
+        <span class="self">Self </span>{ <a href="#913">keys</a> }
+    }
+}
+
+<span class="kw">fn </span>module_name_to_str(c_str: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/core/ffi/c_str/struct.CStr.html">CStr</a>) -&gt; <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a> {
+    <a href="#926">c_str</a>.to_str().unwrap_or_else(|e| {
+        <a class="macro" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/macro.bug.html">bug!</a>(<span class="string">&quot;Encountered non-utf8 LLVM module name `{}`: {}&quot;</span>, c_str.to_string_lossy(), e)
+    })
+}
+
+<span class="kw">pub fn </span>parse_module&lt;<span class="lifetime">&#39;a</span>&gt;(
+    cx: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../llvm/ffi.rs.html#628">llvm::Context</a>,
+    name: <span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/core/ffi/c_str/struct.CStr.html">CStr</a>,
+    data: <span class="kw-2">&amp;</span>[<a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>],
+    diag_handler: <span class="kw-2">&amp;</span><a href="../../../rustc_errors/struct.Handler.html">Handler</a>,
+) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><a href="../llvm/ffi.rs.html#625">llvm::Module</a>, <a href="../../../rustc_span/fatal_error/struct.FatalError.html">FatalError</a>&gt; {
+    <span class="kw">unsafe </span>{
+        <a href="../llvm/ffi.rs.html#2504-2509">llvm::LLVMRustParseBitcodeForLTO</a>(<a href="#933">cx</a>, <a href="#935">data</a>.as_ptr(), <a href="#935">data</a>.len(), <a href="#934">name</a>.as_ptr()).ok_or_else(
+            || {
+                <span class="kw">let </span>msg = <span class="string">&quot;failed to parse bitcode for LTO module&quot;</span>;
+                <a href="write.rs.html#41">write::llvm_err</a>(<a href="#936">diag_handler</a>, <a href="#941">msg</a>)
+            },
+        )
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="rustc_codegen_llvm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

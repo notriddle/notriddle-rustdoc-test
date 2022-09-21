@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Id",""]],"fn":[["print_ast_stats",""],["print_hir_stats",""]],"macro":[["record_variants",""]],"struct":[["Node",""],["NodeStats",""],["StatCollector","This type measures the size of AST and HIR nodes, by implementing the AST and HIR `Visitor` traits. But we don’t measure every visited type because that could cause double counting."]]};

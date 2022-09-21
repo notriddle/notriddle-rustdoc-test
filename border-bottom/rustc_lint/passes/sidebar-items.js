@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["declare_early_lint_pass",""],["declare_late_lint_pass",""],["expand_early_lint_pass_methods",""],["expand_lint_pass_methods","Trait for types providing lint checks."]],"trait":[["EarlyLintPass",""],["LateLintPass",""]],"type":[["EarlyLintPassObject","A lint pass boxed up as a trait object."],["LateLintPassObject",""]]};

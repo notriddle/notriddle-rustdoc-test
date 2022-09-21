@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["evaluate_candidate",""],["may_hoist","Returns true if computing the discriminant of `place` may be hoisted out of the branch"],["verify_candidate_branch",""]],"struct":[["EarlyOtherwiseBranch","This pass optimizes something like"],["OptimizationData",""]]};

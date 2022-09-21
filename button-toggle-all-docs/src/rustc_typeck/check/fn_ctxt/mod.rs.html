@@ -1,0 +1,610 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `compiler/rustc_typeck/src/check/fn_ctxt/mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../rustc_typeck/index.html"><div class="logo-container"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../rustc_typeck/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+</pre><pre class="rust"><code><span class="kw">mod </span><a href="_impl.rs.html#1-1512">_impl</a>;
+<span class="kw">mod </span><a href="arg_matrix.rs.html#1-383">arg_matrix</a>;
+<span class="kw">mod </span><a href="checks.rs.html#1-2222">checks</a>;
+<span class="kw">mod </span><a href="suggestions.rs.html#1-1139">suggestions</a>;
+
+<span class="kw">pub use </span><a href="#1">_impl</a>::<span class="kw-2">*</span>;
+<span class="kw">pub use </span><a href="#4">suggestions</a>::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><a href="../../astconv/mod.rs.html#55"><span class="kw">crate</span>::astconv::AstConv</a>;
+<span class="kw">use </span><a href="../coercion.rs.html#1287"><span class="kw">crate</span>::check::coercion::DynamicCoerceMany</a>;
+<span class="kw">use </span><span class="kw">crate</span>::check::{<a href="../diverges.rs.html#11">Diverges</a>, <a href="../mod.rs.html#220">EnclosingBreakables</a>, <a href="../inherited.rs.html#32">Inherited</a>, <a href="../mod.rs.html#175">UnsafetyState</a>};
+
+<span class="kw">use </span><a href="../../../../rustc_hir/index.html">rustc_hir</a> <span class="kw">as </span>hir;
+<span class="kw">use </span><a href="../../../../rustc_span/def_id/struct.DefId.html">rustc_hir::def_id::DefId</a>;
+<span class="kw">use </span><a href="../../../../rustc_infer/infer/index.html">rustc_infer::infer</a>;
+<span class="kw">use </span>rustc_infer::infer::type_variable::{<a href="../../../../rustc_infer/infer/type_variable/struct.TypeVariableOrigin.html">TypeVariableOrigin</a>, <a href="../../../../rustc_infer/infer/type_variable/enum.TypeVariableOriginKind.html">TypeVariableOriginKind</a>};
+<span class="kw">use </span>rustc_middle::infer::unify_key::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/struct.ConstVariableOrigin.html">ConstVariableOrigin</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/enum.ConstVariableOriginKind.html">ConstVariableOriginKind</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/subst/enum.GenericArgKind.html">rustc_middle::ty::subst::GenericArgKind</a>;
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/visit/trait.TypeVisitable.html">rustc_middle::ty::visit::TypeVisitable</a>;
+<span class="kw">use </span>rustc_middle::ty::{<a class="self" href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/index.html">self</a>, Const, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html">Ty</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html">TyCtxt</a>};
+<span class="kw">use </span><a href="../../../../rustc_session/session/struct.Session.html">rustc_session::Session</a>;
+<span class="kw">use </span><a href="../../../../rustc_span/symbol/struct.Ident.html">rustc_span::symbol::Ident</a>;
+<span class="kw">use </span>rustc_span::{<a class="self" href="../../../../rustc_span/index.html">self</a>, <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>};
+<span class="kw">use </span>rustc_trait_selection::traits::{<a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/traits/struct.ObligationCause.html">ObligationCause</a>, <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/traits/enum.ObligationCauseCode.html">ObligationCauseCode</a>};
+
+<span class="kw">use </span>std::cell::{<a href="https://doc.rust-lang.org/nightly/core/cell/struct.Cell.html">Cell</a>, <a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefCell.html">RefCell</a>};
+<span class="kw">use </span><a href="https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html">std::ops::Deref</a>;
+
+<span class="doccomment">/// The `FnCtxt` stores type-checking context needed to type-check bodies of
+/// functions, closures, and `const`s, including performing type inference
+/// with [`InferCtxt`].
+///
+/// This is in contrast to [`ItemCtxt`], which is used to type-check item *signatures*
+/// and thus does not perform type inference.
+///
+/// See [`ItemCtxt`]&#39;s docs for more.
+///
+/// [`ItemCtxt`]: crate::collect::ItemCtxt
+/// [`InferCtxt`]: infer::InferCtxt
+</span><span class="kw">pub struct </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) body_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+
+    <span class="doccomment">/// The parameter environment used for proving trait obligations
+    /// in this function. This can change when we descend into
+    /// closures (as they bring new things into scope), hence it is
+    /// not part of `Inherited` (as of the time of this writing,
+    /// closures do not yet change the environment, but they will
+    /// eventually).
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// Number of errors that had been reported when we started
+    /// checking this function. On exit, if we find that *more* errors
+    /// have been reported, we will skip regionck and other work that
+    /// expects the types within the function to be consistent.
+    </span><span class="comment">// FIXME(matthewjasper) This should not exist, and it&#39;s not correct
+    // if type checking is run in parallel.
+    </span>err_count_on_creation: <a href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+
+    <span class="doccomment">/// If `Some`, this stores coercion information for returned
+    /// expressions. If `None`, this is in a context where return is
+    /// inappropriate, such as a const expression.
+    ///
+    /// This is a `RefCell&lt;DynamicCoerceMany&gt;`, which means that we
+    /// can track all the return expressions and then use them to
+    /// compute a useful coercion from the set, similar to a match
+    /// expression or other branching context. You can use methods
+    /// like `expected_ty` to access the declared return type (if
+    /// any).
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) ret_coercion: <span class="prelude-ty">Option</span>&lt;RefCell&lt;DynamicCoerceMany&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;&gt;,
+
+    <span class="doccomment">/// Used exclusively to reduce cost of advanced evaluation used for
+    /// more helpful diagnostics.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) in_tail_expr: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+
+    <span class="doccomment">/// First span of a return site that we find. Used in error messages.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) ret_coercion_span: Cell&lt;<span class="prelude-ty">Option</span>&lt;<a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>&gt;&gt;,
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) resume_yield_tys: <span class="prelude-ty">Option</span>&lt;(Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;)&gt;,
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) ps: Cell&lt;<a href="../mod.rs.html#175">UnsafetyState</a>&gt;,
+
+    <span class="doccomment">/// Whether the last checked node generates a divergence (e.g.,
+    /// `return` will set this to `Always`). In general, when entering
+    /// an expression or other node in the tree, the initial value
+    /// indicates whether prior parts of the containing expression may
+    /// have diverged. It is then typically set to `Maybe` (and the
+    /// old value remembered) for processing the subparts of the
+    /// current expression. As each subpart is processed, they may set
+    /// the flag to `Always`, etc. Finally, at the end, we take the
+    /// result and &quot;union&quot; it with the original value, so that when we
+    /// return the flag indicates if any subpart of the parent
+    /// expression (up to and including this part) has diverged. So,
+    /// if you read it after evaluating a subexpression `X`, the value
+    /// you get indicates whether any subexpression that was
+    /// evaluating up to and including `X` diverged.
+    ///
+    /// We currently use this flag only for diagnostic purposes:
+    ///
+    /// - To warn about unreachable code: if, after processing a
+    ///   sub-expression but before we have applied the effects of the
+    ///   current node, we see that the flag is set to `Always`, we
+    ///   can issue a warning. This corresponds to something like
+    ///   `foo(return)`; we warn on the `foo()` expression. (We then
+    ///   update the flag to `WarnedAlways` to suppress duplicate
+    ///   reports.) Similarly, if we traverse to a fresh statement (or
+    ///   tail expression) from an `Always` setting, we will issue a
+    ///   warning. This corresponds to something like `{return;
+    ///   foo();}` or `{return; 22}`, where we would warn on the
+    ///   `foo()` or `22`.
+    ///
+    /// An expression represents dead code if, after checking it,
+    /// the diverges flag is set to something other than `Maybe`.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) diverges: Cell&lt;<a href="../diverges.rs.html#11">Diverges</a>&gt;,
+
+    <span class="doccomment">/// Whether any child nodes have any type errors.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) has_errors: Cell&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) enclosing_breakables: RefCell&lt;EnclosingBreakables&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;,
+
+    <span class="kw">pub</span>(<span class="kw">super</span>) inh: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Inherited&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+
+    <span class="doccomment">/// True if the function or closure&#39;s return type is known before
+    /// entering the function/closure, i.e. if the return type is
+    /// either given explicitly or inferred from, say, an `Fn*` trait
+    /// bound. Used for diagnostic purposes only.
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) return_type_pre_known: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+
+    <span class="doccomment">/// True if the return type has an Opaque type
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) return_type_has_opaque: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">pub fn </span>new(
+        inh: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Inherited&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;,
+        param_env: ty::ParamEnv&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        body_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>,
+    ) -&gt; FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+        <a href="#40">FnCtxt</a> {
+            <a href="#136">body_id</a>,
+            <a href="#135">param_env</a>,
+            err_count_on_creation: <a href="#134">inh</a>.tcx.sess.err_count(),
+            ret_coercion: <span class="prelude-val">None</span>,
+            in_tail_expr: <span class="bool-val">false</span>,
+            ret_coercion_span: Cell::new(<span class="prelude-val">None</span>),
+            resume_yield_tys: <span class="prelude-val">None</span>,
+            ps: Cell::new(UnsafetyState::function(hir::Unsafety::Normal, <a href="../../../../rustc_hir/hir_id/constant.CRATE_HIR_ID.html">hir::CRATE_HIR_ID</a>)),
+            diverges: Cell::new(<a href="../diverges.rs.html#14">Diverges::Maybe</a>),
+            has_errors: Cell::new(<span class="bool-val">false</span>),
+            enclosing_breakables: RefCell::new(<a href="../mod.rs.html#220">EnclosingBreakables</a> {
+                stack: Vec::new(),
+                by_id: <a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html">Default::default</a>(),
+            }),
+            <a href="#134">inh</a>,
+            return_type_pre_known: <span class="bool-val">true</span>,
+            return_type_has_opaque: <span class="bool-val">false</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>cause(<span class="kw-2">&amp;</span><span class="self">self</span>, span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>, code: ObligationCauseCode&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; ObligationCause&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        ObligationCause::new(<a href="#159">span</a>, <a class="self" href="#159">self</a>.body_id, <a href="#159">code</a>)
+    }
+
+    <span class="kw">pub fn </span>misc(<span class="kw-2">&amp;</span><span class="self">self</span>, span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; ObligationCause&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#163">self</a>.<a href="#159">cause</a>(<a href="#163">span</a>, ObligationCauseCode::MiscObligation)
+    }
+
+    <span class="kw">pub fn </span>sess(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><a href="../../../../rustc_session/session/struct.Session.html">Session</a> {
+        <span class="kw-2">&amp;</span><a class="self" href="#167">self</a>.tcx.sess
+    }
+
+    <span class="kw">pub fn </span>errors_reported_since_creation(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <a class="self" href="#171">self</a>.tcx.sess.err_count() &gt; <a class="self" href="#171">self</a>.err_count_on_creation
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; <a href="https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html">Deref</a> <span class="kw">for </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">type </span>Target = Inherited&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt;;
+    <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
+        <span class="kw-2">&amp;</span><a class="self" href="#178">self</a>.inh
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; AstConv&lt;<span class="lifetime">&#39;tcx</span>&gt; <span class="kw">for </span>FnCtxt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;tcx</span>&gt; {
+    <span class="kw">fn </span>tcx&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; TyCtxt&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <a class="self" href="#184">self</a>.tcx
+    }
+
+    <span class="kw">fn </span>item_def_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>&gt; {
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">fn </span>get_type_parameter_bounds(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="kw">_</span>: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        <span class="kw">_</span>: <a href="../../../../rustc_span/symbol/struct.Ident.html">Ident</a>,
+    ) -&gt; ty::GenericPredicates&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>tcx = <a class="self" href="#193">self</a>.tcx;
+        <span class="kw">let </span>item_def_id = <a href="#198">tcx</a>.hir().ty_param_owner(<a href="#195">def_id</a>.expect_local());
+        <span class="kw">let </span>generics = <a href="#198">tcx</a>.generics_of(<a href="#199">item_def_id</a>);
+        <span class="kw">let </span>index = <a href="#200">generics</a>.param_def_id_to_index[<span class="kw-2">&amp;</span><a href="#195">def_id</a>];
+        <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.GenericPredicates.html">ty::GenericPredicates</a> {
+            parent: <span class="prelude-val">None</span>,
+            predicates: <a href="#198">tcx</a>.arena.alloc_from_iter(
+                <a class="self" href="#193">self</a>.param_env.caller_bounds().iter().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html">filter_map</a>(|predicate| {
+                    <span class="kw">match </span><a href="#205">predicate</a>.kind().skip_binder() {
+                        ty::PredicateKind::Trait(data) <span class="kw">if </span><a href="#207">data</a>.self_ty().is_param(<a href="#201">index</a>) =&gt; {
+                            <span class="comment">// HACK(eddyb) should get the original `Span`.
+                            </span><span class="kw">let </span>span = <a href="#198">tcx</a>.def_span(<a href="#195">def_id</a>);
+                            <span class="prelude-val">Some</span>((<a href="#205">predicate</a>, <a href="#209">span</a>))
+                        }
+                        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                    }
+                }),
+            ),
+        }
+    }
+
+    <span class="kw">fn </span>re_infer(<span class="kw-2">&amp;</span><span class="self">self</span>, def: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.GenericParamDef.html">ty::GenericParamDef</a>&gt;, span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; <span class="prelude-ty">Option</span>&lt;ty::Region&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt; {
+        <span class="kw">let </span>v = <span class="kw">match </span><a href="#219">def</a> {
+            <span class="prelude-val">Some</span>(def) =&gt; infer::EarlyBoundRegion(<a href="#219">span</a>, <a href="#221">def</a>.name),
+            <span class="prelude-val">None </span>=&gt; infer::MiscVariable(<a href="#219">span</a>),
+        };
+        <span class="prelude-val">Some</span>(<a class="self" href="#219">self</a>.next_region_var(<a href="#220">v</a>))
+    }
+
+    <span class="kw">fn </span>allow_ty_infer(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+        <span class="bool-val">true
+    </span>}
+
+    <span class="kw">fn </span>ty_infer(<span class="kw-2">&amp;</span><span class="self">self</span>, param: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.GenericParamDef.html">ty::GenericParamDef</a>&gt;, span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(param) = <a href="#231">param</a> {
+            <span class="kw">if let </span>GenericArgKind::Type(ty) = <a class="self" href="#231">self</a>.var_for_def(<a href="#231">span</a>, <a href="#232">param</a>).unpack() {
+                <span class="kw">return </span><a href="#233">ty</a>;
+            }
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>()
+        } <span class="kw">else </span>{
+            <a class="self" href="#231">self</a>.next_ty_var(<a href="../../../../rustc_infer/infer/type_variable/struct.TypeVariableOrigin.html">TypeVariableOrigin</a> {
+                kind: TypeVariableOriginKind::TypeInference,
+                <a href="#231">span</a>,
+            })
+        }
+    }
+
+    <span class="kw">fn </span>ct_infer(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+        param: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/generics/struct.GenericParamDef.html">ty::GenericParamDef</a>&gt;,
+        span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+    ) -&gt; Const&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(param) = <a href="#248">param</a> {
+            <span class="kw">if let </span>GenericArgKind::Const(ct) = <a class="self" href="#246">self</a>.var_for_def(<a href="#249">span</a>, <a href="#251">param</a>).unpack() {
+                <span class="kw">return </span><a href="#252">ct</a>;
+            }
+            <a class="macro" href="https://doc.rust-lang.org/nightly/core/macro.unreachable.html">unreachable!</a>()
+        } <span class="kw">else </span>{
+            <a class="self" href="#246">self</a>.next_const_var(
+                <a href="#247">ty</a>,
+                <a href="https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/infer/unify_key/struct.ConstVariableOrigin.html">ConstVariableOrigin</a> { kind: ConstVariableOriginKind::ConstInference, <a href="#249">span</a> },
+            )
+        }
+    }
+
+    <span class="kw">fn </span>projected_ty_from_poly_trait_ref(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>,
+        item_def_id: <a href="../../../../rustc_span/def_id/struct.DefId.html">DefId</a>,
+        item_segment: <span class="kw-2">&amp;</span>hir::PathSegment&lt;<span class="lifetime">&#39;_</span>&gt;,
+        poly_trait_ref: ty::PolyTraitRef&lt;<span class="lifetime">&#39;tcx</span>&gt;,
+    ) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">let </span>trait_ref = <a class="self" href="#265">self</a>.replace_bound_vars_with_fresh_vars(
+            <a href="#266">span</a>,
+            infer::LateBoundRegionConversionTime::AssocTypeProjection(<a href="#267">item_def_id</a>),
+            <a href="#269">poly_trait_ref</a>,
+        );
+
+        <span class="kw">let </span>item_substs = &lt;<span class="kw">dyn </span>AstConv&lt;<span class="lifetime">&#39;tcx</span>&gt;&gt;::create_substs_for_associated_item(
+            <a class="self" href="#265">self</a>,
+            <a class="self" href="#265">self</a>.tcx,
+            <a href="#266">span</a>,
+            <a href="#267">item_def_id</a>,
+            <a href="#268">item_segment</a>,
+            <a href="#271">trait_ref</a>.substs,
+        );
+
+        <a class="self" href="#265">self</a>.<a href="../../astconv/mod.rs.html#56">tcx</a>().mk_projection(<a href="#267">item_def_id</a>, <a href="#277">item_substs</a>)
+    }
+
+    <span class="kw">fn </span>normalize_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;) -&gt; Ty&lt;<span class="lifetime">&#39;tcx</span>&gt; {
+        <span class="kw">if </span>ty.has_escaping_bound_vars() {
+            <a href="#289">ty</a> <span class="comment">// FIXME: normalization and escaping regions
+        </span>} <span class="kw">else </span>{
+            <a class="self" href="#289">self</a>.<a href="_impl.rs.html#373-375">normalize_associated_types_in</a>(<a href="#289">span</a>, <a href="#289">ty</a>)
+        }
+    }
+
+    <span class="kw">fn </span>set_tainted_by_errors(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+        <a class="self" href="#297">self</a>.infcx.set_tainted_by_errors()
+    }
+
+    <span class="kw">fn </span>record_ty(<span class="kw-2">&amp;</span><span class="self">self</span>, hir_id: <a href="../../../../rustc_hir/hir_id/struct.HirId.html">hir::HirId</a>, ty: Ty&lt;<span class="lifetime">&#39;tcx</span>&gt;, _span: <a href="../../../../rustc_span/span_encoding/struct.Span.html">Span</a>) {
+        <a class="self" href="#301">self</a>.<a href="_impl.rs.html#141">write_ty</a>(<a href="#301">hir_id</a>, <a href="#301">ty</a>)
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="rustc_typeck" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0-dev" ></div></body></html>

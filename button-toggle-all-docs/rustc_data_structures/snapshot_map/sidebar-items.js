@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["UndoLog",""]],"struct":[["Snapshot","Snapshots are tokens that should be created/consumed linearly."],["SnapshotMap",""]],"type":[["SnapshotMapRef",""],["SnapshotMapStorage",""]]};
