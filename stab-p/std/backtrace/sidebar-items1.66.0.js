@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["BacktraceStatus","The current status of a backtrace, indicating whether it was captured or whether it is empty for some other reason."]],"struct":[["Backtrace","A captured OS thread stack backtrace."],["BacktraceFrame","A single frame of a backtrace."]]};
